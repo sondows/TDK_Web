@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>탑동김치찌개 - 스마트오더</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <header>
+        <div class="store-name">탑동김치찌개</div>
+        <div class="table-no">테이블 1번</div>
+    </header>
+
+    <nav class="category-tabs" id="tabs"></nav>
+
+    <div id="menuContainer">
+        <!-- 자바스크립트에서 메뉴가 렌더링됩니다 -->
+    </div>
+
+    <div class="cart-bar">
+        <div class="cart-info">
+            <div class="total-label">총 주문금액</div>
+            <div class="total-amount" id="totalPrice">0원</div>
+        </div>
+        <button class="order-btn" onclick="submitOrder()">주문하기 (<span id="cartCount">0</span>)</button>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
