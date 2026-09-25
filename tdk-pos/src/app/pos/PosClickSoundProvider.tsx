@@ -1,7 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { Suspense, useLayoutEffect, useRef, type ReactNode } from "react";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
+import PosTouchDiagnostics from "./PosTouchDiagnostics";
 
 function interactiveElement(target: EventTarget | null, root: HTMLElement) {
   if (!(target instanceof Element)) return null;
@@ -20,7 +21,7 @@ export default function PosClickSoundProvider({ children }: { children: ReactNod
     const root = rootRef.current;
     if (!root) return;
 
-    const onPointerDown = (event: Event) => {
+    const onClick = (event: Event) => {
       if (interactiveElement(event.target, root)) {
         unlockPosClickSound();
         void playPosClickSound();
@@ -28,19 +29,20 @@ export default function PosClickSoundProvider({ children }: { children: ReactNod
     };
     const onKeyDown = (event: Event) => {
       const keyEvent = event as KeyboardEvent;
-      if (!keyEvent.repeat && (keyEvent.key === "Enter" || keyEvent.key === " ") && interactiveElement(keyEvent.target, root)) {
+      const element = interactiveElement(keyEvent.target, root);
+      if (element?.getAttribute("role") === "button" && !(element instanceof HTMLButtonElement) && !keyEvent.repeat && (keyEvent.key === "Enter" || keyEvent.key === " ")) {
         unlockPosClickSound();
         void playPosClickSound();
       }
     };
 
-    root.addEventListener("pointerdown", onPointerDown, { capture: true });
+    root.addEventListener("click", onClick, { capture: true });
     root.addEventListener("keydown", onKeyDown, { capture: true });
     return () => {
-      root.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      root.removeEventListener("click", onClick, { capture: true });
       root.removeEventListener("keydown", onKeyDown, { capture: true });
     };
   }, []);
 
-  return <div className="contents" ref={rootRef}>{children}</div>;
+  return <><div className="contents" ref={rootRef}>{children}</div><Suspense fallback={null}><PosTouchDiagnostics /></Suspense></>;
 }
