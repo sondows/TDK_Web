@@ -1,0 +1,805 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* The first card in the POS left column is informational; keep it compact. */
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child {
+  padding: 0.5rem 0.75rem;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:first-child {
+  gap: 0.35rem;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:first-child > p {
+  font-size: 0.625rem;
+  line-height: 1;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:first-child button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.625rem;
+  line-height: 1;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child h1 {
+  margin-top: 0.15rem;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:last-child {
+  margin-top: 0.25rem;
+  line-height: 1.1;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:last-child > div {
+  gap: 0.25rem;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:last-child > div > span,
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child header > div:last-child time {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child .pos-clock-date {
+  margin-right: 0.35rem;
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child .pos-clock-time {
+  color: #1e293b;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* Match the table/takeout/reservation selector treatment in the center panel. */
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > button.bg-white.text-blue-700 {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > button.text-slate-500 {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > button.text-slate-500:hover {
+  background: #e2e8f0;
+}
+
+.pos-table-info {
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 0.15rem 0.55rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.pos-table-info > p {
+  margin: 0.1rem 0 0;
+}
+
+.pos-table-info > p > span {
+  margin-left: 0.8rem;
+}
+
+.pos-table-info-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.75rem;
+}
+
+.pos-table-number {
+  min-width: 2.35rem;
+  color: #0f172a;
+  font-size: clamp(2rem, 2.7vw, 2.5rem);
+  font-weight: 850;
+  letter-spacing: -0.06em;
+  line-height: 1;
+  text-align: center;
+}
+
+.pos-table-info-copy {
+  min-width: 0;
+}
+
+.pos-table-info-copy > p {
+  margin: 0.08rem 0 0;
+}
+
+.pos-table-stay {
+  margin-left: 0.25rem;
+  color: #334155;
+  font-weight: 800;
+}
+
+.pos-table-info-copy small {
+  margin-left: 0.2rem;
+  color: #94a3b8;
+  font-size: 0.6875rem;
+}
+
+.pos-order-columns,
+.pos-order-row,
+.pos-order-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pos-order-columns {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.1rem 0 0.4rem;
+  color: #64748b;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.pos-order-columns span:last-child,
+.pos-order-row strong,
+.pos-order-total strong {
+  text-align: right;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pos-order-rows {
+  padding: 0.3rem 0;
+}
+
+.pos-order-row {
+  min-height: 2rem;
+  font-size: 0.8125rem;
+}
+
+.pos-menu-and-qty {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.pos-menu-and-qty > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-menu-and-qty > span:last-child {
+  color: #475569;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pos-order-total {
+  border-top: 1px solid #cbd5e1;
+  padding-top: 0.55rem;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.pos-order-heading {
+  margin: 1rem 0 0.35rem;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.pos-party-orders {
+  margin-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.pos-order-empty {
+  padding: 1.25rem 0;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+/* With no applied discount, the gross-total row duplicates the payable total. */
+.pos-order-items-scroll:not(:has(> div.border-t.border-slate-200)) > div.text-slate-700 {
+  display: none;
+}
+
+.pos-function-bar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.pos-function-button {
+  display: flex;
+  height: 90px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.75rem;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.pos-function-button svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+/* The main POS footer uses text-only touch targets. */
+main.h-dvh > div > section.col-span-2.grid-cols-6 > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
+  display: none;
+}
+
+/* Table-cancellation staff selection is rendered beside the PIN keypad. */
+.table-cancel-details > section:nth-of-type(2) {
+  display: none;
+}
+
+.table-cancel-details > div:first-child > p:first-child,
+.table-cancel-details > div:first-child > p:nth-child(3) {
+  display: none;
+}
+
+.table-cancel-details {
+  position: relative;
+}
+
+.table-cancel-details > div:first-child {
+  min-height: 86px;
+  padding-right: 10rem;
+}
+
+.table-cancel-details > div:first-child > p:nth-child(2) {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.table-cancel-details > div:nth-child(2) {
+  position: absolute;
+  top: 1.75rem;
+  right: 1.5rem;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-right: 10px;
+}
+
+.table-cancel-pin > section > h3:first-child {
+  display: none;
+}
+
+.pos-function-button:hover {
+  background: #e2e8f0;
+}
+
+.pos-function-button:active {
+  background: #cbd5e1;
+  transform: scale(0.98);
+}
+
+.pos-function-primary {
+  background: #e0ecff;
+  color: #1d4ed8;
+}
+
+.pos-function-primary:hover {
+  background: #dbeafe;
+}
+
+.pos-menu-list {
+  --menu-card-column-gap: 6px;
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  column-gap: var(--menu-card-column-gap);
+  row-gap: 8px;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pos-menu-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.pos-menu-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 76px;
+  height: 76px;
+  grid-template-columns: minmax(0, 3fr) minmax(3.75rem, 1fr);
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #ffffff;
+  color: #0f172a;
+  text-align: left;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.pos-menu-card:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.pos-menu-card:active {
+  background: #eff6ff;
+  transform: scale(0.99);
+}
+
+.pos-right-menu-panel.is-order-disabled .pos-category-button {
+  cursor: not-allowed;
+  border-color: #e2e8f0 !important;
+  background: #f8fafc !important;
+  color: #94a3b8 !important;
+  box-shadow: none;
+}
+
+.pos-right-menu-panel.is-order-disabled .pos-category-corner-marker {
+  opacity: 0.3;
+}
+
+.pos-right-menu-panel.is-order-disabled .pos-category-underline {
+  opacity: 0.25;
+}
+
+.pos-menu-list.is-order-disabled .pos-menu-card {
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.68;
+}
+
+.pos-menu-list.is-order-disabled .pos-menu-card:hover,
+.pos-menu-list.is-order-disabled .pos-menu-card:active {
+  border-color: #e2e8f0;
+  background: #ffffff;
+  transform: none;
+}
+
+.pos-menu-list.is-order-disabled .pos-menu-copy strong {
+  color: #64748b;
+}
+
+.pos-menu-list.is-order-disabled .pos-menu-price {
+  color: #94a3b8;
+}
+
+.pos-menu-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.pos-menu-copy strong {
+  display: -webkit-box;
+  height: 2.5em;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pos-menu-price {
+  color: #1d4ed8;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.pos-menu-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.pos-menu-image-placeholder {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.pos-menu-image {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.pos-menu-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pos-menu-cart-button {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.3rem;
+  display: grid;
+  box-sizing: border-box;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid #475569;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+  transition: transform 100ms ease, background-color 100ms ease;
+}
+
+.pos-menu-cart-button:active {
+  transform: scale(0.92);
+  background: #f1f5f9;
+}
+
+.pos-menu-cart-button:disabled {
+  cursor: not-allowed;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.pos-menu-cart-button img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  object-fit: contain;
+}
+
+.pos-menu-image-placeholder svg {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+.pos-menu-image-placeholder span {
+  font-size: 0.6rem;
+  font-weight: 600;
+}
+
+.pos-right-menu-panel {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+/* The right menu panel occupies both the content and function-bar grid rows. */
+main.h-dvh > div > section:nth-child(3) {
+  grid-row: span 2 / span 2;
+  align-self: stretch;
+}
+
+.pos-category-bar {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.3rem;
+  overflow-x: auto;
+  padding-bottom: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.pos-category-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.pos-category-bar.is-six-items {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+  overflow-x: hidden;
+  padding-inline: 0.1rem;
+}
+
+.pos-category-bar.is-six-items .pos-category-button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.2rem;
+  text-align: center;
+}
+
+.pos-category-button {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  border-radius: 0.65rem;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  padding: 0.45rem 0.55rem;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pos-category-button.is-active {
+  border-color: transparent;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.pos-category-corner-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  filter: brightness(0.78);
+}
+
+.pos-category-underline {
+  width: 100%;
+  height: 3px;
+  flex-shrink: 0;
+  margin-top: 4px;
+  margin-bottom: 0.25rem;
+  border-radius: 9999px;
+}
+
+/* QuantityModal quick quantities: mirrors the selected TableShape emerald outline. */
+section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"] {
+  border: 1px solid #94a3b8;
+  background: #ffffff;
+  color: #334155;
+  box-shadow:
+    0 0 0 2px #34d399,
+    0 0 8px rgba(52, 211, 153, 0.32),
+    inset 0 0 5px rgba(52, 211, 153, 0.09);
+}
+
+section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"]:hover,
+section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"]:active {
+  background: #ffffff;
+  box-shadow:
+    0 0 0 2px #34d399,
+    0 0 8px rgba(52, 211, 153, 0.45),
+    inset 0 0 5px rgba(52, 211, 153, 0.1);
+}
+
+section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"].bg-blue-600 {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #1e293b;
+  box-shadow:
+    0 0 0 2px #34d399,
+    0 0 8px rgba(52, 211, 153, 0.35),
+    inset 0 0 5px rgba(52, 211, 153, 0.09);
+}
+
+/* Direct-input mode intentionally de-emphasizes the quick quantity shortcuts. */
+section[aria-labelledby="quantity-modal-title"][data-expanded="true"] button[class*="min-h-[4.75rem]"] {
+  border-color: #cbd5e1;
+  outline: 0;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: none;
+}
+
+/* QuantityModal information layout: intentionally scoped to the modal's ARIA id. */
+section[aria-labelledby="quantity-modal-title"] div:has(> h2#quantity-modal-title) {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  padding: 0.625rem 0.75rem;
+}
+
+section[aria-labelledby="quantity-modal-title"] div:has(> h2#quantity-modal-title) > strong {
+  font-size: 1rem;
+}
+
+section[aria-labelledby="quantity-modal-title"] aside > div.mt-4.space-y-2 {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  padding: 0.75rem;
+}
+
+section[aria-labelledby="quantity-modal-title"] aside > div.mt-4.space-y-2 strong {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+/* The direct-input rail reserves a physical row between close and expand/collapse. */
+section[aria-labelledby="quantity-modal-title"] > div > div:last-child {
+  grid-template-rows: 15% 5% 80%;
+}
+
+section[aria-labelledby="quantity-modal-title"] > div > div:last-child > button:first-child {
+  border-bottom: 0;
+  font-size: 1.25rem;
+}
+
+section[aria-labelledby="quantity-modal-title"] > div > div:last-child > button:last-child {
+  grid-row: 3;
+  font-size: 0.875rem;
+}
+
+section[aria-labelledby="quantity-modal-title"] > div > div:last-child > button:last-child > span:first-child,
+section[aria-labelledby="quantity-modal-title"] > div > div:last-child > button:last-child > span:last-child {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* Inactive POS tabs remain distinct from their pale-gray tab containers. */
+[data-pos-top-tabs] button.bg-slate-100,
+section.relative.flex.min-h-0.flex-1.flex-col > nav > button.bg-slate-100 {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.pos-table-info-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+/* Order item lists scroll by wheel and touch, without exposing a scrollbar. */
+.pos-order-content {
+  display: flex;
+  max-height: 100%;
+  min-height: 0;
+  flex: 0 1 auto;
+  flex-direction: column;
+}
+
+.pos-order-items-scroll {
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow-y: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.pos-order-items-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Discount quick presets are full-width touch rows, while the direct controls remain two columns. */
+section.flex.min-h-0.flex-col.bg-white.p-5 > div.mt-3.grid.grid-cols-2 {
+  flex: 1 1 0%;
+  min-height: 0;
+  margin-bottom: 1.25rem;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: repeat(4, minmax(62px, 1fr));
+  gap: 0.5rem !important;
+}
+
+section.flex.min-h-0.flex-col.bg-white.p-5 > div.mt-3.grid.grid-cols-2 > button {
+  min-height: 62px !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+section.flex.min-h-0.flex-col.bg-white.p-5 > div.mt-3.grid.grid-cols-2 > button > span + span {
+  margin-top: 0 !important;
+  margin-left: 1rem;
+  flex-shrink: 0;
+}
+
+/* Keep the two discount section titles on the same typography scale. */
+section.flex.min-h-0.flex-col.bg-white.p-5 > h2 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+section.flex.min-h-0.flex-col.bg-white.p-5 > div.mt-auto > h3 {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* The discount modal uses a bold text chevron while preserving the existing button. */
+section[role="dialog"] > header > div:first-child > button[aria-label="돌아가기"] {
+  font-size: 0;
+}
+
+section[role="dialog"] > header > div:first-child > button[aria-label="돌아가기"]::after {
+  content: "<";
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1;
+  color: #334155;
+}
+
+/* The final direct-discount keypad key is a clear-all action. */
+section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounded-2xl.p-3 > button:last-child {
+  font-size: 0;
+}
+
+section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounded-2xl.p-3 > button:last-child::after {
+  content: "C";
+  font-size: 1.5rem;
+  font-weight: 700;
+}

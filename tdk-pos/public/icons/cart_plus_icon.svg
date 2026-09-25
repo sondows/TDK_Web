@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="장바구니 추가 아이콘">
+  <g fill="none" stroke="#18B7F1" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 58h22c8 0 14 5 16 13l20 92c2 8 9 14 17 14h79c8 0 15-6 17-14l17-71"/>
+    <path d="M145 78v58M116 107h58"/>
+    <circle cx="116" cy="207" r="14"/>
+    <circle cx="184" cy="207" r="14"/>
+  </g>
+</svg>
