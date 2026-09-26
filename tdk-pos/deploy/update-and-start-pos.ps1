@@ -114,13 +114,33 @@ function Stop-LegacyPos {
 }
 function Browser {
   if ($NoBrowser) { return }
+  $profile = Join-Path $runtime 'chrome-profile'
+  $appArgument = "--app=$url"
   $chrome = @(
     (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
     (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
     (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
   if ($chrome) {
-    Start-Process -FilePath $chrome -ArgumentList @('--new-window', '--app=http://localhost:3000/pos') | Out-Null
+    # The dedicated profile identifies our Chrome process without touching normal Chrome windows.
+    $existing = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.CommandLine -and
+        $_.CommandLine.Contains('--user-data-dir=') -and
+        $_.CommandLine.Contains($profile) -and
+        $_.CommandLine.Contains($appArgument) -and
+        (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowHandle -ne 0
+      } | Select-Object -First 1
+    if ($existing) { Write-Log 'Chrome POS window already open'; return }
+    New-Item -ItemType Directory -Path $profile -Force | Out-Null
+    Start-Process -FilePath $chrome -ArgumentList @(
+      $appArgument,
+      "--user-data-dir=`"$profile`"",
+      '--disable-translate',
+      '--no-first-run',
+      '--start-maximized',
+      '--window-position=0,0'
+    ) | Out-Null
     Write-Log 'Chrome POS window opened'
   } else { Write-Log 'Chrome not found; open http://localhost:3000/pos manually' }
 }
