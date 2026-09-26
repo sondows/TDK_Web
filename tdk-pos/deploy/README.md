@@ -12,13 +12,15 @@
    ```
 
 4. `Registered scheduled task: TDK POS Auto Start`가 보이면 등록되었습니다. Windows를 재부팅하고 같은 계정으로 로그인합니다. 로그인 후 POS 전용 Chrome 창이 열리고 `http://localhost:3000/pos`가 표시되는지 확인합니다.
-5. 문제가 있으면 `.pos-runtime\logs\pos-updater.log`를 확인합니다. 서버 자체의 출력은 같은 폴더의 `server.out.log`, `server.err.log`에 있습니다. 로그를 외부에 보낼 때는 내용을 먼저 확인하세요.
+5. 문제가 있으면 `.pos-runtime\logs\pos-updater.log`를 확인합니다. 서버 표준 출력은 `pos-server.log`, 오류 출력은 `pos-server.err.log`에 있습니다. 로그를 외부에 보낼 때는 내용을 먼저 확인하세요.
 
 작업은 **로그인 시** 실행됩니다. 실제 POS 계정으로 로그인해야 서버와 Chrome 창이 시작됩니다. Chrome은 별도 앱 창으로 열리며 기존 Chrome 창을 닫지 않습니다. POS 화면 자체에 전체화면 버튼이 있으므로 kiosk 모드는 사용하지 않습니다.
 
 ## 수동 실행과 해제
 
 수동으로 업데이트를 확인하고 실행하려면 `tdk-pos\deploy\start-pos.cmd`를 실행합니다. 현재 서버가 이미 정상 실행 중이면 중복 실행하지 않고 기존 서버를 유지합니다. 현재 서버를 끄고 새 버전을 적용하려면 POS 사용을 마친 뒤 Windows를 재부팅하거나 해당 작업의 실행 프로세스를 종료한 뒤 다시 실행하세요. 모든 `node.exe`를 종료하지 마세요.
+
+자동 실행 스크립트가 시작한 서버만 수동으로 종료하려면 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\deploy\stop-pos.ps1`을 실행합니다. 이 스크립트는 기록된 PID, 시작 시각, 3000 포트 점유 PID가 모두 일치할 때만 해당 Node 프로세스를 종료합니다. 이전 버전 스크립트가 시작해 PID 기록이 없는 서버는 건드리지 않습니다.
 
 자동 시작을 해제하려면 다음을 실행합니다.
 
