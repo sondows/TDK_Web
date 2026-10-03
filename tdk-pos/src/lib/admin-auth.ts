@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { and, eq, gt, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
-import { createSessionToken, hashSessionToken, type CurrentStaff } from "@/lib/auth";
+import { createSessionToken, hashSessionToken, sessionCookieSecure, type CurrentStaff } from "@/lib/auth";
 
 export const ADMIN_SESSION_COOKIE_NAME = "tdk_admin_session";
 export const ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
@@ -13,7 +13,7 @@ const ADMIN_TOKEN_PREFIX = "admin.";
 export const adminSessionCookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  secure: sessionCookieSecure,
   maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
   path: "/",
 };

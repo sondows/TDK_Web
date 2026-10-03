@@ -10,11 +10,17 @@ import { isValidPin } from "@/lib/pin";
 
 export const SESSION_COOKIE_NAME = "tdk_pos_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
+const configuredCookieSecure = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
+export const sessionCookieSecure = configuredCookieSecure === "true"
+  ? true
+  : configuredCookieSecure === "false"
+    ? false
+    : process.env.NODE_ENV === "production";
 
 export const sessionCookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  secure: sessionCookieSecure,
   maxAge: SESSION_MAX_AGE_SECONDS,
   path: "/",
 };
