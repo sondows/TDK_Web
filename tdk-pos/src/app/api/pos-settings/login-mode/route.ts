@@ -1,10 +1,10 @@
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
 import { getPrivilegedStaff } from "@/lib/permissions";
 
 export async function GET() {
-  return Response.json({ mode: await getPosLoginMode() });
+  return Response.json({ mode: await getConfiguredPosLoginMode() });
 }
 
 export async function PUT(request: Request) {

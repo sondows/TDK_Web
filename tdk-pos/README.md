@@ -16,6 +16,10 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Receipt logo storage
+
+Receipt logos are stored as normalized monochrome PNG files in `storage/receipt-logo` by default. Set `RECEIPT_LOGO_STORAGE_PATH` to a persistent, writable directory for deployment. If multiple POS server instances share one database, point them at the same shared storage. The `system_settings.receipt_logo_file` value is only a relative file name; back up the logo directory together with the database. The POS server sends the logo pixels with each receipt request, so the Device Agent does not need access to this directory.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

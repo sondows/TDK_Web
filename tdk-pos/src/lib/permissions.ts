@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
 import { type CurrentStaff, getCurrentStaff } from "@/lib/auth";
@@ -20,8 +20,15 @@ export function createAdminGrant(staffId: number) {
 }
 
 export async function getPrivilegedStaff(): Promise<CurrentStaff | null> {
+  const granted = await getAdminGrantedStaff();
+  if (granted) return granted;
   const loggedIn = await getCurrentStaff();
-  if (loggedIn) return loggedIn;
+  if (loggedIn && loggedIn.staffCode !== "000") return loggedIn;
+  return null;
+}
+
+/** Uses a recent administrator PIN grant even if a different POS employee is logged in. */
+export async function getAdminGrantedStaff(): Promise<CurrentStaff | null> {
   const token = (await cookies()).get(ADMIN_GRANT_COOKIE)?.value;
   if (!token) return null;
   const [staffIdText, expiryText, signature] = token.split(".");
@@ -29,12 +36,12 @@ export async function getPrivilegedStaff(): Promise<CurrentStaff | null> {
   if (!staffIdText || !expiryText || !signature || Date.now() > Number(expiryText)) return null;
   const expected = sign(payload);
   if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-  const [member] = await db.select({ staffId: staff.staffId, staffCode: staff.staffCode, name: staff.name, role: staff.role }).from(staff).where(eq(staff.staffId, Number(staffIdText))).limit(1);
+  const [member] = await db.select({ staffId: staff.staffId, staffCode: staff.staffCode, name: staff.name, role: staff.role }).from(staff).where(and(eq(staff.staffId, Number(staffIdText)), eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
   return member ?? null;
 }
 
 export const canManageStaff = (role: StaffRole) => role === "OWNER";
 export const canManageMenu = (role: StaffRole) => role === "OWNER" || role === "MANAGER";
+export const canManageCustomers = (role: StaffRole) => role === "OWNER" || role === "MANAGER";
 export const canManageSettings = (role: StaffRole) => role === "OWNER";
 export const canViewSales = (role: StaffRole) => role === "OWNER" || role === "MANAGER";
-

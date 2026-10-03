@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AdminBackLink from "../AdminBackLink";
 import ManagementPageHeader from "../ManagementPageHeader";
+import PosSubHeader from "../../PosSubHeader";
 import PinInput from "@/components/PinInput";
 import { PIN_LENGTH } from "@/lib/pin";
+import AdminCredentialSetup from "./AdminCredentialSetup";
 
 type Role = "OWNER" | "MANAGER" | "STAFF";
 type Row = { staffId: number; staffCode: string; name: string; role: Role; isActive: number; hasPin: boolean; isShared: boolean };
@@ -102,8 +103,9 @@ export default function StaffManagementClient() {
     </section>
     {listMessage && <p className="mx-auto mt-3 max-w-5xl text-sm text-red-600">{listMessage}</p>}
     {form && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-      <section className="w-full max-w-md rounded-2xl bg-white p-6">
-        {isEditing && !sharedAccount ? <header className="flex items-center gap-3"><AdminBackLink ariaLabel="직원 수정 닫기" onNavigate={close} title="돌아가기" /><h2 className="text-xl font-extrabold">직원 수정</h2></header> : <h2 className="text-xl font-extrabold">{sharedAccount ? "공용 POS 전용 계정" : "직원 등록"}</h2>}
+      <section className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl bg-white">
+        <PosSubHeader disabled={saving} onBack={close} title={sharedAccount ? "공용 POS 전용 계정" : isEditing ? "직원 수정" : "직원 등록"} />
+        <div className="p-6">
         {sharedAccount ? <p className="mt-4 rounded-xl bg-slate-100 p-4 text-sm">직원코드 000과 PIN은 수정할 수 없습니다.</p> : <div className="space-y-3 pt-4">
           <label>직원코드<input className="mt-1 min-h-11 w-full rounded-lg border px-3" disabled={isEditing || saving} onChange={event => setForm({ ...form, staffCode: event.target.value })} value={form.staffCode} /></label>
           <label>이름<input className="mt-1 min-h-11 w-full rounded-lg border px-3" disabled={saving} onChange={event => setForm({ ...form, name: event.target.value })} value={form.name} /></label>
@@ -114,6 +116,8 @@ export default function StaffManagementClient() {
         </div>}
         {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
         {isEditing && !sharedAccount ? <button className="mt-6 min-h-12 w-full rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={saving} onClick={() => void save()} type="button">{saving ? "저장 중..." : "저장"}</button> : <div className="mt-6 grid grid-cols-2 gap-2"><button className="min-h-12 rounded-xl bg-slate-100 font-bold disabled:opacity-50" disabled={saving} onClick={close} type="button">취소</button>{!sharedAccount && <button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={saving} onClick={() => void save()} type="button">{saving ? "저장 중..." : "저장"}</button>}</div>}
+        {editing?.role === "OWNER" && !sharedAccount && <AdminCredentialSetup key={editing.staffId} staffId={editing.staffId} />}
+        </div>
       </section>
     </div>}
   </main>;

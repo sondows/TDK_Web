@@ -17,11 +17,6 @@ export type SalesListResponse = {
   date: string;
   startDate: string;
   endDate: string;
-  summary: {
-    netSales: number;
-    transactionCount: number;
-    cancellationCount: number;
-  };
   sales: SaleListItem[];
   message?: string;
 };
@@ -29,7 +24,10 @@ export type SalesListResponse = {
 export type SaleDetail = {
   checkoutId: number;
   occurredAt: string;
+  orderedAt: string;
+  customerName?: string | null;
   tableLabel: string;
+  tableNos: string[];
   checkoutStatus: string;
   displayStatus: SaleDisplayStatus;
   subtotalAmount: number;
@@ -50,12 +48,19 @@ export type SaleDetail = {
   payments: Array<{
     paymentId: number;
     method: string;
+    methodCode: string;
+    customerDisplayName: string | null;
     amount: number;
+    appliedAmount: number;
+    prepaidCreditAmount: number;
+    prepaidReversalAmount: number;
     status: string;
     approvalNo: string | null;
     paidAt: string;
     cancelledAt: string | null;
     staffName: string | null;
+    cashReceived: number | null;
+    cashChange: number | null;
   }>;
   orderCancellations: Array<{
     cancellationId: number;

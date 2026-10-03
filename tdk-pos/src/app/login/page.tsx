@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import PinInput from "@/components/PinInput";
+import PinKeypad from "@/components/PinKeypad";
+import PinAuthPanel from "@/components/PinAuthPanel";
 import { PIN_LENGTH } from "@/lib/pin";
 
 type Staff = {
@@ -16,8 +18,6 @@ type Staff = {
 
 type PinStatus = "idle" | "checking" | "valid";
 
-const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-const selectedStaffStyle = "border-blue-600 bg-blue-50 text-blue-900";
 const activePinStyle = "border-2 border-blue-600 ring-1 ring-blue-100";
 
 export default function LoginPage() {
@@ -35,18 +35,13 @@ export default function LoginPage() {
   useEffect(() => {
     let active = true;
 
-    void fetch("/api/pos-settings/login-mode")
-      .then(response => response.json() as Promise<{ mode?: string }>)
-      .then(result => {
-        if (active && result.mode === "SHARED") router.replace("/pos");
-      })
-      .catch(() => undefined);
-
     void fetch("/api/staff/active")
       .then(response => response.json() as Promise<{ staff?: Staff[]; message?: string }>)
       .then(result => {
         if (!active) return;
-        setStaff(result.staff ?? []);
+        setStaff((result.staff ?? []).slice().sort((a, b) =>
+          a.staffCode < b.staffCode ? -1 : a.staffCode > b.staffCode ? 1 : 0,
+        ));
         if (!result.staff?.length && result.message) setMessage(result.message);
       })
       .catch(() => {
@@ -59,7 +54,7 @@ export default function LoginPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, []);
 
   const resetPinVerification = (nextPin = "") => {
     verificationRequestId.current += 1;
@@ -155,64 +150,37 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
-      <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+      <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[336px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <header className="shrink-0 border-b-4 border-blue-600 px-8 py-6 text-center">
           <h1 className="text-4xl font-extrabold text-blue-600">TDK POS</h1>
-          <p className="mt-2 text-xl font-bold text-slate-600">직원 로그인</p>
+          <p className="mt-2 text-xl font-bold text-slate-600">로그인</p>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <section className="shrink-0 px-8 pb-4 pt-7">
-            <h2 className="text-xl font-bold text-slate-900">직원 선택</h2>
-            <div className="mt-4 grid max-h-[min(28vh,300px)] grid-flow-col grid-rows-2 gap-2 overflow-x-auto pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {staff.map(person => (
-                <button
-                  className={`h-14 w-[120px] min-w-[120px] justify-self-center rounded-xl border-2 px-4 text-lg font-bold transition active:scale-[0.98] ${selectedStaff?.staffCode === person.staffCode ? selectedStaffStyle : "border-slate-200 bg-white text-slate-800 hover:border-slate-400"}`}
-                  disabled={loading || isSubmitting}
-                  key={person.staffId}
-                  onClick={() => selectStaff(person)}
-                  type="button"
-                >
-                  {person.name}
-                </button>
-              ))}
-            </div>
-            {!loading && !staff.length && (
-              <p className="mt-4 rounded-xl bg-slate-50 p-4 text-center text-slate-500">
-                {message || "로그인 가능한 직원이 없습니다."}
-              </p>
-            )}
-          </section>
-
-          <section className="flex min-h-0 flex-1 flex-col border-t border-slate-200 px-8 pb-7 pt-5">
-            <PinInput
+        <PinAuthPanel
+          scrollablePeople
+          emptyMessage={!loading && !staff.length ? message || "로그인 가능한 직원이 없습니다." : undefined}
+          footer={message && staff.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{message}</p> : undefined}
+          keypad={<PinKeypad
+            actionDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || !pin}
+            digitDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH}
+            onBackspace={remove}
+            onClear={clear}
+            onDigit={append}
+          />}
+          label="직원"
+          onSelect={selectStaff}
+          people={staff}
+          pinInput={<PinInput
               ariaLabel="직원 PIN"
               className={pinEnabled ? activePinStyle : ""}
               disabled={!pinEnabled || isSubmitting || pinStatus === "checking"}
-              label="PIN"
+              keypadAligned
               onChange={updatePin}
               value={pin}
-            />
-            <div className="mt-4 grid min-h-0 flex-1 grid-cols-3 grid-rows-4 gap-1">
-              {digits.map(digit => (
-                <button
-                  className="min-h-[60px] rounded-xl border-0 bg-transparent text-2xl font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40"
-                  disabled={!pinEnabled || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH}
-                  key={digit}
-                  onClick={() => append(digit)}
-                  type="button"
-                >
-                  {digit}
-                </button>
-              ))}
-              <button className="min-h-[60px] rounded-xl border-0 bg-transparent text-2xl font-bold text-slate-700 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40" disabled={!pinEnabled || isSubmitting || pinStatus === "checking" || !pin} onClick={remove} type="button">BS</button>
-              <button className="min-h-[60px] rounded-xl border-0 bg-transparent text-2xl font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40" disabled={!pinEnabled || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH} onClick={() => append("0")} type="button">0</button>
-              <button className="min-h-[60px] rounded-xl border-0 bg-transparent text-2xl font-bold text-slate-700 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40" disabled={!pinEnabled || isSubmitting || pinStatus === "checking" || !pin} onClick={clear} type="button">C</button>
-            </div>
-
-            {message && staff.length > 0 && <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{message}</p>}
-          </section>
-        </div>
+            />}
+          selectedCode={selectedStaff?.staffCode}
+          selectionDisabled={loading || isSubmitting}
+        />
       </section>
 
       {showPinError && (
@@ -229,4 +197,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

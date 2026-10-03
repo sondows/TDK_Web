@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       if (requiresReauth) {
         if (typeof body.staffCode !== "string" || typeof body.pin !== "string") return { reauth: true as const, isFullOrderCancellation };
         const [checker] = await tx.select({ staffId: staff.staffId, pinHash: staff.pinHash }).from(staff).where(and(eq(staff.staffCode, body.staffCode.trim()), eq(staff.isActive, 1))).limit(1);
-        if (!checker || !(await verifyPin(body.pin, checker.pinHash))) throw new Error("직원번호 또는 PIN이 올바르지 않습니다.");
+        if (!checker || body.staffCode.trim() === "000" || !(await verifyPin(body.pin, checker.pinHash))) throw new Error("직원번호 또는 PIN이 올바르지 않습니다.");
         cancelledByStaffId = checker.staffId;
       }
       if (!cancelledByStaffId) throw new Error(sharedMode ? "매장 공용 취소 계정을 찾을 수 없습니다." : "취소 처리 직원이 필요합니다.");

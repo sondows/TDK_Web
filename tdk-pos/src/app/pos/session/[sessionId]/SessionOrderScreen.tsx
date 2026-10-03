@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import PosSubHeader from "../../PosSubHeader";
+import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 
 type Category = { categoryId: number; posName: string };
 type Menu = {
@@ -45,6 +47,7 @@ export default function SessionOrderScreen({
   orders: Order[];
 }) {
   const router = useRouter();
+  const { ref: categoryScrollRef, handlers: categoryScrollHandlers } = useHorizontalScroll(true, categories.map(category => category.categoryId).join("\0"), false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(
     categories[0]?.categoryId ?? null
   );
@@ -174,21 +177,8 @@ export default function SessionOrderScreen({
 
   return (
     <main className="min-h-screen bg-gray-100 p-6">
-      <header className="rounded-xl bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <button
-              className="text-sm font-medium text-blue-600 hover:underline"
-              onClick={() => router.push("/pos")}
-              type="button"
-            >
-              ← POS 테이블 화면
-            </button>
-            <h1 className="mt-2 text-3xl font-bold">{session.tableName}</h1>
-            <p className="mt-2 text-gray-600">
-              성인 {session.personCount}명 · 유아 {session.babyCount}명 · 입장 {formatDate(session.openedAt)}
-            </p>
-          </div>
+      <PosSubHeader backLabel="POS 테이블 화면으로 돌아가기" className="rounded-xl shadow-sm" level={1} onBack={() => router.push("/pos")} title={session.tableName} trailing={<div className="flex items-center gap-4">
+          <p className="text-base text-white/90">성인 {session.personCount}명 · 유아 {session.babyCount}명 · 입장 {formatDate(session.openedAt)}</p>
           <button
             className="rounded-lg bg-red-600 px-5 py-3 text-lg font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-400"
             disabled={isClosing}
@@ -197,13 +187,12 @@ export default function SessionOrderScreen({
           >
             테이블 종료
           </button>
-        </div>
-      </header>
+        </div>} />
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_420px]">
         <section className="rounded-xl bg-white p-5 shadow-sm">
           <h2 className="text-xl font-bold">메뉴</h2>
-          <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
+          <div className="horizontal-select-scroll mt-4 flex gap-3 overflow-x-auto pb-2" {...categoryScrollHandlers} ref={categoryScrollRef}>
             {categories.map((category) => (
               <button
                 className={`min-w-28 rounded-lg px-5 py-3 text-lg font-semibold ${

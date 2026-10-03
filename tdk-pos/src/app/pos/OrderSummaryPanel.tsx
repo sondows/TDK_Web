@@ -5,6 +5,7 @@ import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
 import { formatSessionElapsed } from "@/lib/session-time";
 import PaymentModal from "./PaymentModal";
+import PosSubHeader from "./PosSubHeader";
 type SessionDiscount = {
   sessionId: number;
   discountType: "SNS_REVIEW" | "AMOUNT" | "PERCENT";
@@ -337,7 +338,7 @@ export default function OrderSummaryPanel({
                       });
                     }}
                     type="button"
-                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700 disabled:opacity-40"
+                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700"
                   >
                     −
                   </button>
@@ -353,7 +354,7 @@ export default function OrderSummaryPanel({
                       });
                     }}
                     type="button"
-                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700 disabled:opacity-40"
+                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700"
                   >
                     +
                   </button>
@@ -746,7 +747,7 @@ export default function OrderSummaryPanel({
                   취소
                 </button>
                 <button
-                  className="min-h-14 rounded-xl bg-[#7C3AED] font-bold text-white disabled:opacity-50"
+                  className="min-h-14 rounded-xl bg-[#7C3AED] font-bold text-white"
                   disabled={!chosen.length || c.busy}
                   onClick={() => {
                     onBlockingUiChange(true);
@@ -761,7 +762,7 @@ export default function OrderSummaryPanel({
           ) : (
             <div className="shrink-0 pb-2.5 pt-3">
               <button
-                className="min-h-14 w-full rounded-xl bg-[#7C3AED] font-bold text-white disabled:opacity-50"
+                className="min-h-14 w-full rounded-xl bg-[#7C3AED] font-bold text-white"
                 disabled={!sessionId || !cancelables.length}
                 onClick={start}
                 type="button"
@@ -773,7 +774,7 @@ export default function OrderSummaryPanel({
         {tab === "summary" && (
           <div className="shrink-0 pb-2.5 pt-3">
             <button
-              className="min-h-14 w-full rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50"
+              className="min-h-14 w-full rounded-xl bg-blue-600 font-bold text-white"
               disabled={!selected?.sessionId || total <= 0}
               onClick={() => {
                 onBlockingUiChange(true);
@@ -865,32 +866,9 @@ function Confirm({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-      <section className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
-        <header className="flex items-center gap-3">
-          <button
-            aria-label="돌아가기"
-            className="flex size-10 items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
-            onClick={close}
-            title="돌아가기"
-            type="button"
-          >
-            <svg
-              aria-hidden="true"
-              fill="none"
-              height="21"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="21"
-            >
-              <path d="M19 12H5" />
-              <path d="m12 19-7-7 7-7" />
-            </svg>
-          </button>
-          <h2 className="text-lg font-extrabold">건별 주문 취소</h2>
-        </header>
+      <section className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl">
+        <PosSubHeader backLabel="돌아가기" onBack={close} title="건별 주문 취소" />
+        <div className="p-5">
         <section className="mt-5">
           <h3 className="text-sm font-bold">취소 내역</h3>
           <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -947,13 +925,14 @@ function Confirm({
         </section>
         {c.error && <p className="mt-2 text-sm text-red-600">{c.error}</p>}
         <button
-          className="mt-5 min-h-12 w-full rounded-xl bg-[#7C3AED] font-bold text-white disabled:opacity-50"
+          className="mt-5 min-h-12 w-full rounded-xl bg-[#7C3AED] font-bold text-white"
           disabled={c.busy || (c.reason === "기타" && !c.detail.trim())}
           onClick={submit}
           type="button"
         >
           {c.busy ? "처리 중..." : "건별 주문 취소"}
         </button>
+        </div>
       </section>
     </div>
   );
@@ -987,7 +966,7 @@ function Reauth({
           }>,
       )
       .then((data) => {
-        if (mounted) setEmployees(data.staff ?? []);
+        if (mounted) setEmployees((data.staff ?? []).filter(employee => employee.staffCode !== "000"));
       })
       .catch(() => undefined);
     return () => {
@@ -1040,7 +1019,7 @@ function Reauth({
             취소
           </button>
           <button
-            className="min-h-12 rounded-xl bg-[#7C3AED] font-bold text-white disabled:opacity-50"
+            className="min-h-12 rounded-xl bg-[#7C3AED] font-bold text-white"
             disabled={!c.staffCode || c.pin.length !== PIN_LENGTH || c.busy}
             onClick={submit}
             type="button"

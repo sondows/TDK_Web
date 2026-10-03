@@ -51,6 +51,10 @@ export function createSessionToken() {
 
 export async function hashPin(pin: string) {
   if (!isValidPin(pin)) throw new Error("PIN은 숫자 4자리여야 합니다.");
+  return hashNumericPin(pin);
+}
+
+async function hashNumericPin(pin: string) {
   const salt = randomBytes(16).toString("hex");
   const derivedKey = await deriveScryptKey(pin, salt, 16384, 8, 1);
 
@@ -59,6 +63,22 @@ export async function hashPin(pin: string) {
 
 export async function verifyPin(pin: string, storedHash: string | null) {
   if (!storedHash || !isValidPin(pin)) return false;
+  return verifyNumericPin(pin, storedHash);
+}
+
+export const isValidAdminPin = (pin: string) => /^\d{6}$/.test(pin);
+
+export async function hashAdminPin(pin: string) {
+  if (!isValidAdminPin(pin)) throw new Error("관리센터 PIN은 숫자 6자리여야 합니다.");
+  return hashNumericPin(pin);
+}
+
+export async function verifyAdminPin(pin: string, storedHash: string | null) {
+  if (!storedHash || !isValidAdminPin(pin)) return false;
+  return verifyNumericPin(pin, storedHash);
+}
+
+async function verifyNumericPin(pin: string, storedHash: string) {
 
   const [algorithm, n, r, p, salt, expectedKey] = storedHash.split("$");
   if (
@@ -88,7 +108,7 @@ export async function verifyPin(pin: string, storedHash: string | null) {
 
 export async function getCurrentStaff(): Promise<CurrentStaff | null> {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
-  if (!token) return null;
+  if (!token || token.startsWith("admin.")) return null;
 
   const sessionCutoff = new Date(Date.now() - SESSION_MAX_AGE_SECONDS * 1000);
   const [currentStaff] = await db
@@ -116,10 +136,11 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
 /** Verifies a real active employee without creating a browser login session. */
 export async function verifyActiveStaffCredentials(
   staffCode: string,
-  pin: string
+  pin: string,
+  { allowShared = false }: { allowShared?: boolean } = {},
 ): Promise<CurrentStaff | null> {
   const normalizedCode = staffCode.trim();
-  if (!normalizedCode || !pin) return null;
+  if (!normalizedCode || !pin || (normalizedCode === "000" && !allowShared)) return null;
 
   const [candidate] = await db
     .select({

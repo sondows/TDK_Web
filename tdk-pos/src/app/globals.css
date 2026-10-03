@@ -25,6 +25,10 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+[role="dialog"] [role="listbox"] > button[role="option"] {
+  width: 100%;
+}
+
 /* The first card in the POS left column is informational; keep it compact. */
 main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:first-child {
   padding: 0.5rem 0.75rem;
@@ -149,6 +153,84 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   font-size: 0.6875rem;
 }
 
+.pos-table-occupied-content {
+  --pos-table-right-inset: 3px;
+  --pos-table-top-left-inset: calc(var(--pos-table-right-inset) + var(--pos-table-right-inset));
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(24px, max-content) minmax(0, 1fr);
+  column-gap: 4px;
+  padding: var(--pos-table-top-left-inset) var(--pos-table-right-inset) 6px var(--pos-table-top-left-inset);
+}
+
+.pos-table-occupied-content > strong {
+  align-self: start;
+}
+
+.pos-table-occupied-number-multi {
+  position: relative;
+  left: 2px;
+}
+
+.pos-table-occupied-info {
+  display: flex;
+  position: relative;
+  left: 2px;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.pos-table-occupied-amount {
+  font-size: 12px;
+}
+
+.pos-table-occupied-info > .pos-table-occupied-amount:first-child {
+  line-height: 24px;
+}
+
+.pos-table-occupied-info > .pos-table-occupied-amount:nth-child(2) {
+  line-height: 19px;
+  transform: translate(3px, 0.5px);
+}
+
+.pos-table-occupied-usage {
+  font-size: 10px;
+}
+
+.pos-table-occupied-info > span {
+  display: block;
+  text-align: left;
+}
+
+[data-pos-shell] .pos-table-occupied-content > strong {
+  transform: translateX(6px);
+}
+
+[data-pos-shell] .pos-table-occupied-info {
+  left: 17px;
+}
+
+[data-pos-shell] .pos-table-occupied-amount {
+  font-size: 14px;
+}
+
+[data-pos-shell] .pos-table-occupied-usage {
+  font-size: 12px;
+}
+
+@media (max-width: 1000px), (max-height: 800px) {
+  .pos-table-occupied-content {
+    --pos-table-right-inset: 2px;
+    grid-template-columns: max-content minmax(0, 1fr);
+    padding-bottom: 1px;
+  }
+}
+
 .pos-order-columns,
 .pos-order-row,
 .pos-order-total {
@@ -262,9 +344,34 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   flex-shrink: 0;
 }
 
-/* The main POS footer uses text-only touch targets. */
-main.h-dvh > div > section.col-span-2.grid-cols-6 > button {
+/* Keep the six original touch targets at their grid width as more actions are added. */
+.horizontal-select-scroll {
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+}
+
+.horizontal-select-scroll[data-dragging="true"] {
+  scroll-snap-type: none;
+  scroll-behavior: auto;
+}
+
+.horizontal-select-scroll > button {
+  scroll-snap-align: start;
+}
+
+.payment-method-scroll {
+  scroll-padding-inline: 14px;
+}
+
+.pos-footer-scroll {
+  width: calc(100% - 3rem);
+  margin-inline: 1.5rem;
+}
+
+.pos-footer-scroll > button {
   display: flex;
+  flex: 0 0 calc((100% - 2.5rem) / 6);
+  min-width: 0;
   align-items: center;
   justify-content: center;
   white-space: nowrap;
@@ -272,8 +379,157 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button {
   font-weight: 700;
 }
 
-main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
+.pos-footer-scroll > button svg {
   display: none;
+}
+
+/* Table management uses real, scaled layout dimensions; dialogs keep their own sizing. */
+.table-management-screen {
+  --table-management-ui-scale: 0.7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px * var(--table-management-ui-scale));
+}
+
+.table-management-card {
+  width: min(100%, calc(1800px * var(--table-management-ui-scale) * var(--table-management-width-factor)));
+}
+
+.table-management-card > header {
+  width: 100%;
+  min-height: calc(70px * var(--table-management-ui-scale));
+  padding: calc(12px * var(--table-management-ui-scale)) calc(20px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header > div:first-child {
+  gap: calc(12px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header > div:first-child > button {
+  width: calc(46px * var(--table-management-ui-scale));
+  height: calc(46px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header > div:first-child > button svg {
+  width: calc(24px * var(--table-management-ui-scale));
+  height: calc(24px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header h1,
+.table-management-card > header h2 {
+  font-size: calc(24px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header > div:last-child > div {
+  gap: calc(16px * var(--table-management-ui-scale));
+  padding-left: calc(20px * var(--table-management-ui-scale));
+  font-size: calc(20px * var(--table-management-ui-scale));
+}
+
+.table-management-card > header > div:last-child > div > span:first-child {
+  font-size: calc(24px * var(--table-management-ui-scale));
+}
+
+.table-management-panel {
+  width: 100%;
+  height: calc((100dvh - 7rem) * var(--table-management-ui-scale));
+  grid-template-columns: minmax(0, 1fr) minmax(calc(230px * var(--table-management-ui-scale)), 25%);
+}
+
+.table-management-canvas {
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: calc(20px * var(--table-management-ui-scale)) calc(20px * var(--table-management-ui-scale));
+}
+
+.table-management-actions {
+  padding: calc(16px * var(--table-management-ui-scale));
+}
+
+.table-management-actions > div {
+  gap: calc(12px * var(--table-management-ui-scale));
+}
+
+.table-management-actions button {
+  padding-inline: calc(20px * var(--table-management-ui-scale));
+  border-radius: calc(12px * var(--table-management-ui-scale));
+  font-size: calc(22px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas [data-table-management-item] strong {
+  font-size: calc(24px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas [data-table-management-item] > span:nth-of-type(5) {
+  border-radius: calc(20px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-content {
+  --pos-table-right-inset: calc(3px * var(--table-management-ui-scale));
+  grid-template-columns: minmax(calc(24px * var(--table-management-ui-scale)), max-content) minmax(0, 1fr);
+  column-gap: calc(4px * var(--table-management-ui-scale));
+  padding-bottom: calc(6px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-info {
+  left: calc(2px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-number-multi {
+  left: calc(2px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-amount {
+  height: calc(16px * var(--table-management-ui-scale));
+  font-size: calc(12px * var(--table-management-ui-scale));
+  line-height: calc(16px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-info > .pos-table-occupied-amount:first-child {
+  line-height: calc(24px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas .pos-table-occupied-info > .pos-table-occupied-amount:nth-child(2) {
+  line-height: calc(19px * var(--table-management-ui-scale));
+  transform: translate(calc(3px * var(--table-management-ui-scale)), calc(0.5px * var(--table-management-ui-scale)));
+}
+
+.table-management-canvas .pos-table-occupied-usage {
+  height: calc(16px * var(--table-management-ui-scale));
+  font-size: calc(10px * var(--table-management-ui-scale));
+  line-height: calc(16px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas [data-table-management-item] [aria-label^="일행 그룹"] {
+  top: calc(-12px * var(--table-management-ui-scale));
+  right: calc(-12px * var(--table-management-ui-scale));
+  width: calc(36px * var(--table-management-ui-scale));
+  height: calc(36px * var(--table-management-ui-scale));
+  font-size: calc(18px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas > div:not(:first-child) {
+  top: calc(16px * var(--table-management-ui-scale));
+  left: calc(16px * var(--table-management-ui-scale));
+  padding: calc(12px * var(--table-management-ui-scale));
+  border-radius: calc(12px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas > div:not(:first-child) > p {
+  margin-bottom: calc(8px * var(--table-management-ui-scale));
+  font-size: calc(14px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas > div:not(:first-child) > div {
+  gap: calc(8px * var(--table-management-ui-scale));
+}
+
+.table-management-canvas > div:not(:first-child) button {
+  min-height: calc(40px * var(--table-management-ui-scale));
+  padding-inline: calc(16px * var(--table-management-ui-scale));
+  border-radius: calc(8px * var(--table-management-ui-scale));
+  font-size: calc(14px * var(--table-management-ui-scale));
 }
 
 /* Table-cancellation staff selection is rendered beside the PIN keypad. */
@@ -319,6 +575,168 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
   display: none;
 }
 
+/* Keep the shared authentication UI unchanged outside the table cancellation dialog. */
+.table-cancellation-dialog {
+  /* The previously displayed 85% dialog is reduced by another 15%. */
+  --table-cancel-scale: 0.7225;
+  width: min(100%, calc(819px * var(--table-cancel-scale)));
+  height: min(calc(603px * var(--table-cancel-scale)), calc(100dvh - 32px));
+}
+
+.table-cancellation-dialog > header {
+  width: 100%;
+  height: calc(70px * var(--table-cancel-scale));
+  min-height: calc(70px * var(--table-cancel-scale));
+  padding: calc(12px * var(--table-cancel-scale)) calc(20px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog > header > div:first-child {
+  gap: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog > header > div:first-child > button {
+  width: calc(46px * var(--table-cancel-scale));
+  height: calc(46px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog > header > div:first-child > button svg {
+  width: calc(24px * var(--table-cancel-scale));
+  height: calc(24px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog > header h2 {
+  font-size: calc(24px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog > header + div {
+  grid-template-columns: minmax(0, 1fr) min(calc(336px * var(--table-cancel-scale)), 45%);
+}
+
+.table-cancellation-dialog .table-cancel-details {
+  padding: calc(24px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > div:first-child {
+  min-height: calc(86px * var(--table-cancel-scale));
+  padding: calc(20px * var(--table-cancel-scale));
+  padding-right: calc(160px * var(--table-cancel-scale));
+  border-radius: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > div:first-child > p:nth-child(2) {
+  font-size: calc(28px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > div:nth-child(2) {
+  top: calc(28px * var(--table-cancel-scale));
+  right: calc(24px * var(--table-cancel-scale));
+  gap: calc(2px * var(--table-cancel-scale));
+  padding-right: calc(10px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > div:nth-child(2) > span {
+  font-size: calc(18px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > div:nth-child(2) > strong {
+  font-size: calc(30px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section {
+  margin-top: calc(24px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section h3 {
+  font-size: calc(18px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section > div {
+  margin-top: calc(12px * var(--table-cancel-scale));
+  gap: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section button,
+.table-cancellation-dialog .table-cancel-details > section input {
+  min-height: calc(58px * var(--table-cancel-scale));
+  border-radius: calc(12px * var(--table-cancel-scale));
+  font-size: calc(16px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section button {
+  padding-inline: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-details > section input {
+  margin-top: calc(12px * var(--table-cancel-scale));
+  padding-inline: calc(16px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin {
+  padding-block: calc(24px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin > div {
+  max-width: calc(336px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section {
+  padding-inline: calc(26px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:first-child {
+  padding-block: calc(8px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) {
+  padding-top: calc(8px * var(--table-cancel-scale));
+  padding-bottom: calc(28px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section > h2,
+.table-cancellation-dialog .table-cancel-pin section > span {
+  font-size: max(11px, calc(12px * var(--table-cancel-scale)));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:first-child > div > div {
+  margin-top: calc(4px * var(--table-cancel-scale));
+  gap: calc(8px * var(--table-cancel-scale));
+  padding-right: calc(8px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:first-child button {
+  height: calc(56px * var(--table-cancel-scale));
+  width: calc((100% - 8px * var(--table-cancel-scale)) / 2);
+  padding-inline: calc(16px * var(--table-cancel-scale));
+  border-radius: calc(12px * var(--table-cancel-scale));
+  font-size: calc(18px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:first-of-type {
+  margin-top: calc(4px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:first-of-type > div {
+  min-height: calc(52px * var(--table-cancel-scale));
+  padding-block: calc(6px * var(--table-cancel-scale));
+  border-radius: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:first-of-type [aria-hidden="true"] > span {
+  width: calc(20px * var(--table-cancel-scale));
+  height: calc(20px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:nth-of-type(2) {
+  margin-top: calc(16px * var(--table-cancel-scale));
+  column-gap: calc(4px * var(--table-cancel-scale));
+  row-gap: calc(12px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:nth-of-type(2) > button {
+  min-height: calc(60px * var(--table-cancel-scale));
+  font-size: calc(24px * var(--table-cancel-scale));
+}
+
 .pos-function-button:hover {
   background: #e2e8f0;
 }
@@ -338,16 +756,19 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
 }
 
 .pos-menu-list {
-  --menu-card-column-gap: 6px;
+  --menu-card-column-gap: 12px;
   display: grid;
   min-height: 0;
   flex: 1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Fit nine rows after eight 12px gaps while keeping a usable minimum card size. */
+  grid-auto-rows: max(72px, calc((100% - 96px) / 9));
   align-content: start;
   column-gap: var(--menu-card-column-gap);
-  row-gap: 8px;
+  row-gap: 12px;
   overflow-y: auto;
-  padding-right: 0.15rem;
+  touch-action: pan-y;
+  padding-inline: 4px;
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -362,9 +783,9 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 76px;
-  height: 76px;
-  grid-template-columns: minmax(0, 3fr) minmax(3.75rem, 1fr);
+  min-height: 72px;
+  height: 100%;
+  grid-template-columns: minmax(0, 2.25fr) minmax(3.75rem, 1fr);
   overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 0.8rem;
@@ -386,24 +807,11 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
 
 .pos-right-menu-panel.is-order-disabled .pos-category-button {
   cursor: not-allowed;
-  border-color: #e2e8f0 !important;
-  background: #f8fafc !important;
-  color: #94a3b8 !important;
-  box-shadow: none;
-}
-
-.pos-right-menu-panel.is-order-disabled .pos-category-corner-marker {
-  opacity: 0.3;
-}
-
-.pos-right-menu-panel.is-order-disabled .pos-category-underline {
-  opacity: 0.25;
 }
 
 .pos-menu-list.is-order-disabled .pos-menu-card {
   cursor: not-allowed;
   pointer-events: none;
-  opacity: 0.68;
 }
 
 .pos-menu-list.is-order-disabled .pos-menu-card:hover,
@@ -413,14 +821,6 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
   transform: none;
 }
 
-.pos-menu-list.is-order-disabled .pos-menu-copy strong {
-  color: #64748b;
-}
-
-.pos-menu-list.is-order-disabled .pos-menu-price {
-  color: #94a3b8;
-}
-
 .pos-menu-copy {
   display: flex;
   min-width: 0;
@@ -428,16 +828,18 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
   justify-content: center;
   gap: 0.2rem;
   padding: 0.4rem 0.55rem;
+  text-align: center;
 }
 
 .pos-menu-copy strong {
   display: -webkit-box;
-  height: 2.5em;
+  max-height: 2.5em;
   flex-shrink: 0;
   overflow: hidden;
-  font-size: 0.9rem;
+  font-size: 1.0625rem;
   font-weight: 800;
   line-height: 1.25;
+  text-wrap: balance;
   word-break: keep-all;
   overflow-wrap: break-word;
   -webkit-box-orient: vertical;
@@ -446,7 +848,7 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
 
 .pos-menu-price {
   color: #1d4ed8;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 750;
 }
 
@@ -488,39 +890,54 @@ main.h-dvh > div > section.col-span-2.grid-cols-6 > button svg {
 }
 
 .pos-menu-cart-button {
+  --pos-cart-visual-size: 27px;
+  --pos-cart-visual-shift: 8px;
   position: absolute;
   right: 0.3rem;
   bottom: 0.3rem;
   display: grid;
   box-sizing: border-box;
-  width: 27px;
-  height: 27px;
+  width: 44px;
+  height: 44px;
   place-items: center;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  transition: transform 100ms ease;
+}
+
+.pos-menu-cart-button::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--pos-cart-visual-size);
+  height: var(--pos-cart-visual-size);
+  transform: translate(calc(-50% + var(--pos-cart-visual-shift)), calc(-50% + var(--pos-cart-visual-shift)));
   border: 1px solid #475569;
   border-radius: 50%;
   background: #ffffff;
-  color: #334155;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
-  transition: transform 100ms ease, background-color 100ms ease;
 }
 
 .pos-menu-cart-button:active {
   transform: scale(0.92);
+}
+
+.pos-menu-cart-button:active::before {
   background: #f1f5f9;
 }
 
 .pos-menu-cart-button:disabled {
   cursor: not-allowed;
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #94a3b8;
-  box-shadow: none;
 }
 
 .pos-menu-cart-button img {
+  position: relative;
   display: block;
   width: 22px;
   height: 22px;
+  transform: translate(var(--pos-cart-visual-shift), var(--pos-cart-visual-shift));
   pointer-events: none;
   object-fit: contain;
 }
@@ -802,4 +1219,69 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   content: "C";
   font-size: 1.5rem;
   font-weight: 700;
+}
+
+/* Keep the 1280px POS unchanged; give wider touch screens a modest type step. */
+@media (min-width: 1600px) and (min-height: 900px) {
+  [data-pos-shell] > .pos-main-grid {
+    grid-template-columns: minmax(280px, 2.295fr) minmax(350px, 4.705fr) minmax(280px, 3fr);
+  }
+
+  [data-pos-shell] { font-size: 1.125rem; }
+
+  [data-pos-shell] .text-xs { font-size: 0.875rem; }
+  [data-pos-shell] .text-sm { font-size: 1rem; }
+  [data-pos-shell] .text-base { font-size: 1.125rem; }
+  [data-pos-shell] .text-lg { font-size: 1.25rem; }
+  [data-pos-shell] .text-xl { font-size: 1.4375rem; }
+  [data-pos-shell] .text-2xl { font-size: 1.6875rem; }
+  [data-pos-shell] .text-3xl { font-size: 2.125rem; }
+  [data-pos-shell] .text-4xl { font-size: 2.5rem; }
+  [data-pos-shell] .text-5xl { font-size: 3.375rem; }
+  [data-pos-shell] [class~="text-[9px]"] { font-size: 11px; }
+  [data-pos-shell] [class~="text-[10px]"] { font-size: 12px; }
+  [data-pos-shell] [class~="text-[11px]"] { font-size: 13px; }
+  [data-pos-shell] [class~="text-[22px]"] { font-size: 25px; }
+  [data-pos-shell] [class~="text-[40px]"] { font-size: 44px; }
+
+  [data-pos-shell] .min-h-10 { min-height: 44px; }
+  [data-pos-shell] .min-h-11 { min-height: 48px; }
+  [data-pos-shell] .min-h-12 { min-height: 56px; }
+  [data-pos-shell] .min-h-14 { min-height: 64px; }
+  [data-pos-shell] .size-11 { width: 48px; height: 48px; }
+  [data-pos-shell] [class~="min-h-[84px]"] { min-height: 92px; }
+  [data-pos-shell] [class~="min-h-[4.75rem]"] { min-height: 84px; }
+
+  [data-pos-shell] > div > div:first-child > section:first-child header > div:first-child > p,
+  [data-pos-shell] > div > div:first-child > section:first-child header > div:first-child button { font-size: 0.75rem; }
+  [data-pos-shell] > div > div:first-child > section:first-child header > div:first-child button { padding: 0.25rem 0.5rem; }
+  [data-pos-shell] > div > div:first-child > section:first-child h1 { font-size: 1.125rem; }
+  [data-pos-shell] > div > div:first-child > section:first-child header > div:last-child > div > span,
+  [data-pos-shell] > div > div:first-child > section:first-child header > div:last-child time { font-size: 0.875rem; }
+  [data-pos-shell] .pos-clock-date { font-size: 0.8125rem; }
+  [data-pos-shell] .pos-clock-time { font-size: 1.0625rem; }
+
+  [data-pos-shell] .pos-table-info { font-size: 0.875rem; }
+  [data-pos-shell] .pos-table-number { font-size: clamp(2.25rem, 2.7vw, 2.75rem); }
+  [data-pos-shell] .pos-table-info-copy small { font-size: 0.8125rem; }
+  [data-pos-shell] .pos-order-columns { font-size: 0.8125rem; }
+  [data-pos-shell] .pos-order-row { min-height: 36px; font-size: 0.9375rem; }
+  [data-pos-shell] .pos-order-total { font-size: 1.0625rem; }
+  [data-pos-shell] .pos-order-heading { font-size: 0.9375rem; }
+  [data-pos-shell] .pos-order-empty { font-size: 0.9375rem; }
+  [data-pos-shell] > div > div:first-child > section:nth-child(2) nav button { padding-block: 10px; font-size: 12px; }
+
+  [data-pos-shell] [data-pos-top-tabs] button { padding-block: 14px; }
+  [data-pos-shell] .pos-function-button { height: 98px; font-size: 1rem; }
+  [data-pos-shell] .pos-footer-scroll > button { height: 80px; font-size: 1.25rem; }
+  [data-pos-shell] .pos-category-button { padding: 0.5rem 0.625rem; font-size: 0.875rem; }
+  [data-pos-shell] .pos-menu-list { --menu-card-column-gap: 20px; padding-inline: 8px; }
+  [data-pos-shell] .pos-menu-copy strong { font-size: 1.125rem; }
+  [data-pos-shell] .pos-menu-price { font-size: 0.875rem; }
+  [data-pos-shell] .pos-menu-cart-button { --pos-cart-visual-size: 32px; --pos-cart-visual-shift: 6px; }
+  [data-pos-shell] .pos-menu-cart-button img { width: 24px; height: 24px; }
+  [data-pos-shell] .pos-table-occupied-amount { font-size: 16px; }
+  [data-pos-shell] .pos-table-occupied-usage { font-size: 14px; }
+  [data-pos-shell] .pos-table-occupied-info > .pos-table-occupied-amount:first-child { line-height: 26px; }
+  [data-pos-shell] .pos-table-occupied-info > .pos-table-occupied-amount:nth-child(2) { line-height: 20px; transform: translateX(3.5px); }
 }

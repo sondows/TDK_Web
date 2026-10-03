@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false }, { status: 401 });
     }
 
-    const staffMember = await verifyActiveStaffCredentials(staffCode, pin);
+    const staffMember = await verifyActiveStaffCredentials(staffCode, pin, { allowShared: true });
     if (!staffMember) {
       return NextResponse.json({ success: false }, { status: 401 });
     }
@@ -23,4 +23,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false }, { status: 500 });
   }
 }
-

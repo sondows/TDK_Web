@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 
-import ManagementPageHeader from "../admin/ManagementPageHeader";
+import PosSubHeader from "../PosSubHeader";
 import TableLayoutCanvas from "../TableLayoutCanvas";
 import TableShape from "../TableShape";
 import type { TableLayoutValues } from "@/lib/table-layout";
 import PinInput from "@/components/PinInput";
+import PinKeypad from "@/components/PinKeypad";
+import PinAuthPanel from "@/components/PinAuthPanel";
 import { PIN_LENGTH } from "@/lib/pin";
 
 type ActiveMergeSource = { mergeId: number; sourceTableNo: string };
@@ -15,13 +18,14 @@ type TableCancelPreview = { tableId: number; tableNos: string[]; total: number }
 type Table = TableLayoutValues & { tableId: number; tableNo: string; tableName: string | null; capacity: number; isActive: number; sessionId: number | null; groupId: number | null; personCount: number; babyCount: number; openedAt: string | null; amountDue: number; mergedSourceTableNos: string[]; activeMergeSources: ActiveMergeSource[] };
 type Mode = "IDLE" | "MOVE" | "PARTY_CREATE" | "PARTY_CANCEL" | "MERGE" | "SPLIT" | "ORDER_COPY" | "TABLE_CANCEL";
 const MANAGEMENT_DISPLAY_SCALE = 0.8;
+const MANAGEMENT_WIDTH_FACTOR = 0.85;
 const PARTY_GROUP_COLORS = ["#2563EB", "#7C3AED", "#EA580C", "#0891B2", "#DB2777", "#A16207"];
 
 function scaledLayout(table: Table): TableLayoutValues {
   return {
     positionX: table.positionX,
     positionY: table.positionY,
-    layoutWidth: table.layoutWidth * MANAGEMENT_DISPLAY_SCALE,
+    layoutWidth: table.layoutWidth * MANAGEMENT_DISPLAY_SCALE / MANAGEMENT_WIDTH_FACTOR,
     layoutHeight: table.layoutHeight * MANAGEMENT_DISPLAY_SCALE,
     rotation: table.rotation,
   };
@@ -37,7 +41,7 @@ const actions: Array<{ mode: Exclude<Mode, "IDLE">; label: string }> = [
   { mode: "TABLE_CANCEL", label: "테이블 취소" },
 ];
 
-export default function TableManagementClient({ tables }: { tables: Table[] }) {
+export default function TableManagementClient({ tables, modal = false, closeToPos = false }: { tables: Table[]; modal?: boolean; closeToPos?: boolean }) {
   const router = useRouter();
   const canvasRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
@@ -496,25 +500,27 @@ export default function TableManagementClient({ tables }: { tables: Table[] }) {
   const partyGroupVisualById = new Map(partyGroupIds.map((groupId, index) => [groupId, { number: index + 1, color: PARTY_GROUP_COLORS[index % PARTY_GROUP_COLORS.length] }]));
   const selectedGroupId = mode === "PARTY_CREATE" ? null : mode === "PARTY_CANCEL" ? partyCancelGroupId : tables.find(table => table.tableId === selected)?.groupId ?? null;
 
-  return <main className="h-dvh overflow-hidden bg-slate-100 p-3 text-slate-900">
-    <div className="rounded-xl bg-white px-4 shadow-sm">
-      <ManagementPageHeader actions={<div className="flex w-full min-w-0 items-center gap-4 border-l border-slate-200 pl-5 text-xl font-semibold leading-tight text-slate-700"><span aria-hidden="true" className="shrink-0 text-2xl text-blue-600">ⓘ</span><span>{message}</span></div>} maxWidth="max-w-[1800px]" onBack={() => router.push("/pos")} splitRatio title="테이블 관리" />
-    </div>
-    <div className="mx-auto mt-3 grid h-[calc(100dvh-7rem)] max-w-[1800px] min-h-0 grid-cols-[minmax(0,1fr)_minmax(230px,25%)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <TableLayoutCanvas ref={canvasRef} className="bg-slate-50" style={{ backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: "20px 20px" }}>
+  const Root = modal ? "div" : "main";
+  const close = () => modal && !closeToPos ? router.back() : router.push("/pos");
+  return <Root className={`table-management-screen h-dvh overflow-hidden text-slate-900 ${modal ? "fixed inset-0 z-[60] bg-slate-950/55" : "bg-slate-100"}`}>
+    <section aria-label="테이블 관리" aria-modal={modal ? true : undefined} className="table-management-card flex min-h-0 flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl" role={modal ? "dialog" : undefined} style={{ "--table-management-width-factor": MANAGEMENT_WIDTH_FACTOR } as CSSProperties}>
+      <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={close} splitRatio title="테이블 관리" trailing={<div className="flex w-full min-w-0 items-center gap-4 border-l border-white/30 pl-5 text-xl font-semibold leading-tight text-white"><span aria-hidden="true" className="shrink-0 text-2xl text-white">ⓘ</span><span>{message}</span></div>} />
+      <div className="table-management-panel grid min-h-0 overflow-hidden bg-white">
+      <TableLayoutCanvas ref={canvasRef} className="table-management-canvas bg-slate-50">
         <div className="absolute inset-0" ref={groupRef} style={{ transform: `translate3d(${groupOffset.x}px, ${groupOffset.y}px, 0)` }}>
           {tables.map(table => { const partyVisual = table.groupId === null ? undefined : partyGroupVisualById.get(table.groupId); return <TableShape key={table.tableId} {...table} {...scaledLayout(table)} amountDue={table.amountDue} blocked={mode === "PARTY_CREATE" && table.groupId !== null} dataTableManagementItem editable={false} enhancedText grouped={mode === "ORDER_COPY" ? copyDestinationIds.includes(table.tableId) : mode === "PARTY_CANCEL" ? table.groupId !== null && table.groupId !== partyCancelGroupId : selectedGroupId !== null && table.groupId === selectedGroupId && table.tableId !== selected} guestCount={table.personCount + table.babyCount} hasOpenSession={table.sessionId !== null} mergeSplitCandidate={mode === "SPLIT" && table.activeMergeSources.length > 0} mergeSplitSelected={mode === "SPLIT" && splitDestinationId === table.tableId} onClick={() => handleTableClick(table)} partyGroupBadge={mode === "PARTY_CANCEL" && partyVisual ? partyVisual.number : null} partyGroupColor={mode === "PARTY_CANCEL" ? partyVisual?.color : undefined} partyGroupSelected={mode === "PARTY_CANCEL" && partyCancelGroupId !== null && table.groupId === partyCancelGroupId} selected={selected === table.tableId || partySelectedIds.includes(table.tableId) || (mode === "PARTY_CANCEL" && partyCancelGroupId !== null && table.groupId === partyCancelGroupId) || (mode === "SPLIT" && splitDestinationId === table.tableId)} startedAt={table.openedAt} tableNumber={table.tableNo} />; })}
         </div>
         {mode === "SPLIT" && splitDestinationId !== null && splitMergeId === null && (() => { const destination = tables.find(table => table.tableId === splitDestinationId); const sources = destination?.activeMergeSources ?? []; return <div className="absolute left-4 top-4 z-30 rounded-xl border border-violet-200 bg-white/95 p-3 shadow-lg"><p className="mb-2 text-sm font-bold text-violet-800">분리할 합석을 선택해 주세요.</p><div className="flex gap-2">{sources.map(source => <button className="min-h-10 rounded-lg border border-violet-300 bg-violet-50 px-4 text-sm font-extrabold text-violet-800" key={source.mergeId} onClick={() => { setSplitMergeId(source.mergeId); setStatusMessage(null); }} type="button">{source.sourceTableNo}T</button>)}</div></div>; })()}
       </TableLayoutCanvas>
-      <aside className="flex min-h-0 flex-col border-l border-slate-200 bg-white p-4">
-        <div className="grid min-h-0 flex-1 grid-rows-7 gap-3">
-          {actions.map(action => <button className={`flex min-h-0 w-full items-center justify-center rounded-xl border px-5 text-center text-[22px] font-bold transition ${mode === action.mode ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`} disabled={moveBusy || mergeBusy || splitBusy || copyBusy || tableCancelBusy || partyBusy} key={action.mode} onClick={() => selectMode(action.mode)} type="button">{action.label}</button>)}
+      <aside className="table-management-actions flex min-h-0 flex-col border-l border-slate-200 bg-white">
+        <div className="grid min-h-0 flex-1 grid-rows-7">
+          {actions.map(action => <button className={`flex min-h-0 w-full items-center justify-center border text-center font-bold transition ${mode === action.mode ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`} disabled={moveBusy || mergeBusy || splitBusy || copyBusy || tableCancelBusy || partyBusy} key={action.mode} onClick={() => selectMode(action.mode)} type="button">{action.label}</button>)}
         </div>
       </aside>
     </div>
+    </section>
     {tableCancelPreview && <TableCancellationModal busy={tableCancelBusy} close={() => !tableCancelBusy && setTableCancelPreview(null)} complete={(tableNos) => { resetTemporarySelections(); showStatus(`${tableNos.map(tableNo => `${tableNo}T`).join(" + ")} 이용을 취소했습니다.`, true); router.refresh(); }} preview={tableCancelPreview} setBusy={setTableCancelBusy} />}
-  </main>;
+  </Root>;
 }
 
 function TableCancellationModal({ preview, busy, setBusy, close, complete }: { preview: TableCancelPreview; busy: boolean; setBusy: (value: boolean) => void; close: () => void; complete: (tableNos: string[]) => void }) {
@@ -596,18 +602,12 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   const clearPin = () => { if (staffCode && !busy && !submittingRef.current) setPin(""); };
 
   const money = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(preview.total);
-  const keypad = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "BS", "0", "C"];
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4" onClick={() => !busy && close()}>
-      <section aria-modal="true" className="flex max-h-[calc(100dvh-32px)] w-full max-w-[940px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
-        <header className="flex min-h-[76px] shrink-0 items-center gap-4 border-b border-slate-200 px-6">
-          <button aria-label="뒤로가기" className="flex size-12 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 active:scale-95 disabled:opacity-50" disabled={busy} onClick={close} type="button">
-            <svg aria-hidden="true" fill="none" height="26" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" viewBox="0 0 24 24" width="26"><path d="m15 18-6-6 6-6" /><path d="M9 12h10" /></svg>
-          </button>
-          <h2 className="text-2xl font-extrabold text-slate-900">테이블 취소</h2>
-        </header>
-        <div className="grid min-h-0 flex-1 grid-cols-[55%_45%] divide-x divide-slate-200">
+      <section aria-modal="true" className="table-cancellation-dialog flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
+        <PosSubHeader backLabel="뒤로가기" disabled={busy} onBack={close} title="테이블 취소" />
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_min(336px,45%)] divide-x divide-slate-200">
           <div className="table-cancel-details min-h-0 overflow-y-auto p-6">
             <div className="rounded-xl border border-red-200 bg-red-50 p-5">
               <p className="text-base font-bold text-red-800">취소 대상</p>
@@ -628,22 +628,26 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
               {reason === "기타" && <input className="mt-3 min-h-[58px] w-full rounded-xl border border-slate-300 px-4 text-base outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100" onChange={event => setDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요." value={detail} />}
             </section>
           </div>
-          <div className="table-cancel-pin flex min-h-0 flex-col p-6">
-            <section className="shrink-0">
-              <h3 className="mt-0 text-lg font-bold text-slate-800">취소 직원</h3>
-              <div className="mt-3 flex min-w-0 gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {employees.map(employee => (
-                  <button className={staffCode === employee.staffCode ? "min-h-[58px] min-w-[120px] shrink-0 rounded-xl border-2 border-blue-600 bg-blue-50 px-3 text-base font-bold text-blue-700 transition active:scale-[0.98]" : "min-h-[58px] min-w-[120px] shrink-0 rounded-xl border border-slate-300 bg-white px-3 text-base font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98] disabled:opacity-50"} disabled={busy} key={employee.staffId} onClick={() => selectCancellationStaff(employee.staffCode)} type="button">{employee.name}</button>
-                ))}
-              </div>
-            </section>
-            <PinInput ariaLabel="테이블 취소 PIN" autoFocus={Boolean(staffCode)} className={staffCode ? "border-2 border-blue-600 ring-2 ring-blue-100" : "bg-slate-50"} disabled={busy || !staffCode} label="PIN" onChange={setPin} onComplete={value => void submit(value)} value={pin} />
-            <div className="mt-5 grid grid-cols-3 grid-rows-4 gap-1">
-              {keypad.map(key => (
-                <button className="min-h-[68px] rounded-xl border-0 bg-transparent text-2xl font-extrabold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:text-slate-300 disabled:opacity-40" disabled={!staffCode || busy || (key !== "BS" && key !== "C" && pin.length >= PIN_LENGTH)} key={key} onClick={() => key === "BS" ? removePinDigit() : key === "C" ? clearPin() : appendPinDigit(key)} type="button">{key}</button>
-              ))}
+          <div className="table-cancel-pin flex min-h-0 flex-col py-6">
+            <div className="mx-auto flex min-h-0 w-full max-w-[336px] flex-1 flex-col">
+              <PinAuthPanel
+                scrollablePeople
+                footer={error ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-base font-medium text-red-700">{error}</p> : undefined}
+                keypad={<PinKeypad
+                  actionDisabled={!staffCode || busy || !pin}
+                  digitDisabled={!staffCode || busy || pin.length >= PIN_LENGTH}
+                  onBackspace={removePinDigit}
+                  onClear={clearPin}
+                  onDigit={appendPinDigit}
+                />}
+                label="관리자"
+                onSelect={employee => selectCancellationStaff(employee.staffCode)}
+                people={employees}
+                pinInput={<PinInput ariaLabel="테이블 취소 PIN" autoFocus={Boolean(staffCode)} className={staffCode ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={busy || !staffCode} keypadAligned onChange={setPin} onComplete={value => void submit(value)} value={pin} />}
+                selectedCode={staffCode}
+                selectionDisabled={busy}
+              />
             </div>
-            {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-base font-medium text-red-700">{error}</p>}
           </div>
         </div>
       </section>

@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
+import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
 import {
   createSessionToken,
   hashSessionToken,
@@ -24,6 +25,10 @@ export async function POST(request: Request) {
         { success: false, message: LOGIN_FAILURE_MESSAGE },
         { status: 401 }
       );
+    }
+
+    if (staffCode === "000" && await getConfiguredPosLoginMode() !== "SHARED") {
+      return NextResponse.json({ success: false, message: LOGIN_FAILURE_MESSAGE }, { status: 401 });
     }
 
     const [staffMember] = await db

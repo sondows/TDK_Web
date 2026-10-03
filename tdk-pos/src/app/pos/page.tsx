@@ -3,15 +3,15 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { checkoutItems, checkouts, diningTables, discountRules, menuCategories, menuImages, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemCancellations, orderItemOptions, orderItems, orders, payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
-import { getPosLoginMode } from "@/lib/pos-login-mode";
 import PosShell from "./PosShell";
 import { resolveTableLayout } from "@/lib/table-layout";
 
 export default async function PosPage() {
   const authenticatedStaff = await getCurrentStaff();
-  const loginMode = await getPosLoginMode();
-  if (!authenticatedStaff && loginMode !== "SHARED") redirect("/login");
-  const currentStaff = authenticatedStaff ?? { name: "매장 공용", role: "SHARED" as const };
+  if (!authenticatedStaff) redirect("/login");
+  const currentStaff = authenticatedStaff.staffCode === "000"
+    ? { name: "매장 공용", role: "SHARED" as const }
+    : authenticatedStaff;
   const [tableLayouts, openSessions, activeMerges, activeMenus, activeCategories, activeMenuModifiers, idleResetSetting, quickDiscounts] = await Promise.all([
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, tableName: diningTables.tableName, capacity: diningTables.capacity, positionX: diningTables.positionX, positionY: diningTables.positionY, layoutWidth: diningTables.layoutWidth, layoutHeight: diningTables.layoutHeight, rotation: diningTables.rotation }).from(diningTables).where(eq(diningTables.isActive, 1)).orderBy(diningTables.sortOrder),
     db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, groupId: tableSessions.groupId, personCount: tableSessions.personCount, babyCount: tableSessions.babyCount, openedAtEpoch: sql<number>`UNIX_TIMESTAMP(${tableSessions.openedAt})` }).from(tableSessions).where(eq(tableSessions.status, "OPEN")),
@@ -43,25 +43,20 @@ export default async function PosPage() {
   const orderIdByItemId = new Map(items.map((item) => [item.orderItemId, item.orderId]));
   const checkoutLinks = itemIds.length ? await db.select({ checkoutId: checkoutItems.checkoutId, checkoutStatus: checkouts.status, orderItemId: checkoutItems.orderItemId }).from(checkoutItems).innerJoin(checkouts, eq(checkoutItems.checkoutId, checkouts.checkoutId)).where(inArray(checkoutItems.orderItemId, itemIds)) : [];
   const activeCheckoutIds = [...new Set(checkoutLinks.filter(link => link.checkoutStatus === "OPEN" || link.checkoutStatus === "PARTIALLY_PAID").map(link => link.checkoutId))];
-  const approvedPayments = activeCheckoutIds.length ? await db.select({ checkoutId: payments.checkoutId, amount: payments.amount }).from(payments).where(and(inArray(payments.checkoutId, activeCheckoutIds), eq(payments.status, "APPROVED"))) : [];
+  const approvedPayments = activeCheckoutIds.length ? await db.select({ checkoutId: payments.checkoutId, amount: payments.appliedAmount }).from(payments).where(and(inArray(payments.checkoutId, activeCheckoutIds), eq(payments.status, "APPROVED"))) : [];
   const amountDueBySession = new Map<number, number>();
   const cancellationsByItem = new Map<number, typeof cancellations>(); cancellations.forEach(cancellation => cancellationsByItem.set(cancellation.orderItemId, [...(cancellationsByItem.get(cancellation.orderItemId) ?? []), cancellation]));
   const optionsByItem = new Map<number, typeof itemOptions>(); itemOptions.forEach(option => optionsByItem.set(option.orderItemId, [...(optionsByItem.get(option.orderItemId) ?? []), option]));
   const orderDetails = sessionOrders.map(order => ({ orderId: order.orderId, sessionId: order.sessionId, orderedAt: order.orderedAt.toISOString(), status: order.status, items: items.filter(item => item.orderId === order.orderId).map(item => { const itemCancellations = cancellationsByItem.get(item.orderItemId) ?? []; const cancelledQty = itemCancellations.reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0); return { ...item, cancelledQty, effectiveQty: order.status === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, item.qty - cancelledQty), options: (optionsByItem.get(item.orderItemId) ?? []).map(option => ({ ...option })), cancellations: itemCancellations.map(cancellation => ({ ...cancellation, cancelledAt: cancellation.cancelledAt.toISOString() })) }; }) }));
+  const effectiveItemIds = new Set(orderDetails.flatMap(order => order.items.filter(item => item.effectiveQty > 0).map(item => item.orderItemId)));
   items.forEach((item) => {
     const sessionId = orderSessionById.get(item.orderId);
     const effectiveQty = orderStatusById.get(item.orderId) === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, item.qty - (cancellationsByItem.get(item.orderItemId) ?? []).reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0));
     if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + Number(item.unitPrice) * effectiveQty);
   });
-  const physicalAmountByTableId = new Map<number, number>();
-  tables.forEach(table => {
-    if (!table.sessionId) return;
-    const sessionIds = new Set([table.sessionId, ...(table.mergedSourceSessionIds ?? [])]);
-    physicalAmountByTableId.set(table.tableId, Math.max(0, [...sessionIds].reduce((sum, sessionId) => sum + (amountDueBySession.get(sessionId) ?? 0), 0) - discounts.filter(discount => sessionIds.has(discount.sessionId)).reduce((sum, discount) => sum + Number(discount.discountAmount), 0)));
-  });
   const checkoutIdsBySessionId = new Map<number, Set<number>>();
   checkoutLinks.forEach((link) => {
-    if (link.checkoutStatus !== "OPEN" && link.checkoutStatus !== "PARTIALLY_PAID") return;
+    if (!effectiveItemIds.has(link.orderItemId) || (link.checkoutStatus !== "OPEN" && link.checkoutStatus !== "PARTIALLY_PAID")) return;
     const orderId = orderIdByItemId.get(link.orderItemId);
     const sessionId = orderId === undefined ? undefined : orderSessionById.get(orderId);
     if (sessionId === undefined) return;
@@ -89,6 +84,11 @@ export default async function PosPage() {
     const discount = discounts.filter(entry => paymentScopeSessionIds.has(entry.sessionId)).reduce((sum, entry) => sum + Number(entry.discountAmount), 0);
     paymentTotalByTableId.set(table.tableId, Math.max(0, gross - discount));
   });
+  const receivableByTableId = new Map<number, number>();
+  tables.forEach((table) => {
+    if (!table.sessionId) return;
+    receivableByTableId.set(table.tableId, Math.max(0, (paymentTotalByTableId.get(table.tableId) ?? 0) - (prepaidByTableId.get(table.tableId) ?? 0)));
+  });
   const idleResetSeconds = Math.max(0, Number(idleResetSetting[0]?.value ?? 60));
-  return <PosShell discounts={discounts} idleResetSeconds={Number.isInteger(idleResetSeconds) ? idleResetSeconds : 0} quickDiscounts={quickDiscounts.filter(rule => rule.slot !== null && (rule.type === "AMOUNT" || rule.type === "RATE")).map(rule => ({ ruleId: rule.ruleId, slot: rule.slot!, title: rule.title, type: rule.type === "RATE" ? "PERCENT" as const : "AMOUNT" as const, value: Number(rule.value) }))} staffName={currentStaff.name} staffRole={currentStaff.role} tables={tables.map((table, index) => ({ ...table, ...resolveTableLayout({ positionX: table.positionX === null ? undefined : Number(table.positionX), positionY: table.positionY === null ? undefined : Number(table.positionY), layoutWidth: table.layoutWidth === null ? undefined : Number(table.layoutWidth), layoutHeight: table.layoutHeight === null ? undefined : Number(table.layoutHeight), rotation: table.rotation }, index), amountDue: table.sessionId ? physicalAmountByTableId.get(table.tableId) ?? 0 : 0, prepaidAmount: table.sessionId ? prepaidByTableId.get(table.tableId) ?? 0 : 0, paymentTotal: table.sessionId ? paymentTotalByTableId.get(table.tableId) ?? 0 : 0, openedAt: table.openedAtEpoch === null ? null : new Date(Number(table.openedAtEpoch) * 1000).toISOString() }))} menus={activeMenus} categories={activeCategories} menuModifiers={activeMenuModifiers} orders={sessionOrders} orderItems={items} orderDetails={orderDetails} />;
+  return <PosShell discounts={discounts} idleResetSeconds={Number.isInteger(idleResetSeconds) ? idleResetSeconds : 0} quickDiscounts={quickDiscounts.filter(rule => rule.slot !== null && (rule.type === "AMOUNT" || rule.type === "RATE")).map(rule => ({ ruleId: rule.ruleId, slot: rule.slot!, title: rule.title, type: rule.type === "RATE" ? "PERCENT" as const : "AMOUNT" as const, value: Number(rule.value) }))} staffName={currentStaff.name} staffRole={currentStaff.role} tables={tables.map((table, index) => ({ ...table, ...resolveTableLayout({ positionX: table.positionX === null ? undefined : Number(table.positionX), positionY: table.positionY === null ? undefined : Number(table.positionY), layoutWidth: table.layoutWidth === null ? undefined : Number(table.layoutWidth), layoutHeight: table.layoutHeight === null ? undefined : Number(table.layoutHeight), rotation: table.rotation }, index), amountDue: table.sessionId ? receivableByTableId.get(table.tableId) ?? 0 : 0, prepaidAmount: table.sessionId ? prepaidByTableId.get(table.tableId) ?? 0 : 0, paymentTotal: table.sessionId ? paymentTotalByTableId.get(table.tableId) ?? 0 : 0, openedAt: table.openedAtEpoch === null ? null : new Date(Number(table.openedAtEpoch) * 1000).toISOString() }))} menus={activeMenus} categories={activeCategories} menuModifiers={activeMenuModifiers} orders={sessionOrders} orderItems={items} orderDetails={orderDetails} />;
 }

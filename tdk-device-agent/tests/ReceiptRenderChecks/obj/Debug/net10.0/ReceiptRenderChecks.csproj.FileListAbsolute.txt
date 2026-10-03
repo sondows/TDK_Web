@@ -1,0 +1,15 @@
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.exe
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.deps.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.runtimeconfig.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.dll
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.pdb
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.GeneratedMSBuildEditorConfig.editorconfig
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.AssemblyInfoInputs.cache
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.AssemblyInfo.cs
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.csproj.CoreCompileInputs.cache
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.sourcelink.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.dll
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\refint\ReceiptRenderChecks.dll
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.pdb
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.genruntimeconfig.cache
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\tests\ReceiptRenderChecks\obj\Debug\net10.0\ref\ReceiptRenderChecks.dll

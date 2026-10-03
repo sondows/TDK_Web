@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 
 import {
   mysqlTable,
@@ -7,7 +8,9 @@ import {
   int,
   tinyint,
   datetime,
+  date,
   decimal,
+  text,
   index,
   primaryKey,
   uniqueIndex,
@@ -61,6 +64,8 @@ export const staff = mysqlTable(
     staffCode: varchar("staff_code", { length: 30 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     pinHash: varchar("pin_hash", { length: 255 }),
+    adminLoginId: varchar("admin_login_id", { length: 32 }),
+    adminPinHash: varchar("admin_pin_hash", { length: 255 }),
     role: mysqlEnum("role", ["OWNER", "MANAGER", "STAFF"])
       .notNull()
       .default("STAFF"),
@@ -73,7 +78,30 @@ export const staff = mysqlTable(
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [uniqueIndex("uq_staff_code").on(table.staffCode)]
+  (table) => [
+    uniqueIndex("uq_staff_code").on(table.staffCode),
+    uniqueIndex("uq_staff_admin_login_id").on(table.adminLoginId),
+  ]
+);
+
+export const customers = mysqlTable(
+  "customers",
+  {
+    customerId: bigint("customer_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+    name: varchar("name", { length: 100 }).notNull(),
+    contactName: varchar("contact_name", { length: 100 }),
+    phone: varchar("phone", { length: 30 }),
+    email: varchar("email", { length: 255 }),
+    memo: text("memo"),
+    isPaymentManaged: tinyint("is_payment_managed").notNull().default(0),
+    isActive: tinyint("is_active").notNull().default(1),
+    createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_customers_name").on(table.name),
+    index("idx_customers_phone").on(table.phone),
+  ]
 );
 
 export const staffSessions = mysqlTable("staff_sessions", {
@@ -428,6 +456,21 @@ export const paymentMethods = mysqlTable("payment_methods", {
   sortOrder: int("sort_order").notNull().default(0),
 }, (table) => [uniqueIndex("uq_payment_method_code").on(table.methodCode)]);
 
+export const paymentMethodSettings = mysqlTable("payment_method_settings", {
+  paymentMethodId: bigint("payment_method_id", { mode: "number", unsigned: true }).primaryKey().references(() => paymentMethods.paymentMethodId),
+  inputType: mysqlEnum("input_type", ["AMOUNT", "QUANTITY"]).notNull(),
+  unitAmount: decimal("unit_amount", { precision: 14, scale: 2 }),
+  balancePolicy: mysqlEnum("balance_policy", ["CASH_CHANGE", "FORFEIT"]),
+  cashChangeEnabled: tinyint("cash_change_enabled"),
+  cashChangeMinPercent: tinyint("cash_change_min_percent", { unsigned: true }),
+  validityEnabled: tinyint("validity_enabled").notNull().default(0),
+  validFrom: date("valid_from", { mode: "string" }),
+  validUntil: date("valid_until", { mode: "string" }),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+});
+
 export const checkouts = mysqlTable("checkouts", {
   checkoutId: bigint("checkout_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   subtotalAmount: decimal("subtotal_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
@@ -456,6 +499,8 @@ export const payments = mysqlTable("payments", {
   checkoutId: bigint("checkout_id", { mode: "number", unsigned: true }).notNull().references(() => checkouts.checkoutId),
   paymentMethodId: bigint("payment_method_id", { mode: "number", unsigned: true }).notNull().references(() => paymentMethods.paymentMethodId),
   amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  appliedAmount: decimal("applied_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  customerId: bigint("customer_id", { mode: "number", unsigned: true }).references(() => customers.customerId),
   status: mysqlEnum("status", ["PENDING", "APPROVED", "CANCELLED", "REFUNDED", "FAILED"]).notNull().default("APPROVED"),
   approvalNo: varchar("approval_no", { length: 100 }),
   externalTransactionId: varchar("external_transaction_id", { length: 150 }),
@@ -463,7 +508,57 @@ export const payments = mysqlTable("payments", {
   paidAt: datetime("paid_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   cancelledAt: datetime("cancelled_at"),
   note: varchar("note", { length: 500 }),
-}, (table) => [index("idx_payments_checkout_status").on(table.checkoutId, table.status), index("idx_payments_paid_at").on(table.paidAt)]);
+}, (table) => [index("idx_payments_checkout_status").on(table.checkoutId, table.status), index("idx_payments_paid_at").on(table.paidAt), index("idx_payments_customer").on(table.customerId)]);
+
+/** Signed customer trade balance history. Payment entries retain their source payment link. */
+export const customerPrepaidLedger = mysqlTable("customer_prepaid_ledger", {
+  ledgerId: bigint("ledger_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  customerId: bigint("customer_id", { mode: "number", unsigned: true }).notNull().references(() => customers.customerId),
+  paymentId: bigint("payment_id", { mode: "number", unsigned: true }).references(() => payments.paymentId),
+  entryType: mysqlEnum("entry_type", ["CARD_OVERPAYMENT", "CARD_OVERPAYMENT_REVERSAL", "PAYMENT_OVERPAYMENT", "PAYMENT_OVERPAYMENT_REVERSAL", "DEPOSIT", "REFUND", "ADJUSTMENT", "CUSTOMER_PAYMENT", "CUSTOMER_PAYMENT_REVERSAL"]).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  transactionAt: datetime("transaction_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  methodCode: varchar("method_code", { length: 20 }),
+  adjustmentReason: varchar("adjustment_reason", { length: 100 }),
+  memo: varchar("memo", { length: 500 }),
+  requestKey: varchar("request_key", { length: 36 }),
+  reversesLedgerId: bigint("reverses_ledger_id", { mode: "number", unsigned: true }).references((): AnyMySqlColumn => customerPrepaidLedger.ledgerId),
+  createdByStaffId: bigint("created_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("idx_customer_prepaid_ledger_customer_time").on(table.customerId, table.createdAt),
+  index("idx_customer_prepaid_ledger_customer_transaction").on(table.customerId, table.transactionAt, table.ledgerId),
+  uniqueIndex("uq_customer_prepaid_ledger_payment_type").on(table.paymentId, table.entryType),
+  uniqueIndex("uq_customer_prepaid_ledger_reversal").on(table.reversesLedgerId),
+  uniqueIndex("uq_customer_prepaid_ledger_request").on(table.requestKey),
+]);
+
+export const paymentOtherDetails = mysqlTable("payment_other_details", {
+  paymentId: bigint("payment_id", { mode: "number", unsigned: true }).primaryKey().references(() => payments.paymentId),
+  methodNameSnapshot: varchar("method_name_snapshot", { length: 100 }).notNull(),
+  inputTypeSnapshot: mysqlEnum("input_type_snapshot", ["AMOUNT", "QUANTITY"]).notNull(),
+  quantity: int("quantity", { unsigned: true }),
+  unitAmountSnapshot: decimal("unit_amount_snapshot", { precision: 14, scale: 2 }),
+  submittedAmount: decimal("submitted_amount", { precision: 14, scale: 2 }).notNull(),
+  appliedAmount: decimal("applied_amount", { precision: 14, scale: 2 }).notNull(),
+  balancePolicySnapshot: mysqlEnum("balance_policy_snapshot", ["CASH_CHANGE", "FORFEIT"]),
+  cashChangeEnabledSnapshot: tinyint("cash_change_enabled_snapshot"),
+  cashChangeMinPercentSnapshot: tinyint("cash_change_min_percent_snapshot", { unsigned: true }),
+  cashChangeAmount: decimal("cash_change_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  forfeitedAmount: decimal("forfeited_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const auditLogs = mysqlTable("audit_logs", {
+  auditLogId: bigint("audit_log_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  deviceId: bigint("device_id", { mode: "number", unsigned: true }),
+  actionType: varchar("action_type", { length: 50 }).notNull(),
+  entityType: varchar("entity_type", { length: 50 }).notNull(),
+  entityId: bigint("entity_id", { mode: "number", unsigned: true }),
+  description: varchar("description", { length: 1000 }),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const orderItemCancellations = mysqlTable("order_item_cancellations", {
   cancellationId: bigint("cancellation_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),

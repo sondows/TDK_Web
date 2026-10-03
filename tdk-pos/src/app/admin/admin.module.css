@@ -1,0 +1,693 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+  flex: 1;
+  flex-direction: column;
+  background: #f5f7f9;
+  color: #25343b;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.header {
+  display: flex;
+  height: 64px;
+  flex: 0 0 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid #dce3e7;
+  background: #fff;
+  padding: 0 32px;
+}
+
+.brand {
+  color: #455a64;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+.brand span {
+  margin-left: 4px;
+  color: #25343b;
+}
+
+.userArea {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  color: #52636c;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.logoutButton {
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  background: #fff;
+  padding: 7px 11px;
+  color: #344e5a;
+  font-weight: 600;
+}
+
+.logoutButton:hover { background: #f2f5f6; }
+.logoutError { color: #bc3535; }
+
+.loginScreen {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7f9;
+  padding: 24px;
+  color: #25343b;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.loginCard {
+  width: min(420px, 100%);
+  border: 1px solid #dce3e7;
+  background: #fff;
+  padding: 32px;
+  box-shadow: 0 12px 34px rgb(22 37 45 / 9%);
+}
+
+.loginHeading h1 { color: #455a64; font-size: 23px; font-weight: 700; }
+.loginHeading p { margin-top: 8px; color: #60717a; font-size: 13px; }
+.loginForm { display: flex; flex-direction: column; margin-top: 28px; }
+.loginForm label { margin-bottom: 7px; font-size: 14px; font-weight: 600; }
+.loginForm input {
+  height: 42px;
+  margin-bottom: 18px;
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  padding: 0 12px;
+  font-size: 15px;
+}
+.loginForm input:focus-visible { outline: 2px solid #b7cbd4; outline-offset: 1px; }
+.loginForm button {
+  height: 42px;
+  margin-top: 4px;
+  border-radius: 4px;
+  background: #455a64;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+}
+.loginForm button:hover { background: #344b56; }
+.loginForm button:disabled { opacity: 0.65; }
+.loginError { margin: 0 0 12px; color: #bc3535; font-size: 13px; }
+
+.workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 224px minmax(0, 1fr);
+}
+
+.sidebar {
+  border-right: 1px solid #dce3e7;
+  background: #fff;
+  padding: 24px 12px;
+}
+
+.navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navLink {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  border-radius: 5px;
+  padding: 0 14px;
+  color: #52636c;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.navLink:hover {
+  background: #f2f5f6;
+  color: #344b56;
+}
+
+.navLink:focus-visible {
+  outline: 2px solid #455a64;
+  outline-offset: 2px;
+}
+
+.navLinkActive,
+.navLinkActive:hover {
+  background: #e8eff2;
+  color: #344e5a;
+}
+
+.main {
+  min-width: 0;
+  padding: 36px 40px 64px;
+}
+
+.content {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.pageHeading {
+  margin-bottom: 24px;
+}
+
+.pageHeading h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.3;
+}
+
+.pageDescription {
+  margin-top: 8px;
+  color: #60717a;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.paymentFeatureGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.paymentFeatureCard {
+  min-height: 136px;
+  border: 1px solid #dce3e7;
+  background: #fff;
+  padding: 24px;
+}
+
+.paymentFeatureCard h2 {
+  color: #344e5a;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.paymentFeatureCard p {
+  margin-top: 10px;
+  color: #60717a;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.customerSection {
+  border: 1px solid #dce3e7;
+  background: #fff;
+}
+
+.customerToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.customerToolbarControls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.customerInactiveToggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: #52636c;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.customerInactiveToggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: #455a64;
+}
+
+.staffToolbar { flex-wrap: wrap; }
+.staffFilters { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 12px 20px; min-width: 0; }
+.staffFilters .customerSearch { flex: 0 1 340px; }
+
+.customerSearch {
+  width: min(100%, 340px);
+  height: 38px;
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  background: #fff;
+  padding: 0 12px;
+  color: #25343b;
+  font-size: 14px;
+}
+
+.customerSearch::placeholder {
+  color: #89979e;
+}
+
+.customerSearch:focus-visible {
+  border-color: #455a64;
+  outline: 2px solid #b7cbd4;
+  outline-offset: 1px;
+}
+
+.customerAddButton {
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid #455a64;
+  border-radius: 4px;
+  background: #455a64;
+  padding: 0 16px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.customerAddButton:hover,
+.customerSubmitButton:hover {
+  background: #344b56;
+}
+
+.customerModal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: 0;
+  transform: translate(-50%, -50%);
+  overflow-y: auto;
+  border: 1px solid #cbd5da;
+  border-radius: 6px;
+  background: #fff;
+  color: #25343b;
+  box-shadow: 0 18px 48px rgb(22 37 45 / 22%);
+}
+
+.customerModal::backdrop {
+  background: rgb(15 23 42 / 42%);
+}
+
+.customerModalHeader {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e2e8eb;
+  padding: 0 24px;
+}
+
+.customerModalHeader h2 {
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.customerModalClose {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #60717a;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.customerModalClose:hover {
+  background: #f2f5f6;
+  color: #25343b;
+}
+
+.customerModalClose:disabled,
+.customerCancelButton:disabled,
+.customerSubmitButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.customerModalFields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+
+.customerField {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.customerField label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.customerField label span,
+.customerFieldError {
+  color: #bc3535;
+}
+
+.customerFieldInput,
+.customerFieldTextarea {
+  width: 100%;
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  background: #fff;
+  padding: 9px 11px;
+  color: #25343b;
+  font: inherit;
+  font-size: 14px;
+}
+
+.customerFieldInput {
+  height: 38px;
+}
+
+.customerFieldTextarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.customerPaymentField {
+  border-top: 1px solid #e2e8eb;
+  padding-top: 17px;
+}
+
+.customerPaymentLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #25343b;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.customerPaymentLabel input {
+  width: 16px;
+  height: 16px;
+  accent-color: #455a64;
+}
+
+.customerPaymentField p {
+  margin: 5px 0 0 24px;
+  color: #60717a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.customerFieldInput:focus-visible,
+.customerFieldTextarea:focus-visible,
+.customerPaymentLabel input:focus-visible,
+.customerModal button:focus-visible {
+  border-color: #455a64;
+  outline: 2px solid #b7cbd4;
+  outline-offset: 1px;
+}
+
+.customerFieldInput[aria-invalid="true"] {
+  border-color: #bc3535;
+}
+
+.customerFieldError,
+.customerModalNotice {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.customerModalNotice {
+  color: #60717a;
+}
+
+.customerModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #e2e8eb;
+  padding: 16px 24px;
+}
+
+.customerCancelButton,
+.customerSubmitButton {
+  min-width: 76px;
+  min-height: 36px;
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.customerCancelButton {
+  background: #fff;
+  color: #455a64;
+}
+
+.customerCancelButton:hover {
+  background: #f2f5f6;
+}
+
+.customerSubmitButton {
+  border-color: #455a64;
+  background: #455a64;
+  color: #fff;
+}
+
+.customerTableScroll {
+  overflow-x: auto;
+}
+
+.customerTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  color: #34434a;
+  font-size: 14px;
+  text-align: left;
+}
+
+.customerTable th {
+  height: 44px;
+  border-top: 1px solid #e2e8eb;
+  border-bottom: 1px solid #e2e8eb;
+  background: #f8fafb;
+  padding: 0 20px;
+  color: #52636c;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.customerTable td {
+  border-bottom: 1px solid #edf0f2;
+  padding: 14px 20px;
+}
+
+.customerName {
+  font-weight: 600;
+}
+
+.customerInactiveRow {
+  background: #fafbfc;
+  color: #687780;
+}
+
+.customerInactiveRow .customerName {
+  color: #687780;
+}
+
+.customerPositiveBalance { color: #2763a5; font-weight: 700; }
+.customerNegativeBalance { color: #b83d3d; font-weight: 700; }
+.customerZeroBalance { color: #34434a; }
+
+.customerPaymentBadge {
+  display: inline-block;
+  border: 1px solid #cbdbe2;
+  border-radius: 3px;
+  background: #edf4f6;
+  padding: 3px 7px;
+  color: #344e5a;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.customerPaymentBadge:hover { background: #dfecef; }
+
+.customerTradeModal,
+.customerTradeEntryModal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  max-height: calc(100dvh - 32px);
+  margin: 0;
+  transform: translate(-50%, -50%);
+  overflow-y: auto;
+  border: 1px solid #cbd5da;
+  border-radius: 6px;
+  background: #fff;
+  color: #25343b;
+  box-shadow: 0 18px 48px rgb(22 37 45 / 22%);
+}
+
+.customerTradeModal { width: min(980px, calc(100vw - 32px)); }
+.customerTradeEntryModal { width: min(520px, calc(100vw - 32px)); }
+.customerTradeModal::backdrop,
+.customerTradeEntryModal::backdrop { background: rgb(15 23 42 / 42%); }
+.customerTradeHeader { display: flex; min-height: 58px; align-items: center; gap: 14px; border-bottom: 1px solid #e2e8eb; padding: 0 24px; }
+.customerTradeHeader h2 { font-size: 19px; font-weight: 700; white-space: nowrap; }
+.customerTradeBack { width: 32px; height: 32px; border-radius: 4px; color: #455a64; font-size: 23px; }
+.customerTradeBack:hover { background: #f2f5f6; }
+.customerTradeCustomer { margin-left: auto; color: #52636c; font-size: 15px; font-weight: 600; text-align: right; }
+.customerTradeBody { padding: 24px; }
+.customerTradeSummary { display: flex; align-items: baseline; gap: 16px; font-size: 15px; }
+.customerTradeSummary strong { font-size: 25px; }
+.customerTradeActions { display: flex; justify-content: flex-end; gap: 8px; margin: 8px 0 20px; }
+.customerTradeActions button,
+.customerTradeFilters button { min-height: 36px; border: 1px solid #cbd5da; border-radius: 4px; background: #fff; padding: 0 14px; color: #344e5a; font-size: 13px; font-weight: 600; }
+.customerTradeActions button:hover,
+.customerTradeFilters button:hover { background: #f2f5f6; }
+.customerTradeActions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.customerTradeFilters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid #e2e8eb; padding: 16px 0; font-size: 13px; }
+.customerTradeFilters input { height: 36px; border: 1px solid #cbd5da; border-radius: 4px; padding: 0 8px; color: #25343b; font: inherit; }
+.customerTradeError { margin-bottom: 12px; color: #bc3535; font-size: 13px; }
+.customerTradeTableScroll { max-height: min(48vh, 490px); overflow: auto; }
+.customerTradeTable { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 13px; text-align: left; }
+.customerTradeTable th { position: sticky; top: 0; border-top: 1px solid #e2e8eb; border-bottom: 1px solid #e2e8eb; background: #f8fafb; padding: 12px; color: #52636c; font-weight: 600; white-space: nowrap; }
+.customerTradeTable td { border-bottom: 1px solid #edf0f2; padding: 12px; vertical-align: top; }
+.customerTradeTable th:nth-child(3),
+.customerTradeTable th:nth-child(4),
+.customerTradeTable th:nth-child(5),
+.customerTradeTable td:nth-child(3),
+.customerTradeTable td:nth-child(4),
+.customerTradeTable td:nth-child(5) { text-align: right; white-space: nowrap; }
+.customerTradeEmpty { height: 150px; color: #78878f; text-align: center !important; }
+.customerTradeMemo { display: block; margin-top: 3px; color: #78878f; font-size: 12px; }
+.customerTradeEntryInfo { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.customerTradeEntryInfo strong { text-align: right; }
+.customerTradeMethods { border: 0; }
+.customerTradeMethods legend { margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.customerTradeMethods > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.customerTradeMethods label { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cbd5da; border-radius: 4px; padding: 8px 10px; font-size: 13px; cursor: pointer; }
+.customerTradeMethods input { accent-color: #455a64; }
+.customerTradeEntryModal .customerFieldTextarea { min-height: 80px; }
+.customerTradeModal button:focus-visible,
+.customerTradeEntryModal button:focus-visible,
+.customerTradeEntryModal input:focus-visible,
+.customerTradeEntryModal select:focus-visible { outline: 2px solid #b7cbd4; outline-offset: 1px; }
+
+.customerEmpty {
+  height: 180px;
+  color: #78878f;
+  text-align: center;
+}
+
+.staffModal { width: min(560px, calc(100vw - 32px)); }
+.staffFormSection { display: flex; flex-direction: column; gap: 12px; }
+.staffFormSection + .staffFormSection { border-top: 1px solid #e2e8eb; padding-top: 18px; }
+.staffFormSection h3 { color: #344e5a; font-size: 15px; font-weight: 700; }
+.staffHint, .staffMuted { color: #78878f; font-size: 12px; }
+.staffStatusActive, .staffStatusInactive { display: inline-block; border-radius: 3px; padding: 3px 7px; font-size: 12px; font-weight: 600; }
+.staffStatusActive { background: #e8f3ec; color: #276647; }
+.staffStatusInactive { background: #f2f3f4; color: #6a7780; }
+.staffEditButton, .staffChangeButton { border: 1px solid #cbd5da; border-radius: 4px; background: #fff; padding: 6px 10px; color: #344e5a; font-size: 13px; font-weight: 600; }
+.staffEditButton:hover, .staffChangeButton:hover { background: #f2f5f6; }
+.staffChangeButton { align-self: flex-start; }
+
+.staffToggle { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 16px; color: #25343b; font-size: 14px; font-weight: 600; cursor: pointer; }
+.staffToggleControl { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.staffToggleControl input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.staffToggleTrack { position: relative; display: inline-block; width: 44px; height: 24px; border-radius: 999px; background: #aebac0; transition: background 150ms ease; }
+.staffToggleTrack::after { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgb(22 37 45 / 20%); content: ""; transition: transform 150ms ease; }
+.staffToggleControl input:checked + .staffToggleTrack { background: #455a64; }
+.staffToggleControl input:checked + .staffToggleTrack::after { transform: translateX(20px); }
+.staffToggleControl input:focus-visible + .staffToggleTrack { outline: 2px solid #455a64; outline-offset: 3px; }
+.staffToggleValue { min-width: 28px; color: #52636c; font-size: 12px; }
+.staffToggleDisabled { opacity: 0.45; cursor: not-allowed; }
+
+.staffModalFooter { justify-content: space-between; }
+.staffModalFooterActions { display: flex; gap: 8px; margin-left: auto; }
+.staffDeleteButton { min-width: 76px; min-height: 36px; border: 1px solid #d6a3a3; border-radius: 4px; background: #fff; padding: 0 14px; color: #a83a3a; font-size: 14px; font-weight: 600; }
+.staffDeleteButton:hover { background: #fff3f3; }
+.staffDeleteButton:disabled { cursor: not-allowed; opacity: 0.65; }
+.staffDeleteConfirm { width: min(430px, calc(100vw - 32px)); }
+.staffDeleteConfirmText { display: flex; flex-direction: column; gap: 10px; padding: 24px; color: #52636c; font-size: 14px; line-height: 1.5; }
+.staffDeleteConfirmText strong { color: #25343b; font-size: 16px; }
+.staffDeleteConfirmButton { min-width: 76px; min-height: 36px; border: 1px solid #ad4040; border-radius: 4px; background: #ad4040; padding: 0 14px; color: #fff; font-size: 14px; font-weight: 600; }
+.staffDeleteConfirmButton:hover { background: #973434; }
+.staffDeleteConfirmButton:disabled { cursor: not-allowed; opacity: 0.65; }
+
+.welcome {
+  border: 1px solid #dce3e7;
+  background: #fff;
+  padding: 30px 32px;
+}
+
+.welcome h2 {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.welcome p {
+  margin-top: 10px;
+  color: #60717a;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 176px minmax(0, 1fr);
+  }
+
+  .paymentFeatureGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .main {
+    padding: 28px 24px 48px;
+  }
+}
+
+@media (max-width: 620px) {
+  .header {
+    padding: 0 18px;
+  }
+
+  .userArea {
+    min-width: 0;
+  }
+
+  .workspace {
+    grid-template-columns: 136px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 16px 8px;
+  }
+
+  .main {
+    padding: 24px 16px 40px;
+  }
+
+  .welcome {
+    padding: 22px 20px;
+  }
+}
