@@ -1,0 +1,14 @@
+services:
+  tdk-pos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tdk-pos:1.0.0
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./public/uploads/menu:/app/public/uploads/menu
+      - ./storage/receipt-logo:/app/storage/receipt-logo

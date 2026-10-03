@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+.env*
+!.env.production.example
+storage
+public/uploads/menu
+coverage
+*.tsbuildinfo
+npm-debug.log*
+README.md
+sql
