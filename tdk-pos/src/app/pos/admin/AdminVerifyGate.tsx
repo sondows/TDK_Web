@@ -32,6 +32,7 @@ export default function AdminVerifyGate() {
   const [busy, setBusy] = useState(false);
   const [showPinError, setShowPinError] = useState(false);
   const verificationRequestId = useRef(0);
+  const verificationInFlight = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -58,6 +59,7 @@ export default function AdminVerifyGate() {
 
   const resetPinVerification = (nextPin = "") => {
     verificationRequestId.current += 1;
+    verificationInFlight.current = false;
     setPin(nextPin);
     setPinStatus("idle");
     setMessage("");
@@ -84,6 +86,7 @@ export default function AdminVerifyGate() {
       }
       router.refresh();
     } catch {
+      resetPinVerification();
       setMessage("관리자 확인 중 네트워크 오류가 발생했습니다.");
     } finally {
       setBusy(false);
@@ -91,6 +94,8 @@ export default function AdminVerifyGate() {
   };
 
   const verifyPin = (owner: Owner, pinValue: string) => {
+    if (verificationInFlight.current) return;
+    verificationInFlight.current = true;
     const requestId = ++verificationRequestId.current;
     setPinStatus("checking");
 
@@ -107,12 +112,14 @@ export default function AdminVerifyGate() {
           return;
         }
 
+        verificationInFlight.current = false;
         setPin("");
         setPinStatus("idle");
         setShowPinError(true);
       })
       .catch(() => {
         if (requestId === verificationRequestId.current) {
+          verificationInFlight.current = false;
           setPinStatus("idle");
           setMessage("PIN 검증 중 네트워크 오류가 발생했습니다.");
         }
@@ -127,7 +134,7 @@ export default function AdminVerifyGate() {
   };
 
   const updatePin = (nextPin = "") => {
-    if (busy || pinStatus === "checking") return;
+    if (busy || pinStatus === "checking" || verificationInFlight.current) return;
     resetPinVerification(nextPin);
     if (selectedOwner && nextPin.length === PIN_LENGTH) verifyPin(selectedOwner, nextPin);
   };
