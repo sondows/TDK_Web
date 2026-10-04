@@ -61,7 +61,7 @@ if errorlevel 1 goto failed
 
 echo [INFO] Deploying origin/main on NAS...
 set "FAILED_STAGE=NAS SSH / deployment"
-ssh -tt sondows@192.168.0.83 "cd /volume1/TDK-POS || { echo [FAIL] NAS repository directory; exit 21; }; git fetch origin || { echo [FAIL] NAS git fetch; exit 22; }; git checkout main || { echo [FAIL] NAS git checkout; exit 23; }; git reset --hard origin/main || { echo [FAIL] NAS git reset; exit 24; }; cd /volume1/TDK-POS/tdk-pos || { echo [FAIL] NAS compose directory; exit 25; }; sudo docker compose up -d --build || { echo [FAIL] Docker compose build/start; exit 26; }; sudo docker compose ps || { echo [FAIL] Docker compose ps; exit 27; }"
+ssh -tt sondows@192.168.0.83 "export PATH=/opt/bin:/opt/sbin:$PATH || { echo [FAIL] NAS Entware PATH; exit 20; }; cd /volume1/TDK-POS || { echo [FAIL] NAS repository directory; exit 21; }; git fetch origin || { echo [FAIL] NAS git fetch; exit 22; }; git checkout main || { echo [FAIL] NAS git checkout; exit 23; }; git reset --hard origin/main || { echo [FAIL] NAS git reset; exit 24; }; cd /volume1/TDK-POS/tdk-pos || { echo [FAIL] NAS compose directory; exit 25; }; sudo docker compose up -d --build || { echo [FAIL] Docker compose build/start; exit 26; }; sudo docker compose ps || { echo [FAIL] Docker compose ps; exit 27; }"
 if errorlevel 1 goto failed
 
 echo [OK] Deployment finished. Check the tdk-pos status above.
