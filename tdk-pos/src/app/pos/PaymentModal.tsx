@@ -71,7 +71,7 @@ export default function PaymentModal({
   tableId: number;
   tableNo: string;
   close: () => void;
-  completed: () => void;
+  completed: (hasCashPayment: boolean) => void;
 }) {
   const [state, setState] = useState<State | null>(null);
   const [input, setInput] = useState("");
@@ -143,7 +143,7 @@ export default function PaymentModal({
       }
       setInput("");
       if (result.completed) {
-        completed();
+        completed(Boolean(state?.payments.some((payment) => payment.methodCode === "CASH")));
         return { ok: true };
       }
       if (result.state) {

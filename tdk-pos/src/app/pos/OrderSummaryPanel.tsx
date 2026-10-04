@@ -167,7 +167,7 @@ export default function OrderSummaryPanel({
   selectionVersion: number;
   onBlockingUiChange: (open: boolean) => void;
   onCancellationSuccess: () => void;
-  onPaymentCompleted: () => void;
+  onPaymentCompleted: (hasCashPayment: boolean) => void;
   party: {
     sessionIds: number[];
     tableNos: string[];
@@ -836,9 +836,9 @@ export default function OrderSummaryPanel({
             setPaymentOpen(false);
             onCancellationSuccess();
           }}
-          completed={() => {
+          completed={(hasCashPayment) => {
             setPaymentOpen(false);
-            onPaymentCompleted();
+            onPaymentCompleted(hasCashPayment);
           }}
           tableId={selected.tableId}
           tableNo={selected.tableNo}

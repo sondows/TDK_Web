@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG NEXT_PUBLIC_DEVICE_AGENT_URL=http://127.0.0.1:5168
+ENV NEXT_PUBLIC_DEVICE_AGENT_URL=$NEXT_PUBLIC_DEVICE_AGENT_URL
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime

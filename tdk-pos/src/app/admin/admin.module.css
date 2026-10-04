@@ -652,6 +652,29 @@
   line-height: 1.6;
 }
 
+.dashboardSummary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.dashboardStat { display: flex; flex-direction: column; gap: 10px; border: 1px solid #dce3e7; background: #fff; padding: 20px 22px; }
+.dashboardStat span { color: #60717a; font-size: 13px; }
+.dashboardStat strong { color: #344e5a; font-size: 22px; font-weight: 700; }
+.dashboardSales { border: 1px solid #dce3e7; background: #fff; }
+.dashboardSalesHeading { display: flex; align-items: center; justify-content: space-between; padding: 20px; }
+.dashboardSalesHeading h2 { font-size: 18px; font-weight: 700; }
+.dashboardSalesHeading span { color: #60717a; font-size: 13px; }
+.dashboardSaleRow { cursor: pointer; }
+.dashboardSaleRow:hover, .dashboardSaleRow:focus-visible { background: #f2f5f6; outline: 2px solid #b7cbd4; outline-offset: -2px; }
+.dashboardError { padding: 12px 20px; color: #bc3535; font-size: 13px; }
+.dashboardDetail { width: min(780px, calc(100vw - 32px)); }
+.dashboardHeaderActions { display: flex; align-items: center; gap: 12px; }
+.dashboardDetailBody { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
+.dashboardDetailBody h3 { color: #344e5a; font-size: 15px; font-weight: 700; }
+.dashboardFacts, .dashboardAmounts { display: flex; flex-direction: column; gap: 10px; }
+.dashboardFacts div, .dashboardAmounts div, .dashboardPayments div { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.dashboardFacts dt, .dashboardAmounts dt { color: #60717a; }
+.dashboardFacts dd, .dashboardAmounts dd { font-weight: 600; text-align: right; }
+.dashboardAmounts { border-top: 1px solid #e2e8eb; padding-top: 16px; }
+.dashboardPayments { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 620px) { .dashboardSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dashboardStat { padding: 16px; } .dashboardStat strong { font-size: 18px; } }
+
 @media (max-width: 900px) {
   .workspace {
     grid-template-columns: 176px minmax(0, 1fr);

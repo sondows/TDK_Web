@@ -18,6 +18,7 @@ import {
   tableSessions,
 } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
@@ -78,7 +79,7 @@ async function ensurePosAccess() {
 
 export async function GET(request: Request) {
   try {
-    if (!(await ensurePosAccess())) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
+    if (!(await ensurePosAccess()) && !(await getCurrentAdminStaff())) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
     const url = new URL(request.url);
     const checkoutId = Number(url.searchParams.get("checkoutId"));
     if (Number.isInteger(checkoutId) && checkoutId > 0) return detailResponse(checkoutId);

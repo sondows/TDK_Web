@@ -366,11 +366,12 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 .pos-footer-scroll {
   width: calc(100% - 3rem);
   margin-inline: 1.5rem;
+  padding-inline: 0.75rem;
 }
 
 .pos-footer-scroll > button {
   display: flex;
-  flex: 0 0 calc((100% - 2.5rem) / 6);
+  flex: 0 0 calc((100% - 2.25rem) / 7);
   min-width: 0;
   align-items: center;
   justify-content: center;
@@ -1075,16 +1076,25 @@ section[aria-labelledby="quantity-modal-title"][data-expanded="true"] button[cla
   box-shadow: none;
 }
 
-/* QuantityModal information layout: intentionally scoped to the modal's ARIA id. */
-section[aria-labelledby="quantity-modal-title"] div:has(> h2#quantity-modal-title) {
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  background: #f8fafc;
-  padding: 0.625rem 0.75rem;
+/* Keep the menu title beside the fixed-size back button; the price stays at the right. */
+section[aria-labelledby="quantity-modal-title"] > header > div:first-child {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
-section[aria-labelledby="quantity-modal-title"] div:has(> h2#quantity-modal-title) > strong {
-  font-size: 1rem;
+section[aria-labelledby="quantity-modal-title"] > header > div:first-child > button {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+}
+
+section[aria-labelledby="quantity-modal-title"] > header > div:first-child > h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+section[aria-labelledby="quantity-modal-title"] > header > div:last-child {
+  flex: 0 0 auto;
 }
 
 section[aria-labelledby="quantity-modal-title"] aside > div.mt-4.space-y-2 {

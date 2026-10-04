@@ -41,6 +41,16 @@ internal static class PrinterTest
 
     public static uint Print(string printerName, SaleReceipt receipt) => PrintCore(printerName, receipt);
 
+    // SRP-350/352III command manual: DLE DC4 1 m t drives DK pin 2 (m=0)
+    // for t * 100 ms. t=1 is the documented minimum pulse (100 ms).
+    // No feed, raster, initialization, or cutter bytes are sent.
+    public static uint OpenCashDrawer(string printerName)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new InvalidOperationException("현금서랍은 Windows 프린터에서만 열 수 있습니다.");
+        return SendToWindowsPrinter(printerName, [0x10, 0x14, 0x01, 0x00, 0x01], "TDK POS cash drawer", startPage: false);
+    }
+
     private static uint PrintCore(string printerName, SaleReceipt receipt)
     {
         if (!OperatingSystem.IsWindows())
@@ -355,7 +365,7 @@ internal static class PrinterTest
             throw LastError("영수증 글자 그리기");
     }
 
-    private static uint SendToWindowsPrinter(string printerName, byte[] command, string documentName)
+    private static uint SendToWindowsPrinter(string printerName, byte[] command, string documentName, bool startPage = true)
     {
         if (!Native.OpenPrinterW(printerName, out var printer, IntPtr.Zero))
             throw LastError($"프린터 '{printerName}' 열기");
@@ -384,7 +394,7 @@ internal static class PrinterTest
 
             try
             {
-                if (!Native.StartPagePrinter(printer)) throw LastError("인쇄 페이지 시작");
+                if (startPage && !Native.StartPagePrinter(printer)) throw LastError("인쇄 페이지 시작");
                 try
                 {
                     if (!Native.WritePrinter(printer, command, (uint)command.Length, out var written))
@@ -394,7 +404,7 @@ internal static class PrinterTest
                 }
                 finally
                 {
-                    if (!Native.EndPagePrinter(printer)) throw LastError("인쇄 페이지 종료");
+                    if (startPage && !Native.EndPagePrinter(printer)) throw LastError("인쇄 페이지 종료");
                 }
             }
             finally

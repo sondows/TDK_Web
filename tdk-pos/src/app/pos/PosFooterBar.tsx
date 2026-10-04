@@ -9,7 +9,7 @@ export default function PosFooterBar({ children }: { children: ReactNode }) {
   return <section className="pos-footer-bar relative col-span-2 min-w-0 rounded-2xl bg-white p-3 shadow-sm">
     <div
       aria-label="POS 기능"
-      className="horizontal-select-scroll pos-footer-scroll flex min-w-0 flex-nowrap gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-x]"
+      className="horizontal-select-scroll pos-footer-scroll flex min-w-0 flex-nowrap gap-1.5 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-x]"
       ref={ref}
       role="group"
       {...handlers}
