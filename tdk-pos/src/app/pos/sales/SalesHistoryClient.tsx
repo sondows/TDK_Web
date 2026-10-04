@@ -7,9 +7,12 @@ import { formatMoney } from "@/lib/format-money";
 import { printReceipt as printLocalReceipt } from "@/lib/receipt-print";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SalesListResponse } from "@/lib/sales-types";
 import PosSubHeader from "../PosSubHeader";
+import AdminBackLink from "../admin/AdminBackLink";
 import PinInput from "@/components/PinInput";
+import PinKeypad from "@/components/PinKeypad";
+import PinAuthPanel from "@/components/PinAuthPanel";
 
-type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
+type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; discountAmount: number; discountCount: number; cancelledAmount: number; cardAmount: number; cardCount: number; cashAmount: number; cashCount: number; otherAmount: number; otherCount: number; tableCount: number; knownGuestCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
 type Employee = { staffId: number; staffCode: string; name: string; role: string; hasPin: boolean };
 
 const statusStyle: Record<SaleDisplayStatus, { label: string; className: string }> = {
@@ -65,7 +68,11 @@ const shiftMonth = (month: string, amount: number) => {
   value.setUTCMonth(value.getUTCMonth() + amount);
   return dateText(value).slice(0, 7);
 };
-const displayDate = (value: string | null) => value ? `${value.slice(0, 4)}. ${value.slice(5, 7)}. ${value.slice(8, 10)}.` : "날짜를 선택하세요";
+const weekdays = ["일", "월", "화", "수", "목", "금", "토"] as const;
+const displayDate = (value: string | null) => value
+  ? `${value.slice(0, 4)}. ${value.slice(5, 7)}. ${value.slice(8, 10)}. (${weekdays[new Date(`${value}T00:00:00Z`).getUTCDay()]})`
+  : "날짜를 선택하세요";
+const displayDuration = (minutes: number) => minutes < 60 ? `${minutes}분` : `${Math.floor(minutes / 60)}시간${minutes % 60 ? ` ${minutes % 60}분` : ""}`;
 
 function presetPeriod(key: Exclude<PeriodKey, "custom">, today: string): Period {
   if (key === "today") return { key, startDate: today, endDate: today };
@@ -75,21 +82,20 @@ function presetPeriod(key: Exclude<PeriodKey, "custom">, today: string): Period 
   }
   const current = new Date(`${today}T00:00:00Z`);
   if (key === "previousMonth") {
-    const currentMonthStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1));
-    const previousMonthStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - 1, 1));
-    return { key, startDate: dateText(previousMonthStart), endDate: dateText(new Date(currentMonthStart.getTime() - 24 * 60 * 60 * 1000)) };
+    const previousMonthYear = current.getUTCMonth() === 0 ? current.getUTCFullYear() - 1 : current.getUTCFullYear();
+    const previousMonth = (current.getUTCMonth() + 11) % 12;
+    const lastDay = new Date(Date.UTC(previousMonthYear, previousMonth + 1, 0)).getUTCDate();
+    const selected = dateText(new Date(Date.UTC(previousMonthYear, previousMonth, Math.min(current.getUTCDate(), lastDay))));
+    return { key, startDate: selected, endDate: selected };
   }
-  const daysSinceMonday = (current.getUTCDay() + 6) % 7;
-  const thisMonday = shiftDate(today, -daysSinceMonday);
-  return { key, startDate: shiftDate(thisMonday, -7), endDate: shiftDate(thisMonday, -1) };
+  const previousWeek = shiftDate(today, -7);
+  return { key, startDate: previousWeek, endDate: previousWeek };
 }
 
-export default function SalesHistoryClient({ date }: { date: string }) {
+export default function SalesHistoryClient({ date, closeToPos = false }: { date: string; closeToPos?: boolean }) {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>(() => presetPeriod("today", date));
   const [customOpen, setCustomOpen] = useState(false);
-  const [customStartDate, setCustomStartDate] = useState<string | null>(null);
-  const [customEndDate, setCustomEndDate] = useState<string | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(date.slice(0, 7));
   const [data, setData] = useState<SalesListResponse | null>(null);
   const [detail, setDetail] = useState<SaleDetail | null>(null);
@@ -108,6 +114,7 @@ export default function SalesHistoryClient({ date }: { date: string }) {
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryError, setSummaryError] = useState("");
   const summaryRequestId = useRef(0);
+  const summaryAuthInFlight = useRef(false);
 
   const closeSummary = () => {
     summaryRequestId.current++;
@@ -117,6 +124,7 @@ export default function SalesHistoryClient({ date }: { date: string }) {
     setSelectedEmployee("");
     setSummaryError("");
     setSummaryBusy(false);
+    summaryAuthInFlight.current = false;
   };
 
   const openSummary = async () => {
@@ -133,7 +141,8 @@ export default function SalesHistoryClient({ date }: { date: string }) {
   };
 
   const authenticateSummary = async (pin: string) => {
-    if (!selectedEmployee || summaryBusy || pin.length !== 4) return;
+    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || pin.length !== 4) return;
+    summaryAuthInFlight.current = true;
     const requestId = ++summaryRequestId.current;
     setSummaryBusy(true);
     setSummaryError("");
@@ -148,7 +157,24 @@ export default function SalesHistoryClient({ date }: { date: string }) {
       if (!response.ok || !result.success || !result.summary) setSummaryError(result.message ?? "직원 인증에 실패했습니다.");
       else setSummary(result.summary);
     } catch { if (requestId === summaryRequestId.current) { setSummaryPin(""); setSummaryError("매출현황을 불러올 수 없습니다."); } }
-    finally { if (requestId === summaryRequestId.current) setSummaryBusy(false); }
+    finally {
+      if (requestId === summaryRequestId.current) {
+        summaryAuthInFlight.current = false;
+        setSummaryBusy(false);
+      }
+    }
+  };
+
+  const updateSummaryPin = (nextPin: string) => {
+    if (summaryBusy || summaryAuthInFlight.current) return;
+    const normalizedPin = nextPin.slice(0, 4);
+    setSummaryPin(normalizedPin);
+    if (normalizedPin.length === 4) void authenticateSummary(normalizedPin);
+  };
+
+  const appendSummaryPin = (digit: string) => {
+    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || summaryPin.length >= 4) return;
+    updateSummaryPin(`${summaryPin}${digit}`);
   };
 
   useEffect(() => {
@@ -172,25 +198,12 @@ export default function SalesHistoryClient({ date }: { date: string }) {
     setPeriod(presetPeriod(key, date));
   };
 
-  const applyCustomPeriod = () => {
-    if (!customStartDate || !customEndDate) return;
+  const selectCalendarDate = (selectedDate: string) => {
     closeSummary();
     setError("");
-    if (customStartDate !== period.startDate || customEndDate !== period.endDate) setLoading(true);
-    setPeriod({ key: "custom", startDate: customStartDate, endDate: customEndDate });
+    setLoading(true);
+    setPeriod({ key: "custom", startDate: selectedDate, endDate: selectedDate });
     setCustomOpen(false);
-  };
-
-  const selectCustomDate = (selectedDate: string) => {
-    if (!customStartDate || customEndDate) {
-      setCustomStartDate(selectedDate);
-      setCustomEndDate(null);
-    } else if (selectedDate < customStartDate) {
-      setCustomEndDate(customStartDate);
-      setCustomStartDate(selectedDate);
-    } else {
-      setCustomEndDate(selectedDate);
-    }
   };
   const calendarYear = Number(calendarMonth.slice(0, 4));
   const calendarMonthNumber = Number(calendarMonth.slice(5, 7));
@@ -240,15 +253,16 @@ export default function SalesHistoryClient({ date }: { date: string }) {
   const showOrderDates = new Set(data?.sales.map(sale => orderDate(sale.orderedAt).key) ?? []).size > 1;
 
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-slate-100 p-4 text-slate-900">
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
-        <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={() => router.push("/pos")} title="판매내역" trailing={<>
-          <div className="flex min-w-0 items-baseline justify-center gap-2 whitespace-nowrap" title={period.startDate === period.endDate ? displayDate(period.startDate) : `${displayDate(period.startDate)} ~ ${displayDate(period.endDate)}`}>
-            <span className="shrink-0 text-lg font-bold text-white/80">조회기간</span>
-            <strong className="min-w-0 truncate text-xl font-extrabold text-white">{displayDate(period.startDate)}{period.startDate !== period.endDate && ` ~ ${displayDate(period.endDate)}`}</strong>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button className="min-h-12 rounded-xl border border-slate-200 bg-white px-4 text-base font-extrabold text-slate-700 hover:bg-slate-50" onClick={() => void openSummary()} type="button">매출현황</button>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 text-slate-900">
+      <section aria-labelledby="sales-history-title" aria-modal="true" className="flex h-[min(88dvh,960px)] max-h-[calc(100dvh-2rem)] w-[clamp(900px,60vw,1280px)] max-w-[calc(100vw-2rem)] min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
+        <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={() => closeToPos ? router.push("/pos") : router.back()} title="판매내역" titleId="sales-history-title" titleTrailing={
+          <button className="min-h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50" onClick={() => void openSummary()} type="button">매출현황</button>
+        } trailingClassName="shrink-0 gap-2 whitespace-nowrap" trailing={
+          <>
+            <div className="flex min-w-0 items-baseline justify-center gap-2 whitespace-nowrap" title={displayDate(period.startDate)}>
+              <span className="shrink-0 text-base font-bold text-white/80">조회일</span>
+              <strong className="min-w-0 truncate text-lg font-extrabold text-white">{displayDate(period.startDate)}</strong>
+            </div>
             {([
               ["previousMonth", "전월"],
               ["previousWeek", "전주"],
@@ -257,12 +271,10 @@ export default function SalesHistoryClient({ date }: { date: string }) {
               ["custom", "기간지정"],
             ] as const).map(([key, label]) => (
               <button
-                className={`min-h-12 rounded-xl px-4 text-base font-extrabold transition active:scale-[0.98] ${period.key === key ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+                className={`min-h-11 rounded-xl px-3 text-sm font-extrabold transition active:scale-[0.98] ${period.key === key ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
                 key={key}
                 onClick={() => {
                   if (key === "custom") {
-                    setCustomStartDate(period.key === "custom" ? period.startDate : null);
-                    setCustomEndDate(period.key === "custom" ? period.endDate : null);
                     setCalendarMonth((period.key === "custom" ? period.startDate : date).slice(0, 7));
                     setCustomOpen(true);
                   } else choosePreset(key);
@@ -272,10 +284,10 @@ export default function SalesHistoryClient({ date }: { date: string }) {
                 {label}
               </button>
             ))}
-          </div>
-        </>} trailingClassName="flex-1 justify-between gap-4" />
+          </>
+        } />
 
-        <div className="grid shrink-0 grid-cols-[135px_190px_minmax(0,1fr)_150px_180px_130px] items-center gap-4 border-b border-slate-200 px-6 py-3 text-base font-bold text-slate-500">
+        <div className="grid shrink-0 grid-cols-[110px_80px_minmax(0,1fr)_120px_120px_90px] items-center gap-2 border-b border-slate-200 px-4 py-3 text-sm font-bold text-slate-500">
           <span>주문시간</span><span>테이블</span><span>메뉴</span><span className="text-right">결제금액</span><span className="text-center">결제수단</span><span className="text-center">거래상태</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -285,7 +297,7 @@ export default function SalesHistoryClient({ date }: { date: string }) {
             const status = statusStyle[sale.status];
             return (
               <button
-                className="grid min-h-[72px] w-full grid-cols-[135px_190px_minmax(0,1fr)_150px_180px_130px] items-center gap-4 border-b border-slate-100 px-6 text-left text-lg transition hover:bg-blue-50 active:bg-blue-100"
+                className="grid min-h-[72px] w-full grid-cols-[110px_80px_minmax(0,1fr)_120px_120px_90px] items-center gap-2 border-b border-slate-100 px-4 text-left text-base transition hover:bg-blue-50 active:bg-blue-100"
                 key={sale.checkoutId}
                 onClick={() => void openDetail(sale.checkoutId)}
                 type="button"
@@ -305,20 +317,52 @@ export default function SalesHistoryClient({ date }: { date: string }) {
         {error && <p className="shrink-0 border-t border-red-100 bg-red-50 px-6 py-3 font-bold text-red-600">{error}</p>}
       </section>
       {detail && <SaleDetailDialog sale={detail} close={() => { setDetail(null); setPrintSuccess(""); }} print={() => void printReceipt(detail.checkoutId)} printing={printingCheckoutId === detail.checkoutId} printSuccess={printSuccess} />}
-      {summaryOpen && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
-        <PosSubHeader onBack={closeSummary} title="매출현황" trailing={<p className="text-lg font-bold text-white/90">{displayDate(period.startDate)} ~ {displayDate(period.endDate)}</p>} />
-        <div className="min-h-0 flex-1 overflow-y-auto p-7">{summary ? <div className="space-y-3 text-xl">
-          {([ ["총 매출", `${formatMoney(summary.grossSales)}원`], ["순 매출", `${formatMoney(summary.netSales)}원`], ["거래", `${summary.transactionCount}건`], ["취소", `${summary.cancellationCount}건`], ["평균 테이블 단가", summary.tableAverage === null ? "자료 없음" : `${formatMoney(summary.tableAverage)}원`], ["평균 객단가", summary.guestAverage === null ? "자료 불완전" : `${formatMoney(summary.guestAverage)}원`], ["총 이용인원", summary.guestCount === null ? "자료 불완전" : `${summary.guestCount}명`], ["평균 테이블 이용인원", summary.tableGuestAverage === null ? "자료 불완전" : `${summary.tableGuestAverage}명`], ["평균 테이블 이용시간", summary.durationMinutes === null ? "자료 불완전" : `${summary.durationMinutes}분`] ] as const).map(([label, value]) => <div className="flex justify-between gap-4 border-b pb-3" key={label}><span className="font-bold text-slate-600">{label}</span><strong>{value}</strong></div>)}
-          {summary.incompleteGuestCount > 0 && <p className="rounded-xl bg-amber-50 p-4 text-base font-bold text-amber-800">인원 기록이 없는 유효 거래 {summary.incompleteGuestCount}건이 있어 인원 관련 평균을 표시하지 않습니다.</p>}
-        </div> : <div><h3 className="text-xl font-bold">직원 인증</h3><div className="mt-4 flex flex-wrap gap-2">{employees.map(employee => <button className={`min-h-14 rounded-xl border px-5 text-lg font-bold ${selectedEmployee === employee.staffCode ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`} key={employee.staffId} onClick={() => { setSelectedEmployee(employee.staffCode); setSummaryPin(""); setSummaryError(""); }} type="button">{employee.name}</button>)}</div>{!employees.length && <p className="mt-4 text-slate-500">인증 가능한 직원이 없습니다.</p>}<div className="mt-5 max-w-sm"><PinInput ariaLabel="매출현황 직원 PIN" disabled={!selectedEmployee || summaryBusy} label="PIN" onChange={setSummaryPin} onComplete={value => void authenticateSummary(value)} value={summaryPin} /></div><div className="mt-3 grid max-w-sm grid-cols-3 gap-1">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "지움", "0", "초기화"].map(key => <button className="min-h-14 rounded-lg bg-slate-50 text-xl font-bold active:bg-blue-100 disabled:opacity-40" disabled={!selectedEmployee || summaryBusy || (summaryPin.length >= 4 && /^\d$/.test(key))} key={key} onClick={() => { if (key === "지움") setSummaryPin(summaryPin.slice(0, -1)); else if (key === "초기화") setSummaryPin(""); else { const next = `${summaryPin}${key}`.slice(0, 4); setSummaryPin(next); if (next.length === 4) void authenticateSummary(next); } }} type="button">{key}</button>)}</div><button className="mt-5 min-h-14 rounded-xl bg-blue-600 px-8 text-lg font-bold text-white disabled:bg-slate-300" disabled={!selectedEmployee || summaryPin.length !== 4 || summaryBusy} onClick={() => void authenticateSummary(summaryPin)} type="button">{summaryBusy ? "확인 중..." : "확인"}</button>{summaryError && <p className="mt-4 font-bold text-red-600">{summaryError}</p>}</div>}</div>
-        <footer className="border-t p-5"><button className="min-h-14 w-full rounded-xl bg-slate-100 text-xl font-bold" onClick={closeSummary} type="button">닫기</button></footer>
+      {summaryOpen && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className={`flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${summary ? "max-w-2xl" : "max-w-[336px]"}`} role="dialog">
+        <PosSubHeader onBack={closeSummary} title={summary ? "매출현황" : "관리자 확인"} trailing={summary ? <p className="text-lg font-bold text-white/90">{displayDate(period.startDate)}</p> : undefined} />
+        {summary ? <div className="min-h-0 flex-1 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3">
+          {([
+            ["총매출", `${formatMoney(summary.grossSales)} (${summary.transactionCount})`],
+            ["할인", `${formatMoney(summary.discountAmount)} (${summary.discountCount})`],
+            ["취소", `${formatMoney(summary.cancelledAmount)} (${summary.cancellationCount})`],
+            ["기타결제", `${formatMoney(summary.otherAmount)} (${summary.otherCount})`],
+            ["카드", `${formatMoney(summary.cardAmount)} (${summary.cardCount})`],
+            ["현금", `${formatMoney(summary.cashAmount)} (${summary.cashCount})`],
+            ["테이블", `${summary.tableAverage === null ? "—" : formatMoney(summary.tableAverage)} (${summary.tableCount})`],
+            ["인원", `${summary.incompleteGuestCount > 0 ? "자료 불완전" : summary.guestAverage === null ? "—" : formatMoney(summary.guestAverage)} (${summary.knownGuestCount})`],
+            ["테이블당인원", summary.tableGuestAverage === null ? "—" : `${Number(summary.tableGuestAverage.toFixed(1))}명`],
+            ["테이블이용시간", summary.durationMinutes === null ? "—" : displayDuration(summary.durationMinutes)],
+          ] as const).map(([label, value]) => <div className="flex min-h-[64px] items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm" key={label}>
+            <span className="text-sm font-bold text-slate-600">{label}</span>
+            <strong className="whitespace-nowrap text-right text-base font-extrabold text-slate-900">{value}</strong>
+          </div>)}
+        </div>{summaryError && <p className="mt-4 font-bold text-red-600">{summaryError}</p>}</div> : <PinAuthPanel
+          emptyMessage={!employees.length ? summaryError || "인증 가능한 관리자가 없습니다." : undefined}
+          footer={summaryError && employees.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{summaryError}</p> : undefined}
+          keypad={<PinKeypad
+            actionDisabled={!selectedEmployee || summaryBusy || summaryPin.length === 0}
+            digitDisabled={!selectedEmployee || summaryBusy || summaryPin.length >= 4}
+            onBackspace={() => updateSummaryPin(summaryPin.slice(0, -1))}
+            onClear={() => updateSummaryPin("")}
+            onDigit={appendSummaryPin}
+          />}
+          label="관리자"
+          onSelect={employee => { setSelectedEmployee(employee.staffCode); updateSummaryPin(""); setSummaryError(""); }}
+          people={employees}
+          pinInput={<PinInput ariaLabel="매출현황 관리자 PIN" className={selectedEmployee ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={!selectedEmployee || summaryBusy} keypadAligned onChange={updateSummaryPin} value={summaryPin} />}
+          selectedCode={selectedEmployee}
+          selectionDisabled={summaryBusy}
+          scrollablePeople
+        />}
       </section></div>}
       {printError && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl" role="alertdialog"><h2 className="text-2xl font-extrabold">영수증 출력 실패</h2><p className="mt-5 whitespace-pre-line text-lg text-slate-600">{printError}</p><button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-bold text-white" onClick={() => setPrintError("")} type="button">확인</button></section></div>}
       {detailLoading && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/25"><p className="rounded-xl bg-white px-7 py-5 text-lg font-bold shadow-xl">판매 상세를 불러오는 중...</p></div>}
       {customOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
           <section aria-labelledby="range-calendar-title" aria-modal="true" className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" role="dialog">
-            <h2 className="text-center text-2xl font-extrabold" id="range-calendar-title">기간지정</h2>
+            <div className="flex items-center gap-3">
+              <AdminBackLink ariaLabel="판매내역으로 돌아가기" title="판매내역으로 돌아가기" onNavigate={() => setCustomOpen(false)} size={38} iconSize={20} />
+              <h2 className="text-left text-2xl font-extrabold" id="range-calendar-title">기간지정</h2>
+            </div>
             <div className="mt-5 flex items-center justify-between">
               <button aria-label="이전 달" className="min-h-14 min-w-14 rounded-xl border border-slate-200 text-2xl font-bold active:bg-blue-100" onClick={() => setCalendarMonth(month => shiftMonth(month, -1))} type="button">‹</button>
               <strong className="text-2xl">{calendarYear}년 {calendarMonthNumber}월</strong>
@@ -330,23 +374,14 @@ export default function SalesHistoryClient({ date }: { date: string }) {
             <div className="grid grid-cols-7 gap-y-1">
               {calendarDays.map((day, index) => {
                 if (!day) return <span aria-hidden="true" className="min-h-14" key={`empty-${index}`} />;
-                const selected = day === customStartDate || day === customEndDate;
-                const inRange = !!customStartDate && !!customEndDate && day >= customStartDate && day <= customEndDate;
-                return <button aria-label={displayDate(day)} aria-pressed={selected} className={`flex min-h-14 items-center justify-center transition active:scale-95 ${inRange ? "bg-blue-100" : ""} ${day === customStartDate ? "rounded-l-full" : ""} ${day === customEndDate ? "rounded-r-full" : ""}`} key={day} onClick={() => selectCustomDate(day)} type="button"><span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${selected ? "bg-blue-600 text-white" : day === date ? "border-2 border-blue-400 text-blue-700" : "text-slate-800"}`}>{Number(day.slice(8))}</span></button>;
+                const selected = day === period.startDate;
+                return <button aria-label={displayDate(day)} aria-pressed={selected} className="flex min-h-14 items-center justify-center transition active:scale-95" key={day} onClick={() => selectCalendarDate(day)} type="button"><span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${selected ? "bg-blue-600 text-white" : day === date ? "border-2 border-blue-400 text-blue-700" : "text-slate-800"}`}>{Number(day.slice(8))}</span></button>;
               })}
-            </div>
-            <div aria-live="polite" className="mt-5 grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-slate-50 px-4 py-3"><span className="block text-sm font-bold text-slate-500">시작일</span><strong className="mt-1 block text-lg text-blue-700">{displayDate(customStartDate)}</strong></div>
-              <div className="rounded-xl bg-slate-50 px-4 py-3"><span className="block text-sm font-bold text-slate-500">종료일</span><strong className="mt-1 block text-lg text-blue-700">{displayDate(customEndDate)}</strong></div>
-            </div>
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <button className="min-h-14 rounded-xl bg-slate-100 text-lg font-bold text-slate-700" onClick={() => setCustomOpen(false)} type="button">취소</button>
-              <button className="min-h-14 rounded-xl bg-blue-600 text-lg font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={!customStartDate || !customEndDate} onClick={applyCustomPeriod} type="button">조회</button>
             </div>
           </section>
         </div>
       )}
-    </main>
+    </div>
   );
 }
 

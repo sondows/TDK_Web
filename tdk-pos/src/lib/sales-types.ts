@@ -47,6 +47,7 @@ export type SaleDetail = {
   }>;
   payments: Array<{
     paymentId: number;
+    paymentMethodId: number;
     method: string;
     methodCode: string;
     customerDisplayName: string | null;

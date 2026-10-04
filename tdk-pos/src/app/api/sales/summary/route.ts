@@ -1,7 +1,7 @@
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { checkoutItems, checkouts, orderItems, orders, payments, tableSessionMerges, tableSessions } from "@/db/schema";
+import { checkoutItems, checkouts, orderItems, orders, paymentMethods, payments, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyActiveStaffCredentials } from "@/lib/auth";
 import { canViewSales } from "@/lib/permissions";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
@@ -42,20 +42,23 @@ export async function POST(request: Request) {
     const range = dateRange(startDate, endDate);
     if (!range) return Response.json({ success: false, message: "조회기간을 확인해 주세요." }, { status: 400 });
 
-    const checkoutRows = await db.select({ id: checkouts.checkoutId, total: checkouts.totalAmount, status: checkouts.status })
+    const checkoutRows = await db.select({ id: checkouts.checkoutId, total: checkouts.totalAmount, discount: checkouts.discountAmount, status: checkouts.status })
       .from(checkouts)
       .where(sql`${checkouts.completedAt} >= ${range.start} AND ${checkouts.completedAt} < ${range.end}`);
     const ids = checkoutRows.map(row => row.id);
     if (!ids.length) return Response.json({ success: true, summary: {
       grossSales: 0, netSales: 0, transactionCount: 0, cancellationCount: 0,
+      discountAmount: 0, discountCount: 0, cancelledAmount: 0,
+      cardAmount: 0, cardCount: 0, cashAmount: 0, cashCount: 0, otherAmount: 0, otherCount: 0,
+      tableCount: 0, knownGuestCount: 0,
       tableAverage: null, guestAverage: null, guestCount: 0, tableGuestAverage: null,
       durationMinutes: null, incompleteGuestCount: 0,
     } }, { headers: { "Cache-Control": "no-store" } });
 
     const [paymentRows, sessionRows] = await Promise.all([
-      db.select({ checkoutId: payments.checkoutId, amount: payments.amount, appliedAmount: payments.appliedAmount, status: payments.status,
+      db.select({ checkoutId: payments.checkoutId, appliedAmount: payments.appliedAmount, methodType: paymentMethods.methodType, status: payments.status,
         cancelledAt: sql<string | null>`DATE_FORMAT(${payments.cancelledAt}, '%Y-%m-%d')` })
-        .from(payments).where(inArray(payments.checkoutId, ids)),
+        .from(payments).innerJoin(paymentMethods, eq(payments.paymentMethodId, paymentMethods.paymentMethodId)).where(inArray(payments.checkoutId, ids)),
       db.selectDistinct({ checkoutId: checkoutItems.checkoutId, sessionId: tableSessions.sessionId, groupId: tableSessions.groupId,
         adults: tableSessions.personCount, children: tableSessions.babyCount,
         openedAt: tableSessions.openedAt, closedAt: tableSessions.closedAt })
@@ -105,18 +108,34 @@ export async function POST(request: Request) {
     }
 
     let grossSales = 0, netSales = 0, transactionCount = 0, cancellationCount = 0;
+    let discountAmount = 0, discountCount = 0, cancelledAmount = 0;
+    let cardAmount = 0, cardCount = 0, cashAmount = 0, cashCount = 0, otherAmount = 0, otherCount = 0;
     let guestCount = 0, incompleteGuestCount = 0, durationTotal = 0, durationCount = 0;
+    for (const checkout of checkoutRows) {
+      const discount = won(checkout.discount);
+      discountAmount += discount;
+      if (discount > 0) discountCount++;
+    }
+    for (const payment of paymentRows) {
+      const amount = won(payment.appliedAmount);
+      if ((payment.status === "CANCELLED" || payment.status === "REFUNDED") && payment.cancelledAt && payment.cancelledAt >= startDate && payment.cancelledAt <= endDate) {
+        cancelledAmount += amount;
+        cancellationCount++;
+      }
+      if (payment.status !== "APPROVED") continue;
+      netSales += amount;
+      if (payment.methodType === "CARD") { cardAmount += amount; cardCount++; }
+      else if (payment.methodType === "CASH") { cashAmount += amount; cashCount++; }
+      else { otherAmount += amount; otherCount++; }
+    }
     for (const checkout of checkoutRows) {
       const relatedPayments = paymentsByCheckout.get(checkout.id) ?? [];
       const approved = relatedPayments.filter(row => row.status === "APPROVED").reduce((sum, row) => sum + won(row.appliedAmount), 0);
-      const cancelled = relatedPayments.filter(row => row.status === "CANCELLED" || row.status === "REFUNDED");
       const relatedSessions = sessionsByCheckout.get(checkout.id) ?? [];
       // A merged group paid with one checkout is one completed meal transaction.
-      transactionCount++;
       grossSales += won(checkout.total);
-      netSales += approved;
-      if (cancelled.some(row => row.cancelledAt && row.cancelledAt >= startDate && row.cancelledAt <= endDate)) cancellationCount++;
       if (approved <= 0) continue;
+      transactionCount++;
       const people = relatedSessions.reduce((sum, row) => sum + row.adults + row.children, 0);
       if (!relatedSessions.length || people <= 0) incompleteGuestCount++;
       else guestCount += people;
@@ -126,9 +145,11 @@ export async function POST(request: Request) {
         if (last >= first) { durationTotal += (last - first) / 60_000; durationCount++; }
       }
     }
-    const effectiveCount = checkoutRows.filter(row => (paymentsByCheckout.get(row.id) ?? []).some(payment => payment.status === "APPROVED")).length;
+    const effectiveCount = transactionCount;
     return Response.json({ success: true, summary: {
-      grossSales, netSales, transactionCount, cancellationCount,
+      grossSales, netSales, transactionCount, cancellationCount, discountAmount, discountCount, cancelledAmount,
+      cardAmount, cardCount, cashAmount, cashCount, otherAmount, otherCount,
+      tableCount: effectiveCount, knownGuestCount: guestCount,
       tableAverage: effectiveCount ? Math.round(netSales / effectiveCount) : null,
       guestAverage: guestCount && !incompleteGuestCount ? Math.round(netSales / guestCount) : null,
       guestCount: incompleteGuestCount ? null : guestCount,

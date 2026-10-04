@@ -57,7 +57,7 @@ function paymentLabel(payment: { methodCode: string; methodName: string; methodN
     TRANSFER: "이체",
     MEAL_TICKET: "후불식권",
     GIFT: "상품권",
-    OTHER: payment.note === "식권" ? "식권" : "기타결재",
+    OTHER: payment.note === "식권" ? "식권" : payment.methodName,
   };
   return labels[payment.methodCode] ?? payment.methodName;
 }
@@ -350,6 +350,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
       approvalNo: payments.approvalNo,
       paidAt: sql<string>`CONCAT(DATE_FORMAT(${payments.paidAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00')`,
       cancelledAt: sql<string | null>`CASE WHEN ${payments.cancelledAt} IS NULL THEN NULL ELSE CONCAT(DATE_FORMAT(${payments.cancelledAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00') END`,
+      paymentMethodId: payments.paymentMethodId,
       methodCode: paymentMethods.methodCode,
       methodName: paymentMethods.methodName,
       methodNameSnapshot: paymentOtherDetails.methodNameSnapshot,
@@ -410,6 +411,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
       .map(discount => ({ label: discount.label, amount: won(discount.amount) })),
     payments: relevantPayments.map((payment) => ({
       paymentId: payment.paymentId,
+      paymentMethodId: payment.paymentMethodId,
       method: paymentLabel(payment),
       methodCode: payment.methodCode,
       customerDisplayName: payment.methodCode === "CUSTOMER_PAYMENT"
