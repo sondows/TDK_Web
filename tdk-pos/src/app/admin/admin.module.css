@@ -545,12 +545,6 @@
   margin: 0;
 }
 
-.customerCouponSetting > p {
-  grid-column: 1 / -1;
-  margin: 0 0 0 24px;
-  font-size: 11px;
-}
-
 @media (max-width: 640px) {
   .customerInlineSetting {
     flex-wrap: wrap;
@@ -566,10 +560,6 @@
     margin-left: 18px;
   }
 
-  .customerCouponSetting > p {
-    grid-column: 1;
-    margin-left: 18px;
-  }
 }
 
 .customerFieldInput:focus-visible,
@@ -642,12 +632,20 @@
   text-align: left;
 }
 
+.customerTable th:first-child,
+.customerTable td:first-child { width: 34px; padding-right: 4px; padding-left: 8px; }
+.customerTable th:nth-child(3), .customerTable td:nth-child(3) { width: 115px; }
+.customerTable th:nth-child(4), .customerTable td:nth-child(4) { width: 150px; }
+.customerTable th:nth-child(5), .customerTable td:nth-child(5) { width: 105px; }
+.customerTable th:nth-child(6), .customerTable td:nth-child(6) { width: 100px; }
+.customerTable th:nth-child(7), .customerTable td:nth-child(7) { width: 72px; }
+
 .customerTable th {
   height: 44px;
   border-top: 1px solid #e2e8eb;
   border-bottom: 1px solid #e2e8eb;
   background: #f8fafb;
-  padding: 0 20px;
+  padding: 0 12px;
   color: #52636c;
   font-weight: 600;
   white-space: nowrap;
@@ -655,8 +653,37 @@
 
 .customerTable td {
   border-bottom: 1px solid #edf0f2;
-  padding: 14px 20px;
+  padding: 10px 12px;
 }
+
+.customerDragCell { text-align: center; }
+
+.customerDragHandle {
+  display: inline-flex;
+  width: 22px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #71828a;
+  cursor: grab;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  touch-action: none;
+  user-select: none;
+}
+
+.customerDragHandle:hover:not(:disabled) { background: #edf3f5; color: #344e5a; }
+.customerDragHandle:active:not(:disabled) { cursor: grabbing; }
+.customerDragHandle:disabled { cursor: not-allowed; opacity: 0.35; }
+.customerDraggingRow { background: #eef5f7; opacity: 0.65; }
+.customerDropBefore td { border-top: 2px solid #52717d; }
+.customerDropAfter td { border-bottom: 2px solid #52717d; }
+.customerTable td:nth-child(4) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.customerOrderError { margin: 0 0 8px; color: #bc3535; font-size: 12px; }
 
 .customerName {
   font-weight: 600;

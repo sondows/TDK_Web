@@ -10,11 +10,14 @@ var app = builder.Build();
 
 var drawerGate = new SemaphoreSlim(1, 1);
 var lastDrawerOpen = 0L;
+var shutdownRequested = 0;
 var allowedOrigins = app.Configuration.GetSection("CashDrawer:AllowedOrigins").Get<string[]>() ?? [];
 
 app.Use(async (context, next) =>
 {
-    if (!context.Request.Path.Equals("/cash-drawer/open", StringComparison.OrdinalIgnoreCase) &&
+    var isShutdownRequest = context.Request.Path.Equals("/system/shutdown", StringComparison.OrdinalIgnoreCase);
+    if (!isShutdownRequest &&
+        !context.Request.Path.Equals("/cash-drawer/open", StringComparison.OrdinalIgnoreCase) &&
         !context.Request.Path.Equals("/api/printer/receipt", StringComparison.OrdinalIgnoreCase))
     {
         await next();
@@ -22,6 +25,12 @@ app.Use(async (context, next) =>
     }
 
     var origin = context.Request.Headers.Origin.ToString();
+    if (isShutdownRequest && origin.Length == 0)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { ok = false, error = "POS Origin 확인이 필요합니다." });
+        return;
+    }
     if (origin.Length > 0)
     {
         if (!allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
@@ -131,6 +140,49 @@ app.MapPost("/cash-drawer/open", async (IConfiguration configuration, ILogger<Pr
     finally
     {
         drawerGate.Release();
+    }
+});
+
+app.MapPost("/system/shutdown", (ILogger<Program> logger) =>
+{
+    if (!OperatingSystem.IsWindows())
+        return Results.Json(new { ok = false, error = "시스템 종료는 Windows에서만 지원됩니다." }, statusCode: 501);
+
+    if (Interlocked.CompareExchange(ref shutdownRequested, 1, 0) != 0)
+        return Results.Json(new { ok = false, error = "시스템 종료 요청이 이미 처리 중입니다." }, statusCode: 409);
+
+    try
+    {
+        var shutdownExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "shutdown.exe");
+        if (!File.Exists(shutdownExe))
+        {
+            Interlocked.Exchange(ref shutdownRequested, 0);
+            return Results.Json(new { ok = false, error = "Windows 종료 명령을 찾을 수 없습니다." }, statusCode: 503);
+        }
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo(shutdownExe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("/s");
+        startInfo.ArgumentList.Add("/t");
+        startInfo.ArgumentList.Add("5");
+        using var process = System.Diagnostics.Process.Start(startInfo);
+        if (process is null)
+        {
+            Interlocked.Exchange(ref shutdownRequested, 0);
+            return Results.Json(new { ok = false, error = "Windows 종료 요청을 시작하지 못했습니다." }, statusCode: 503);
+        }
+
+        logger.LogInformation("Windows shutdown scheduled after explicit POS confirmation");
+        return Results.Ok(new { ok = true });
+    }
+    catch (Exception exception)
+    {
+        Interlocked.Exchange(ref shutdownRequested, 0);
+        logger.LogError(exception, "Windows shutdown request failed");
+        return Results.Json(new { ok = false, error = "Windows 종료 권한 또는 실행 상태를 확인해주세요." }, statusCode: 503);
     }
 });
 

@@ -35,7 +35,6 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [customers, setCustomers] = useState<CustomerPaymentCandidate[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-  const [selectedCouponCount, setSelectedCouponCount] = useState<number | null>(null);
   const [customerError, setCustomerError] = useState("");
   const [customersLoading, setCustomersLoading] = useState(true);
   const [entry, setEntry] = useState("0");
@@ -86,22 +85,26 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
   const hasValidInput = Boolean(selected && (selected.inputType === "AMOUNT" && !hasManualInput || Number.isSafeInteger(entered) && entered > 0));
   const valid = Boolean(selected && hasValidInput && Number.isSafeInteger(submitted) && submitted > 0 && submitted <= 999999999999 && (selected.inputType === "QUANTITY" || submitted <= remaining || allowOverpayment || selected.cashChangeEnabled === 1));
   const couponUnitAmount = selectedCustomer?.fixedCouponAmount ?? 0;
-  const customerPaymentAmount = selectedCustomer ? selectedCouponCount !== null ? couponUnitAmount * selectedCouponCount : hasManualInput ? entered : customerRemaining : 0;
+  const customerCouponMode = Boolean(selectedCustomer?.usesFixedCoupon && couponUnitAmount > 0);
+  const customerCouponQuantity = customerCouponMode ? entered : null;
+  const customerPaymentAmount = selectedCustomer ? customerCouponMode ? couponUnitAmount * entered : hasManualInput ? entered : customerRemaining : 0;
   const customerCouponApplied = Math.min(customerPaymentAmount, customerRemaining);
-  const customerCouponOverage = selectedCustomer && selectedCouponCount !== null ? resolveQuantityOverage({
+  const customerCouponOverage = selectedCustomer && customerCouponMode && entered > 0 ? resolveQuantityOverage({
     tenderedAmount: customerPaymentAmount,
     appliedAmount: customerCouponApplied,
     balancePolicy: selectedCustomer.fixedCouponBalancePolicy,
     cashChangeEnabled: selectedCustomer.fixedCouponCashChangeEnabled,
     cashChangeMinPercent: selectedCustomer.fixedCouponCashChangeMinPercent,
     customerId: selectedCustomer.customerId,
-  }) : { cashChange: 0, forfeited: 0, error: null };
-  const validCustomerPayment = Boolean(selectedCustomer && Number.isSafeInteger(customerPaymentAmount) && customerPaymentAmount > 0 && customerPaymentAmount <= 999999999999 && (selectedCouponCount === null ? customerPaymentAmount <= customerRemaining : customerCouponOverage.error === null));
+  }) : { cashChange: 0, forfeited: 0, error: null as "THRESHOLD_MISSING" | "THRESHOLD_NOT_MET" | "CHANGE_DISABLED" | null };
+  const customerCouponRemaining = Math.max(0, customerRemaining - customerCouponApplied);
+  const validCustomerPayment = Boolean(selectedCustomer && Number.isSafeInteger(customerPaymentAmount) && customerPaymentAmount > 0 && customerPaymentAmount <= 999999999999 && (customerCouponMode
+    ? Number.isSafeInteger(entered) && entered > 0 && entered <= 9999 && customerCouponOverage.error === null
+    : customerPaymentAmount <= customerRemaining));
   const append = (key: string) => {
     if (key === "C") {
       setEntry("0");
       setHasManualInput(false);
-      setSelectedCouponCount(null);
       return;
     }
     if (key === "BS") {
@@ -109,11 +112,9 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
       const next = entry.slice(0, -1);
       setEntry(next || "0");
       setHasManualInput(next.length > 0);
-      setSelectedCouponCount(null);
       return;
     }
-    setSelectedCouponCount(null);
-    setEntry(current => `${hasManualInput ? current : ""}${key}`.replace(/^0+(?=\d)/, "").slice(0, 9));
+    setEntry(current => `${hasManualInput ? current : ""}${key}`.replace(/^0+(?=\d)/, "").slice(0, customerCouponMode ? 4 : 9));
     setHasManualInput(true);
   };
   const confirm = async () => {
@@ -121,7 +122,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
     if (selectedCustomer) {
       if (!validCustomerPayment) { setError("고객결제 금액은 받을금액 이하여야 합니다."); return; }
       setError("");
-      submitCustomer(selectedCustomer.customerId, selectedCustomer.name, customerPaymentAmount, selectedCouponCount === null ? undefined : { quantity: selectedCouponCount });
+      submitCustomer(selectedCustomer.customerId, selectedCustomer.name, customerPaymentAmount, customerCouponQuantity === null ? undefined : { quantity: customerCouponQuantity });
       close();
       return;
     }
@@ -158,7 +159,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
                 {customersLoading && <p className="p-2 text-sm text-slate-500">불러오는 중...</p>}
                 {customerError && <p className="p-2 text-sm text-red-600" role="alert">{customerError}</p>}
                 {!customersLoading && !customerError && customers.length === 0 && <p className="p-2 text-sm text-slate-500">고객이 없습니다.</p>}
-                {customers.map(customer => <button aria-pressed={selectedCustomerId === customer.customerId} className={`mb-2 flex min-h-14 w-full items-center justify-center rounded-xl border p-2 text-center text-lg font-bold [scroll-snap-align:start] [scroll-snap-stop:always] ${selectedCustomerId === customer.customerId ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white"}`} disabled={busy} key={customer.customerId} onClick={() => { setSelectedCustomerId(customer.customerId); setSelectedId(null); setEntry("0"); setHasManualInput(false); setSelectedCouponCount(null); setError(""); }} type="button">{customer.name.trim() || "—"}</button>)}
+                {customers.map(customer => <button aria-pressed={selectedCustomerId === customer.customerId} className={`mb-2 flex min-h-14 w-full items-center justify-center rounded-xl border p-2 text-center text-lg font-bold [scroll-snap-align:start] [scroll-snap-stop:always] ${selectedCustomerId === customer.customerId ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white"}`} disabled={busy} key={customer.customerId} onClick={() => { setSelectedCustomerId(customer.customerId); setSelectedId(null); setEntry("0"); setHasManualInput(false); setError(""); }} type="button">{customer.name.trim() || "—"}</button>)}
               </div>
               <VerticalScrollIndicators above={customerHints.above} below={customerHints.below} />
             </div>
@@ -166,18 +167,20 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
         </div>
         <div className="flex min-h-0 flex-col items-center px-6 py-6">
           <div className="flex min-h-0 w-[337px] max-w-full flex-1 flex-col">
-            <div className={`w-full shrink-0 px-[5px] text-lg ${selected?.inputType === "QUANTITY" ? "space-y-4" : "space-y-1"}`}>
+            <div className={`w-full shrink-0 px-[5px] text-lg ${selected?.inputType === "QUANTITY" || customerCouponMode ? "space-y-4" : "space-y-1"}`}>
               <div className="flex min-w-0 items-center justify-between gap-3">
                 <h2 className="min-w-0 truncate text-xl font-extrabold" title={selectedCustomer ? selectedCustomer.name : selected?.name}>{selectedCustomer ? selectedCustomer.name.trim() || "—" : selected?.name ?? "결제수단 또는 고객을 선택해 주세요"}</h2>
                 {selectedCustomer && <b className={`shrink-0 ${selectedCustomer.tradeBalance > 0 ? "text-blue-700" : selectedCustomer.tradeBalance < 0 ? "text-red-600" : ""}`}>{selectedCustomer.tradeBalance < 0 ? "-" : ""}{formatMoney(Math.abs(selectedCustomer.tradeBalance))}</b>}
               </div>
-              {selectedCustomer?.usesFixedCoupon && couponUnitAmount > 0 && <div className="flex items-center justify-between gap-2 py-1">
-                <span className="shrink-0 text-sm font-semibold text-slate-600">쿠폰 {formatMoney(couponUnitAmount)}원</span>
-                <div className="flex min-w-0 flex-wrap justify-end gap-1">{[1, 2, 3, 4].map(count => <button aria-pressed={selectedCouponCount === count} className={`min-h-9 rounded-lg border px-2 text-sm font-bold ${selectedCouponCount === count ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"}`} disabled={busy} key={count} onClick={() => { setSelectedCouponCount(count); setEntry("0"); setHasManualInput(false); setError(""); }} type="button">{count}장</button>)}</div>
-              </div>}
-              {selectedCustomer && selectedCouponCount !== null && customerCouponOverage.error && <p className="w-full text-center text-sm font-semibold text-red-600" role="alert">{customerCouponOverage.error === "THRESHOLD_NOT_MET" ? `${selectedCustomer.fixedCouponCashChangeMinPercent}% 이상 사용 시 현금 거스름 가능` : customerCouponOverage.error === "THRESHOLD_MISSING" ? "현금 거스름 기준 설정을 확인해 주세요." : "이 쿠폰은 잔액 현금반환이 설정되어 있지 않습니다."}</p>}
-              <div className="flex items-center justify-between"><span>받을금액</span><b className={selected?.inputType === "QUANTITY" ? "font-extrabold text-blue-700" : "text-2xl font-extrabold text-blue-700"}>{formatMoney(selectedCustomer ? customerRemaining : remaining)}</b></div>
-              {selected?.inputType === "QUANTITY" ? <>
+              {customerCouponMode && entered > 0 && customerCouponOverage.error && <p className="w-full text-center text-sm font-semibold text-red-600" role="alert">{customerCouponOverage.error === "THRESHOLD_NOT_MET" ? `${selectedCustomer?.fixedCouponCashChangeMinPercent}% 이상 사용 시 현금 거스름 가능` : customerCouponOverage.error === "THRESHOLD_MISSING" ? "현금 거스름 기준 설정을 확인해 주세요." : "이 쿠폰은 잔액 현금반환이 설정되어 있지 않습니다."}</p>}
+              <div className="flex items-center justify-between"><span>받을금액</span><b className={selected?.inputType === "QUANTITY" || customerCouponMode ? "font-extrabold text-blue-700" : "text-2xl font-extrabold text-blue-700"}>{formatMoney(selectedCustomer ? customerRemaining : remaining)}</b></div>
+              {customerCouponMode ? <>
+                {entered > 0
+                  ? <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span>쿠폰금액</span><span className="min-w-0 text-center">{formatMoney(couponUnitAmount)} × {entered}매</span><b className="whitespace-nowrap">{formatMoney(customerPaymentAmount)}</b></div>
+                  : <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2"><span>쿠폰금액</span><span className="min-w-0 text-center">{formatMoney(couponUnitAmount)}</span></div>}
+                <div className="flex items-center justify-between"><span>남은금액</span><b>{formatMoney(customerCouponRemaining)}</b></div>
+                {customerCouponOverage.cashChange > 0 && <div className="flex justify-between text-red-600"><span>현금 거스름</span><b>{formatMoney(customerCouponOverage.cashChange)}</b></div>}
+              </> : selected?.inputType === "QUANTITY" ? <>
                 <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2"><span>정액권</span><span className="min-w-0 text-center">{entered > 0 ? `${formatMoney(unit)} × ${entered}매` : formatMoney(unit)}</span><b className="whitespace-nowrap">{formatMoney(submitted)}</b></div>
                 {cashChangeApplies ? cashChangeEligible
                   ? <div className="flex justify-between text-red-600"><span>현금 거스름</span><b>{formatMoney(cashChangeAmount)}</b></div>
@@ -190,7 +193,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
                   : <p className="w-full text-center text-sm font-semibold text-red-600" role="alert">{selected?.cashChangeMinPercent}% 이상 사용 시 현금 거스름 가능</p>)}
               </>}
             </div><div className="flex h-[440px] min-h-0 shrink flex-col">
-              <NumericInputKeypad disabled={busy || (!selected && !selectedCustomer)} onKey={append} keys={selected?.inputType === "QUANTITY" ? ["7", "8", "9", "4", "5", "6", "1", "2", "3", "BS", "0", "C"] : undefined} value={formatMoney(entered)} />
+              <NumericInputKeypad disabled={busy || (!selected && !selectedCustomer)} inputLabel={customerCouponMode ? "쿠폰 매수" : undefined} onKey={append} keys={selected?.inputType === "QUANTITY" || customerCouponMode ? ["7", "8", "9", "4", "5", "6", "1", "2", "3", "BS", "0", "C"] : undefined} value={customerCouponMode ? String(entered) : formatMoney(entered)} />
             </div>
             {error && <p aria-live="polite" className="mt-2 text-center font-bold text-red-600">{error}</p>}
             <button className="mt-4 min-h-[72px] w-full shrink-0 rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400" disabled={busy || (selectedCustomer ? !validCustomerPayment : !valid)} onClick={() => void confirm()} type="button">확인</button>

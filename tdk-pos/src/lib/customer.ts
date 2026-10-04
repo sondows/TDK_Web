@@ -11,6 +11,7 @@ export type CustomerSummary = {
   fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
   fixedCouponCashChangeEnabled: boolean;
   fixedCouponCashChangeMinPercent: number | null;
+  sortOrder: number;
   isActive: boolean;
   tradeBalance: number;
 };

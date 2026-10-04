@@ -206,7 +206,6 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
                 </div>}
               </div>
             </div>}
-            <p>사용 시 POS 고객결제에서 정해진 액면가의 쿠폰 매수를 선택할 수 있습니다.</p>
           </div>
           {customer && <div className={`${styles.customerPaymentField} ${styles.customerInlineSetting}`}>
             <label className={styles.customerPaymentLabel} htmlFor="customer-edit-active">

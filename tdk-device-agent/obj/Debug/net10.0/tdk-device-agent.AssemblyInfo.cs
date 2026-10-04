@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("tdk-device-agent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+052498b36e1700c711345e6e1e8ea188e736233e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2e03ad103cc145a8e601dc9050378a0c5d701b49")]
 [assembly: System.Reflection.AssemblyProductAttribute("tdk-device-agent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("tdk-device-agent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

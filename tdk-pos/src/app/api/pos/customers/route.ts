@@ -33,7 +33,8 @@ export async function GET(request: Request) {
       fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy,
       fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled,
       fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent,
-    }).from(customers).where(condition).orderBy(asc(customers.name), asc(customers.customerId));
+      sortOrder: customers.sortOrder,
+    }).from(customers).where(condition).orderBy(asc(customers.sortOrder), asc(customers.name), asc(customers.customerId));
 
     if (!includeBalance || !rows.length) return json({ success: true, customers: rows.map(row => ({ ...row, usesFixedCoupon: row.usesFixedCoupon === 1, fixedCouponAmount: row.fixedCouponAmount === null ? null : Number(row.fixedCouponAmount) })) });
     const balanceRows = await db.select({

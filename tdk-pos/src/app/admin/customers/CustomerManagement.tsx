@@ -16,6 +16,7 @@ export default function CustomerManagement() {
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [hasInactiveCustomers, setHasInactiveCustomers] = useState(false);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -33,11 +34,12 @@ export default function CustomerManagement() {
           cache: "no-store",
           signal: controller.signal,
         });
-        const result = await response.json() as { success?: boolean; customers?: CustomerSummary[] };
+        const result = await response.json() as { success?: boolean; customers?: CustomerSummary[]; hasInactiveCustomers?: boolean };
         if (!response.ok || !result.success || !Array.isArray(result.customers)) {
           throw new Error(response.status === 401 ? "login" : response.status === 403 ? "forbidden" : "load");
         }
         setCustomers(result.customers);
+        setHasInactiveCustomers(result.hasInactiveCustomers === true);
       } catch (error) {
         if (controller.signal.aborted) return;
         setCustomers([]);
@@ -73,6 +75,28 @@ export default function CustomerManagement() {
     setEditingCustomer(null);
   };
 
+  const saveCustomerOrder = async (customerIds: number[]) => {
+    try {
+      const response = await fetch("/api/customers/order", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerIds }),
+      });
+      const result = await response.json() as { success?: boolean };
+      if (!response.ok || !result.success) return false;
+      setCustomers(current => {
+        const byId = new Map(current.map(customer => [customer.customerId, customer]));
+        return customerIds.flatMap((customerId, index) => {
+          const customer = byId.get(customerId);
+          return customer ? [{ ...customer, sortOrder: index + 1 }] : [];
+        });
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <section aria-label="고객 목록" className={styles.customerSection}>
       <div className={styles.customerToolbar}>
@@ -100,7 +124,7 @@ export default function CustomerManagement() {
           + 고객등록
         </button>
       </div>
-      <CustomerList customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onTrade={customer => setTradingCustomer(customer)} search={search} />
+      <CustomerList canReorder={!loading && !search.trim() && (includeInactive || !hasInactiveCustomers)} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
       {createOpen && <CustomerCreateModal customer={null} onClose={closeCreate} onSaved={created} />}
       {editingCustomer && <CustomerCreateModal customer={editingCustomer} onClose={() => setEditingCustomer(null)} onSaved={updated} />}
       {tradingCustomer && <CustomerTradeModal customer={tradingCustomer} onChanged={() => setRefreshKey(value => value + 1)} onClose={() => setTradingCustomer(null)} />}

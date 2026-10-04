@@ -99,6 +99,7 @@ export const customers = mysqlTable(
     fixedCouponBalancePolicy: mysqlEnum("fixed_coupon_balance_policy", ["CASH_CHANGE", "FORFEIT"]).notNull().default("FORFEIT"),
     fixedCouponCashChangeEnabled: tinyint("fixed_coupon_cash_change_enabled").notNull().default(0),
     fixedCouponCashChangeMinPercent: tinyint("fixed_coupon_cash_change_min_percent", { unsigned: true }),
+    sortOrder: int("sort_order").notNull().default(0),
     isActive: tinyint("is_active").notNull().default(1),
     createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

@@ -46,8 +46,10 @@ export async function GET(request: Request) {
       fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy,
       fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled,
       fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent,
+      sortOrder: customers.sortOrder,
       isActive: customers.isActive,
-    }).from(customers).where(filters.length ? and(...filters) : undefined).orderBy(asc(customers.name), asc(customers.customerId));
+    }).from(customers).where(filters.length ? and(...filters) : undefined).orderBy(asc(customers.sortOrder), asc(customers.name), asc(customers.customerId));
+    const inactiveCustomer = await db.select({ customerId: customers.customerId }).from(customers).where(eq(customers.isActive, 0)).limit(1);
     const ledgerRows = rows.length ? await db.select({
       customerId: customerPrepaidLedger.customerId,
       balance: sql<string>`COALESCE(SUM(${customerPrepaidLedger.amount}), 0)`,
@@ -66,6 +68,7 @@ export async function GET(request: Request) {
         isActive: row.isActive === 1,
         tradeBalance: balances.get(row.customerId) ?? 0,
       })),
+      hasInactiveCustomers: inactiveCustomer.length > 0,
     });
   } catch (error) {
     console.error("Failed to load customers", error);
@@ -82,8 +85,13 @@ export async function POST(request: Request) {
     const { values, errors } = validateCustomerCreate(body);
     if (!values) return json({ success: false, message: "고객정보를 확인해 주세요.", errors }, 400);
 
-    const inserted = await db.insert(customers).values(values);
-    return json({ success: true, customerId: Number(inserted[0].insertId) }, 201);
+    const customerId = await db.transaction(async tx => {
+      const existing = await tx.select({ sortOrder: customers.sortOrder }).from(customers).orderBy(asc(customers.customerId)).for("update");
+      const nextSortOrder = existing.reduce((max, row) => Math.max(max, row.sortOrder), 0) + 1;
+      const inserted = await tx.insert(customers).values({ ...values, sortOrder: nextSortOrder });
+      return Number(inserted[0].insertId);
+    });
+    return json({ success: true, customerId }, 201);
   } catch (error) {
     console.error("Failed to create customer", error);
     return json({ success: false, message: "고객을 저장하지 못했습니다." }, 500);
