@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatMoney as formatPosMoney } from "@/lib/format-money";
 import { formatSessionElapsed } from "@/lib/session-time";
 import { openCashDrawer } from "@/lib/cash-drawer";
+import { printReceipt } from "@/lib/receipt-print";
 import LogoutButton from "./LogoutButton";
 import TableShape from "./TableShape";
 import TableLayoutCanvas from "./TableLayoutCanvas";
@@ -55,31 +56,27 @@ export default function PosShell({ staffName, staffRole, tables, menus, categori
  const [receiptNotice, setReceiptNotice] = useState<{ title: string; message: string; success: boolean } | null>(null);
  const router = useRouter(); const [selectedId, setSelectedId] = useState<number | null>(null); const [selectionVersion, setSelectionVersion] = useState(0); const [view, setView] = useState<"tables"|"takeout"|"reservation"|"waiting">("tables"); const [tab, setTab] = useState<"summary" | "pending" | "detail" | "table" | "kitchen">("summary"); const [fullscreen, setFullscreen] = useState(false); const [personModal, setPersonModal] = useState(false); const [discountModal, setDiscountModal] = useState(false); const [personBusy, setPersonBusy] = useState(false); const [personError, setPersonError] = useState(""); const [cart, setCart] = useState<PendingCartItem[]>([]); const [quantityMenu, setQuantityMenu] = useState<Menu | null>(null); const [submittingOrder, setSubmittingOrder] = useState(false); const [orderError, setOrderError] = useState(""); const [menuResetVersion, setMenuResetVersion] = useState(0); const [tableOverrides, setTableOverrides] = useState<Record<number, Partial<Table>>>({}); const displayTables = tables.map(table => ({ ...table, ...tableOverrides[table.tableId] })); const openTableCount = countOpenTables(displayTables);
  const selected = selectedId === null ? null : displayTables.find(t => t.tableId === selectedId) ?? null;
- const printSelectedReceipt = useCallback(async () => {
+ const sendReceipt = useCallback(async (target: { tableId: number; isReprint?: boolean }) => {
   if (receiptPrintingRef.current) return;
-  if (view !== "tables" || !selected?.tableId) {
-   setReceiptNotice({ title: "영수증 출력", message: "출력할 테이블을 먼저 선택해 주세요.", success: false });
-   return;
-  }
   receiptPrintingRef.current = true;
   setReceiptPrinting(true);
   try {
-   const response = await fetch("/api/sales", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tableId: selected.tableId }),
-   });
-   const result = await response.json() as { success?: boolean; checkoutId?: number; message?: string };
-   if (!response.ok || !result.success)
-    setReceiptNotice({ title: "영수증 출력 실패", message: result.message ?? "프린터 연결 상태를 확인해 주세요.", success: false });
-   else
-    setReceiptNotice({ title: "영수증 출력 요청", message: `${selected.tableNo}T 거래 #${result.checkoutId} 영수증을 인쇄 대기열에 전달했습니다.`, success: true });
-  } catch {
-   setReceiptNotice({ title: "영수증 출력 실패", message: "POS 서버와 Device Agent 연결 상태를 확인해 주세요.", success: false });
+   await printReceipt(target);
+  } catch (error) {
+   console.error("Receipt print failed", error);
+   setReceiptNotice({ title: "영수증 출력 실패", message: error instanceof Error ? error.message : "영수증을 출력할 수 없습니다.\n프린터 및 Device Agent 연결을 확인해주세요.", success: false });
   } finally {
    receiptPrintingRef.current = false;
    setReceiptPrinting(false);
   }
- }, [selected?.tableId, selected?.tableNo, view]);
+ }, []);
+ const printSelectedReceipt = useCallback(async () => {
+  if (view !== "tables" || !selected?.tableId) {
+   setReceiptNotice({ title: "영수증 출력", message: "출력할 테이블을 먼저 선택해 주세요.", success: false });
+   return;
+  }
+  await sendReceipt({ tableId: selected.tableId });
+ }, [selected?.tableId, view, sendReceipt]);
  const selectedGroupId = selected?.sessionId && selected.groupId !== null ? selected.groupId : null;
  const selectedParty = useMemo(() => {
   if (selectedGroupId === null) return null;
@@ -144,17 +141,22 @@ export default function PosShell({ staffName, staffRole, tables, menus, categori
    console.error("Cash drawer open failed", error);
    setReceiptNotice({ title: "금고 열기 실패", message: "금고를 열 수 없습니다.\n프린터 및 Device Agent 연결을 확인해주세요.", success: false });
   } finally {
+   // Keep both manual clicks and automatic cash-payment opens behind the Agent's 1.5s debounce.
+   await new Promise<void>(resolve => window.setTimeout(resolve, 1500));
    drawerOpeningRef.current = false;
    setDrawerOpening(false);
   }
  }, []);
  const handlePaymentCompleted = useCallback((hasCashPayment: boolean) => {
+  const completedTableId = selected?.tableId;
   setTableOverrides({});
   resetPosWorkspace();
   router.refresh();
+  // Payment is already committed before receipt data is requested or printed.
+  if (completedTableId) void sendReceipt({ tableId: completedTableId, isReprint: false });
   // The checkout is already committed. Drawer failures never undo payment.
   if (hasCashPayment) void handleOpenCashDrawer();
- }, [handleOpenCashDrawer, resetPosWorkspace, router]);
+ }, [handleOpenCashDrawer, resetPosWorkspace, router, selected?.tableId, sendReceipt]);
  const changeWorkTab = (nextView: typeof view) => { if (nextView === view) return; resetPosWorkspace(); setView(nextView); };
  useEffect(() => {
   if (!Number.isInteger(idleResetSeconds) || idleResetSeconds <= 0 || isBlockingUiOpen) return;

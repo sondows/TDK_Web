@@ -93,12 +93,12 @@ export async function GET(request: Request) {
   }
 }
 
-// Reprints an existing completed checkout. This path only reads sales data and
-// sends it to the local Device Agent; it never calls the checkout write API.
+// Builds a receipt for an existing completed checkout. The POS browser sends
+// this payload to its own local Device Agent; the NAS server never prints.
 export async function POST(request: Request) {
   try {
     if (!(await ensurePosAccess())) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
-    const body = await request.json() as { checkoutId?: unknown; tableId?: unknown };
+    const body = await request.json() as { checkoutId?: unknown; tableId?: unknown; isReprint?: unknown };
     if (body.checkoutId !== undefined && body.tableId !== undefined)
       return Response.json({ success: false, message: "거래와 테이블을 동시에 지정할 수 없습니다." }, { status: 400 });
     let checkoutId = body.checkoutId;
@@ -139,20 +139,12 @@ export async function POST(request: Request) {
     const itemizedDiscounts = discounts.reduce((sum, discount) => sum + discount.amount, 0) === sale.discountAmount
       ? discounts : [];
 
-    const agentUrl = new URL(process.env.DEVICE_AGENT_URL ?? "http://127.0.0.1:5168");
-    if (agentUrl.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(agentUrl.hostname))
-      throw new Error("Device Agent 주소는 이 PC의 로컬 주소여야 합니다.");
     const [storeInfo, receiptLogo] = await Promise.all([getStoreInfo(), getReceiptLogoRaster()]);
-    const response = await fetch(new URL("/api/printer/receipt", agentUrl), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
-      body: JSON.stringify({
+    return Response.json({ success: true, checkoutId: sale.checkoutId, receipt: {
         storeInfo,
         receiptLogo,
         checkoutId: sale.checkoutId,
-        isReprint: true,
+        isReprint: body.isReprint === false ? false : true,
         statusLabel: partialCancellation ? "일부취소" : null,
         tableLabel: sale.tableNos.map(tableNo => `${tableNo}T`).join("+"),
         orderedAt: sale.orderedAt.slice(0, 16).replace("T", " "),
@@ -172,15 +164,10 @@ export async function POST(request: Request) {
           cashReceived: payment.cashReceived,
           cashChange: payment.cashChange,
         })),
-      }),
-    });
-    const result = await response.json() as { success?: boolean; jobId?: number; error?: string };
-    if (!response.ok || !result.success)
-      return Response.json({ success: false, message: result.error ?? "프린터 연결 상태를 확인해주세요." }, { status: 502 });
-    return Response.json({ success: true, checkoutId: sale.checkoutId, jobId: result.jobId });
+    } });
   } catch (error) {
-    console.error("receipt print failed", error);
-    return Response.json({ success: false, message: "영수증 출력에 실패했습니다. 프린터와 Device Agent 연결 상태를 확인해주세요." }, { status: 502 });
+    console.error("receipt preparation failed", error);
+    return Response.json({ success: false, message: "영수증 정보를 준비할 수 없습니다." }, { status: 500 });
   }
 }
 

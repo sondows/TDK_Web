@@ -45,6 +45,6 @@ There is no complete baseline database migration in this repository. `drizzle.co
 
 Most scripts are not idempotent. Check which columns, constraints, and rows are already present before running them; do not rerun applied ALTER scripts. `sql/proposed_customer_postpaid_permission.sql` is a proposal and must not be applied. Compose does not run migrations automatically.
 
-## Existing Device Agent limitation
+## POS PC Device Agent
 
-`/api/sales` currently accepts a receipt reprint Device Agent URL only on loopback (`127.0.0.1`, `localhost`, `::1`). Inside this Docker container, loopback means the container itself. A Device Agent running on a separate POS PC cannot be reached by changing `DEVICE_AGENT_URL` to that PC's LAN IP under the current code. Receipt reprinting through this server therefore needs a separately planned Agent deployment/integration; this Docker setup does not change the printer code.
+After checkout succeeds, `/api/sales` prepares the receipt data without contacting a printer. The POS PC browser sends that data to its local Device Agent at `http://127.0.0.1:5168/api/printer/receipt`; the same browser uses the agent for CashBox. Configure `CashDrawer:AllowedOrigins` in the Device Agent to include the exact POS site origin (currently `http://192.168.0.83:3000`). `NEXT_PUBLIC_DEVICE_AGENT_URL` is a Docker build argument if the agent port changes; setting it only in the runtime environment does not change browser code.

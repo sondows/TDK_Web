@@ -18,7 +18,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Receipt logo storage
 
-Receipt logos are stored as normalized monochrome PNG files in `storage/receipt-logo` by default. Set `RECEIPT_LOGO_STORAGE_PATH` to a persistent, writable directory for deployment. If multiple POS server instances share one database, point them at the same shared storage. The `system_settings.receipt_logo_file` value is only a relative file name; back up the logo directory together with the database. The POS server sends the logo pixels with each receipt request, so the Device Agent does not need access to this directory.
+Receipt logos are stored as normalized monochrome PNG files in `storage/receipt-logo` by default. Set `RECEIPT_LOGO_STORAGE_PATH` to a persistent, writable directory for deployment. If multiple POS server instances share one database, point them at the same shared storage. The `system_settings.receipt_logo_file` value is only a relative file name; back up the logo directory together with the database. The POS server includes the logo pixels in the receipt payload returned to the POS browser, which forwards it to the local Device Agent; the agent does not need access to this directory.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

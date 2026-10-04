@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { formatMoney } from "@/lib/format-money";
+import { printReceipt as printLocalReceipt } from "@/lib/receipt-print";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SalesListResponse } from "@/lib/sales-types";
 import PosSubHeader from "../PosSubHeader";
 import PinInput from "@/components/PinInput";
@@ -227,16 +228,10 @@ export default function SalesHistoryClient({ date }: { date: string }) {
     setPrintError("");
     setPrintSuccess("");
     try {
-      const response = await fetch("/api/sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ checkoutId }),
-      });
-      const result = await response.json() as { success?: boolean; message?: string };
-      if (!response.ok || !result.success) setPrintError(result.message ?? "프린터 연결 상태를 확인해주세요.");
-      else setPrintSuccess("영수증 재출력을 요청했습니다.");
-    } catch {
-      setPrintError("프린터 연결 상태를 확인해주세요.");
+      await printLocalReceipt({ checkoutId });
+      setPrintSuccess("영수증 재출력을 요청했습니다.");
+    } catch (error) {
+      setPrintError(error instanceof Error ? error.message : "영수증을 출력할 수 없습니다.\n프린터 및 Device Agent 연결을 확인해주세요.");
     } finally {
       printingRef.current = false;
       setPrintingCheckoutId(null);
@@ -318,7 +313,7 @@ export default function SalesHistoryClient({ date }: { date: string }) {
         </div> : <div><h3 className="text-xl font-bold">직원 인증</h3><div className="mt-4 flex flex-wrap gap-2">{employees.map(employee => <button className={`min-h-14 rounded-xl border px-5 text-lg font-bold ${selectedEmployee === employee.staffCode ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200"}`} key={employee.staffId} onClick={() => { setSelectedEmployee(employee.staffCode); setSummaryPin(""); setSummaryError(""); }} type="button">{employee.name}</button>)}</div>{!employees.length && <p className="mt-4 text-slate-500">인증 가능한 직원이 없습니다.</p>}<div className="mt-5 max-w-sm"><PinInput ariaLabel="매출현황 직원 PIN" disabled={!selectedEmployee || summaryBusy} label="PIN" onChange={setSummaryPin} onComplete={value => void authenticateSummary(value)} value={summaryPin} /></div><div className="mt-3 grid max-w-sm grid-cols-3 gap-1">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "지움", "0", "초기화"].map(key => <button className="min-h-14 rounded-lg bg-slate-50 text-xl font-bold active:bg-blue-100 disabled:opacity-40" disabled={!selectedEmployee || summaryBusy || (summaryPin.length >= 4 && /^\d$/.test(key))} key={key} onClick={() => { if (key === "지움") setSummaryPin(summaryPin.slice(0, -1)); else if (key === "초기화") setSummaryPin(""); else { const next = `${summaryPin}${key}`.slice(0, 4); setSummaryPin(next); if (next.length === 4) void authenticateSummary(next); } }} type="button">{key}</button>)}</div><button className="mt-5 min-h-14 rounded-xl bg-blue-600 px-8 text-lg font-bold text-white disabled:bg-slate-300" disabled={!selectedEmployee || summaryPin.length !== 4 || summaryBusy} onClick={() => void authenticateSummary(summaryPin)} type="button">{summaryBusy ? "확인 중..." : "확인"}</button>{summaryError && <p className="mt-4 font-bold text-red-600">{summaryError}</p>}</div>}</div>
         <footer className="border-t p-5"><button className="min-h-14 w-full rounded-xl bg-slate-100 text-xl font-bold" onClick={closeSummary} type="button">닫기</button></footer>
       </section></div>}
-      {printError && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl" role="alertdialog"><h2 className="text-2xl font-extrabold">영수증 출력 실패</h2><p className="mt-5 text-lg text-slate-600">{printError}</p><button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-bold text-white" onClick={() => setPrintError("")} type="button">확인</button></section></div>}
+      {printError && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl" role="alertdialog"><h2 className="text-2xl font-extrabold">영수증 출력 실패</h2><p className="mt-5 whitespace-pre-line text-lg text-slate-600">{printError}</p><button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-bold text-white" onClick={() => setPrintError("")} type="button">확인</button></section></div>}
       {detailLoading && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/25"><p className="rounded-xl bg-white px-7 py-5 text-lg font-bold shadow-xl">판매 상세를 불러오는 중...</p></div>}
       {customOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">

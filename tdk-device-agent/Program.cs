@@ -14,7 +14,8 @@ var allowedOrigins = app.Configuration.GetSection("CashDrawer:AllowedOrigins").G
 
 app.Use(async (context, next) =>
 {
-    if (!context.Request.Path.Equals("/cash-drawer/open", StringComparison.OrdinalIgnoreCase))
+    if (!context.Request.Path.Equals("/cash-drawer/open", StringComparison.OrdinalIgnoreCase) &&
+        !context.Request.Path.Equals("/api/printer/receipt", StringComparison.OrdinalIgnoreCase))
     {
         await next();
         return;
