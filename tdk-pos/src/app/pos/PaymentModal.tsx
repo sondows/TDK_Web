@@ -46,6 +46,7 @@ type OverpaymentPrompt = {
   requestBody: Record<string, unknown>;
 };
 type StagedCustomerPayment = { customerId: number; name: string; amount: number; requestKey: string; couponQuantity: number | null };
+type PaymentDeletionTarget = { kind: "SAVED"; payment: Payment } | { kind: "STAGED_CUSTOMER" };
 const money = (amount: number) => formatMoney(amount);
 const newCustomerPaymentRequestKey = () => {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -56,7 +57,7 @@ const newCustomerPaymentRequestKey = () => {
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
 };
 const paymentMethodLabel = (payment: Payment) => {
-  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}장 고객결제`;
+  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}매 고객결제`;
   if (payment.methodNameSnapshot) return payment.quantity ? `${payment.methodNameSnapshot} × ${payment.quantity}매` : payment.methodNameSnapshot;
   const labels: Record<string, string> = {
     CARD: "카드",
@@ -66,12 +67,6 @@ const paymentMethodLabel = (payment: Payment) => {
   };
   return labels[payment.methodCode] ?? payment.methodName;
 };
-const paymentTime = (paidAt: string) => new Intl.DateTimeFormat("ko-KR", {
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-}).format(new Date(paidAt));
-
 export default function PaymentModal({
   tableId,
   tableNo,
@@ -92,7 +87,7 @@ export default function PaymentModal({
   const [stagedCustomerPayment, setStagedCustomerPayment] = useState<StagedCustomerPayment | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<SelectedCustomer | null>(null);
   const [customerSelectOpen, setCustomerSelectOpen] = useState(false);
-  const [cancelTarget, setCancelTarget] = useState<Payment | null>(null);
+  const [deletionTarget, setDeletionTarget] = useState<PaymentDeletionTarget | null>(null);
   const [cancelError, setCancelError] = useState("");
   const [overpaymentPrompt, setOverpaymentPrompt] = useState<OverpaymentPrompt | null>(null);
   const [cardErrorDialog, setCardErrorDialog] = useState("");
@@ -237,14 +232,19 @@ export default function PaymentModal({
     ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey, couponQuantity: stagedCustomerPayment.couponQuantity }
     : { action: "COMPLETE" });
   const cancelPayment = async () => {
-    if (!cancelTarget || busy) return;
+    if (!deletionTarget || busy) return;
+    if (deletionTarget.kind === "STAGED_CUSTOMER") {
+      setStagedCustomerPayment(null);
+      setDeletionTarget(null);
+      return;
+    }
     setBusy(true);
     setCancelError("");
     try {
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId, action: "CANCEL_PAYMENT", paymentId: cancelTarget.paymentId }),
+        body: JSON.stringify({ tableId, action: "CANCEL_PAYMENT", paymentId: deletionTarget.payment.paymentId }),
       });
       const result = (await response.json()) as { success?: boolean; message?: string; state?: State };
       if (!response.ok || !result.success || !result.state) {
@@ -252,7 +252,7 @@ export default function PaymentModal({
         return;
       }
       setState(result.state);
-      setCancelTarget(null);
+      setDeletionTarget(null);
     } catch {
       setCancelError("네트워크 오류가 발생했습니다. 다시 시도해 주세요.");
     } finally {
@@ -326,11 +326,12 @@ export default function PaymentModal({
                   return (
                   <div className="space-y-[7px]" key={payment.paymentId}>
                   <button
-                    aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제 취소`}
+                    aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제내역 삭제`}
                     className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-lg transition hover:bg-slate-50 active:bg-slate-100 ${prepaid ? "text-blue-600" : "text-slate-900"}`}
+                    disabled={busy}
                     onClick={() => {
                       setCancelError("");
-                      setCancelTarget(payment);
+                      setDeletionTarget({ kind: "SAVED", payment });
                     }}
                     type="button"
                   >
@@ -353,10 +354,9 @@ export default function PaymentModal({
                   aria-label={`${stagedCustomerPayment.name} 고객결제 예정 내역 삭제`}
                   className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-lg text-slate-900 transition hover:bg-slate-50 active:bg-slate-100"
                   disabled={busy}
-                  onClick={() => setStagedCustomerPayment(null)}
-                  title="누르면 예정 고객결제를 삭제합니다."
+                  onClick={() => { setCancelError(""); setDeletionTarget({ kind: "STAGED_CUSTOMER" }); }}
                   type="button"
-                ><span className="min-w-0 truncate">고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}장` : ""}</span><span className="ml-2 flex shrink-0 items-center gap-2"><b>{money(stagedCustomerPayment.amount)}</b><small className="text-sm text-slate-500">삭제</small></span></button>}
+                ><span className="min-w-0 truncate">고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className="ml-2 shrink-0">{money(stagedCustomerPayment.amount)}</b></button>}
               </div>
               <div className="mt-[17px] flex justify-between border-t border-slate-300 pt-[17px] text-2xl font-extrabold text-blue-700">
                 <span>받을금액</span>
@@ -450,16 +450,14 @@ export default function PaymentModal({
         onClose={() => setCustomerSelectOpen(false)}
         onSelect={customer => { setSelectedCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
       />}
-      {cancelTarget && (
-        <PaymentCancellationDialog
+      {deletionTarget && (
+        <PaymentDeletionDialog
           busy={busy}
           error={cancelError}
-          label={`${initialPaymentIds.includes(cancelTarget.paymentId) ? "선불" : ""}${paymentMethodLabel(cancelTarget)}`}
-          payment={cancelTarget}
           close={() => {
             if (busy) return;
             setCancelError("");
-            setCancelTarget(null);
+            setDeletionTarget(null);
           }}
           submit={() => void cancelPayment()}
         />
@@ -468,16 +466,12 @@ export default function PaymentModal({
   );
 }
 
-function PaymentCancellationDialog({
-  payment,
-  label,
+function PaymentDeletionDialog({
   error,
   busy,
   close,
   submit,
 }: {
-  payment: Payment;
-  label: string;
   error: string;
   busy: boolean;
   close: () => void;
@@ -485,42 +479,15 @@ function PaymentCancellationDialog({
 }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
-      <section
-        aria-modal="true"
-        className="flex min-h-[440px] w-full max-w-[461px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
-        role="dialog"
-      >
-        <PosSubHeader backLabel="결제취소 닫기" disabled={busy} onBack={close} title="결제취소" />
-        <div className="flex flex-1 flex-col px-7 pb-7 pt-6">
-        <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-3 rounded-xl border border-slate-200 px-4 py-5 text-lg font-bold text-slate-900">
-          <span className="truncate text-red-600">{label}</span>
-          <strong className="text-xl text-red-600">{money(payment.amount)}</strong>
-          <time className="text-right" dateTime={payment.paidAt}>{paymentTime(payment.paidAt)}</time>
-        </div>
-        <div className="mt-5 min-h-[52px] space-y-2">
-          {(payment.appliedAmount < payment.amount || payment.prepaidCreditAmount > 0) && <div className="rounded-lg bg-slate-50 px-4 py-3 text-base text-slate-800">
-            <div className="flex justify-between"><span>매출 적용</span><b>{money(payment.appliedAmount)}</b></div>
-            {payment.prepaidCreditAmount > 0 && <div className="mt-1 flex justify-between"><span>취소할 선불 적립</span><b>{money(payment.prepaidCreditAmount)}</b></div>}
-            {payment.changeAmount > 0 && <div className="mt-1 flex justify-between"><span>거스름돈</span><b>{money(payment.changeAmount)}</b></div>}
-          </div>}
-          {payment.methodCode === "CARD" && payment.approvalNo && (
-            <div className="flex justify-between rounded-lg bg-slate-50 px-4 py-3 text-base text-slate-800">
-              <span>승인번호</span>
-              <b>{payment.approvalNo}</b>
-            </div>
-          )}
-        </div>
-        <div aria-live="polite" className="mt-3 min-h-[96px] text-base font-bold text-red-600">
-          {error}
-        </div>
-        <button
-          className="mt-auto min-h-[68px] w-full rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:opacity-40"
-          disabled={busy}
-          onClick={submit}
-          type="button"
-        >
-          {busy ? "취소 처리 중..." : "결제취소"}
-        </button>
+      <section aria-modal="true" aria-describedby="payment-deletion-prompt" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
+        <PosSubHeader title="결제내역 삭제" />
+        <div className="px-7 py-7">
+          <p className="text-center text-xl font-bold text-slate-900" id="payment-deletion-prompt">이 결제내역을<br />삭제하시겠습니까?</p>
+          {error && <p aria-live="polite" className="mt-4 text-center text-base font-bold text-red-600">{error}</p>}
+          <div className="mt-8 grid grid-cols-2 gap-3">
+            <button className="min-h-14 rounded-xl border border-slate-300 text-lg font-bold text-slate-700 disabled:opacity-40" disabled={busy} onClick={close} type="button">취소</button>
+            <button className="min-h-14 rounded-xl bg-blue-600 text-lg font-extrabold text-white disabled:opacity-40" disabled={busy} onClick={submit} type="button">{busy ? "처리 중..." : "확인"}</button>
+          </div>
         </div>
       </section>
     </div>
