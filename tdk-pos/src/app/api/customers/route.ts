@@ -41,6 +41,11 @@ export async function GET(request: Request) {
       email: customers.email,
       memo: customers.memo,
       isPaymentManaged: customers.isPaymentManaged,
+      usesFixedCoupon: customers.usesFixedCoupon,
+      fixedCouponAmount: customers.fixedCouponAmount,
+      fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy,
+      fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled,
+      fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent,
       isActive: customers.isActive,
     }).from(customers).where(filters.length ? and(...filters) : undefined).orderBy(asc(customers.name), asc(customers.customerId));
     const ledgerRows = rows.length ? await db.select({
@@ -55,6 +60,9 @@ export async function GET(request: Request) {
       customers: rows.map(row => ({
         ...row,
         isPaymentManaged: row.isPaymentManaged === 1,
+        usesFixedCoupon: row.usesFixedCoupon === 1,
+        fixedCouponAmount: row.fixedCouponAmount === null ? null : Number(row.fixedCouponAmount),
+        fixedCouponCashChangeEnabled: row.fixedCouponCashChangeEnabled === 1,
         isActive: row.isActive === 1,
         tradeBalance: balances.get(row.customerId) ?? 0,
       })),

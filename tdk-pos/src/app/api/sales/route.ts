@@ -49,7 +49,8 @@ function dateRange(startDate: string, endDate: string) {
   return { startDate, endDate, start: `${startDate} 00:00:00`, end: `${endExclusive} 00:00:00` };
 }
 
-function paymentLabel(payment: { methodCode: string; methodName: string; methodNameSnapshot: string | null; quantity: number | null; note: string | null }) {
+function paymentLabel(payment: { methodCode: string; methodName: string; methodNameSnapshot: string | null; quantity: number | null; customerCouponQuantity: number | null; note: string | null }) {
+  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}장 고객결제`;
   if (payment.methodNameSnapshot) return `${payment.methodNameSnapshot}${payment.quantity ? ` × ${payment.quantity}매` : ""}`;
   const labels: Record<string, string> = {
     CARD: "카드",
@@ -247,6 +248,8 @@ async function listResponse(startDate: string, endDate: string) {
       methodName: paymentMethods.methodName,
       methodNameSnapshot: paymentOtherDetails.methodNameSnapshot,
       quantity: paymentOtherDetails.quantity,
+      customerCouponCustomerNameSnapshot: payments.customerCouponCustomerNameSnapshot,
+      customerCouponQuantity: payments.customerCouponQuantity,
       note: payments.note,
     }).from(payments)
       .innerJoin(paymentMethods, eq(paymentMethods.paymentMethodId, payments.paymentMethodId))
@@ -355,6 +358,11 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
       methodName: paymentMethods.methodName,
       methodNameSnapshot: paymentOtherDetails.methodNameSnapshot,
       quantity: paymentOtherDetails.quantity,
+      customerCouponCustomerNameSnapshot: payments.customerCouponCustomerNameSnapshot,
+      customerCouponQuantity: payments.customerCouponQuantity,
+      customerCouponUnitAmountSnapshot: payments.customerCouponUnitAmountSnapshot,
+      customerCouponCashChange: paymentOtherDetails.cashChangeAmount,
+      customerCouponForfeitedAmount: paymentOtherDetails.forfeitedAmount,
       note: payments.note,
       customerName: customers.name,
       customerPhone: customers.phone,
@@ -415,8 +423,12 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
       method: paymentLabel(payment),
       methodCode: payment.methodCode,
       customerDisplayName: payment.methodCode === "CUSTOMER_PAYMENT"
-        ? payment.customerName?.trim() || payment.customerPhone?.trim() || null
+        ? payment.customerCouponCustomerNameSnapshot?.trim() || payment.customerName?.trim() || payment.customerPhone?.trim() || null
         : null,
+      customerCouponQuantity: payment.customerCouponQuantity,
+      customerCouponUnitAmountSnapshot: payment.customerCouponUnitAmountSnapshot === null ? null : won(payment.customerCouponUnitAmountSnapshot),
+      customerCouponCashChange: payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity ? won(payment.customerCouponCashChange ?? 0) : 0,
+      customerCouponForfeitedAmount: payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity ? won(payment.customerCouponForfeitedAmount ?? 0) : 0,
       amount: won(payment.amount),
       appliedAmount: won(payment.appliedAmount),
       prepaidCreditAmount: ledgerByPayment.get(payment.paymentId)?.credit ?? 0,

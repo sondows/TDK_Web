@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
-import { meetsCashChangeThreshold } from "@/lib/other-payment-cash-change";
+import { resolveQuantityOverage } from "@/lib/other-payment-cash-change";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
@@ -95,7 +95,7 @@ async function activeCheckoutIds(tx: Parameters<Parameters<typeof db.transaction
 
 async function paymentStateForCheckouts(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], checkoutIds: number[]) {
   if (!checkoutIds.length) return [];
-  const rows = await tx.select({ paymentId: payments.paymentId, amount: payments.amount, appliedAmount: payments.appliedAmount, methodCode: paymentMethods.methodCode, methodName: paymentMethods.methodName, methodNameSnapshot: paymentOtherDetails.methodNameSnapshot, quantity: paymentOtherDetails.quantity, otherSubmittedAmount: paymentOtherDetails.submittedAmount, otherChangeAmount: paymentOtherDetails.cashChangeAmount, paidAt: payments.paidAt, approvalNo: payments.approvalNo, note: payments.note })
+  const rows = await tx.select({ paymentId: payments.paymentId, amount: payments.amount, appliedAmount: payments.appliedAmount, methodCode: paymentMethods.methodCode, methodName: paymentMethods.methodName, methodNameSnapshot: paymentOtherDetails.methodNameSnapshot, quantity: paymentOtherDetails.quantity, customerCouponQuantity: payments.customerCouponQuantity, customerCouponUnitAmountSnapshot: payments.customerCouponUnitAmountSnapshot, otherSubmittedAmount: paymentOtherDetails.submittedAmount, otherChangeAmount: paymentOtherDetails.cashChangeAmount, paidAt: payments.paidAt, approvalNo: payments.approvalNo, note: payments.note })
     .from(payments)
     .innerJoin(paymentMethods, eq(payments.paymentMethodId, paymentMethods.paymentMethodId))
     .leftJoin(paymentOtherDetails, eq(payments.paymentId, paymentOtherDetails.paymentId))
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
   try {
     const processedByStaffId = await actor();
     requestPhase = "request parsing";
-    const body = await request.json() as { tableId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown };
+    const body = await request.json() as { tableId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
     const tableId = Number(body.tableId);
     if (!Number.isInteger(tableId) || tableId <= 0) throw new CheckoutError("테이블을 확인해 주세요.", 400);
     const action = body.action;
@@ -230,13 +230,15 @@ export async function POST(request: Request) {
         requestPhase = "validate customer payment";
         const customerId = Number(body.customerId);
         const amount = Number(body.amount);
+        const couponQuantity = body.couponQuantity === undefined || body.couponQuantity === null ? null : Number(body.couponQuantity);
         const requestKey = body.requestKey;
         if (!Number.isSafeInteger(customerId) || customerId <= 0 ||
           !Number.isSafeInteger(amount) || amount <= 0 || amount > 999999999999 ||
+          (couponQuantity !== null && (!Number.isSafeInteger(couponQuantity) || couponQuantity <= 0 || couponQuantity > 9999)) ||
           typeof requestKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestKey)) {
           throw new CheckoutError("고객결제 요청을 확인해 주세요.", 400);
         }
-        const [customer] = await tx.select({ customerId: customers.customerId })
+        const [customer] = await tx.select({ customerId: customers.customerId, name: customers.name, usesFixedCoupon: customers.usesFixedCoupon, fixedCouponAmount: customers.fixedCouponAmount, fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy, fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled, fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent })
           .from(customers)
           .where(and(eq(customers.customerId, customerId), eq(customers.isActive, 1), eq(customers.isPaymentManaged, 1)))
           .for("update").limit(1);
@@ -250,8 +252,24 @@ export async function POST(request: Request) {
         const total = Math.max(0, bill.gross - bill.discount);
         const remaining = Math.max(0, total - paid);
         if (!remaining) throw new CheckoutError("이미 결제가 완료되었습니다.");
-        if (amount > remaining) throw new CheckoutError("고객결제 금액이 받을금액보다 많습니다.", 409);
-        if (amount !== remaining) throw new CheckoutError("다른 결제수단을 포함해 받을금액을 모두 채운 뒤 결제완료를 눌러 주세요.", 409);
+        if (couponQuantity === null && amount > remaining) throw new CheckoutError("고객결제 금액이 받을금액보다 많습니다.", 409);
+        const couponUnitAmount = couponQuantity === null ? null : Number(customer.fixedCouponAmount ?? 0);
+        if (couponQuantity !== null && (customer.usesFixedCoupon !== 1 || !couponUnitAmount || !Number.isSafeInteger(couponUnitAmount) || couponUnitAmount <= 0 || amount !== couponQuantity * couponUnitAmount))
+          throw new CheckoutError("고객의 정액쿠폰 설정과 결제금액이 일치하지 않습니다. 다시 선택해 주세요.", 409);
+        const couponTendered = couponQuantity === null ? amount : couponQuantity * couponUnitAmount!;
+        const couponApplied = Math.min(couponTendered, remaining);
+        const couponOverage = couponQuantity === null ? { cashChange: 0, forfeited: 0, error: null } : resolveQuantityOverage({
+          tenderedAmount: couponTendered,
+          appliedAmount: couponApplied,
+          balancePolicy: customer.fixedCouponBalancePolicy,
+          cashChangeEnabled: customer.fixedCouponCashChangeEnabled,
+          cashChangeMinPercent: customer.fixedCouponCashChangeMinPercent,
+          customerId,
+        });
+        if (couponOverage.error === "THRESHOLD_MISSING") throw new CheckoutError("현금 거스름 기준 설정을 확인해 주세요.", 409);
+        if (couponOverage.error === "THRESHOLD_NOT_MET") throw new CheckoutError(`${customer.fixedCouponCashChangeMinPercent}% 이상 사용 시 현금 거스름 가능`, 409);
+        if (couponOverage.error === "CHANGE_DISABLED") throw new CheckoutError("이 쿠폰은 잔액 현금반환이 설정되어 있지 않습니다.", 409);
+        const couponLedgerDebit = couponQuantity === null ? amount : couponOverage.forfeited > 0 ? couponTendered : couponApplied;
         const [method] = await tx.select({ id: paymentMethods.paymentMethodId })
           .from(paymentMethods).where(and(eq(paymentMethods.methodCode, "CUSTOMER_PAYMENT"), eq(paymentMethods.isActive, 1))).limit(1);
         if (!method) throw new CheckoutError("고객결제 수단이 설정되지 않았습니다.", 409);
@@ -272,10 +290,25 @@ export async function POST(request: Request) {
         }
         const tableDescription = bill.tableNos.length === 1 ? `${bill.tableNos[0]}번 테이블 식사` : `${bill.tableNos.join(", ")}번 테이블 식사`;
         requestPhase = "insert customer payment and ledger";
-        const [createdPayment] = await tx.insert(payments).values({ checkoutId, paymentMethodId: method.id, amount: decimal(amount), appliedAmount: decimal(amount), customerId, status: "APPROVED", processedByStaffId, note: tableDescription }).$returningId();
-        await tx.insert(customerPrepaidLedger).values({ customerId, paymentId: createdPayment.paymentId, entryType: "CUSTOMER_PAYMENT", amount: signedDecimal(-amount), memo: tableDescription, requestKey, createdByStaffId: processedByStaffId });
-        const nextPaid = checkoutPaid + amount;
-        const completed = paid + amount >= total;
+        const couponMemo = couponQuantity === null ? "" : ` · 정액쿠폰 ${couponQuantity}장`;
+        const [createdPayment] = await tx.insert(payments).values({ checkoutId, paymentMethodId: method.id, amount: decimal(couponQuantity === null ? amount : couponTendered), appliedAmount: decimal(couponApplied), customerId, customerCouponCustomerNameSnapshot: couponQuantity === null ? null : customer.name, customerCouponQuantity: couponQuantity, customerCouponUnitAmountSnapshot: couponUnitAmount === null ? null : decimal(couponUnitAmount), status: "APPROVED", processedByStaffId, note: tableDescription }).$returningId();
+        if (couponQuantity !== null) await tx.insert(paymentOtherDetails).values({
+          paymentId: createdPayment.paymentId,
+          methodNameSnapshot: `${customer.name} 정액쿠폰`,
+          inputTypeSnapshot: "QUANTITY",
+          quantity: couponQuantity,
+          unitAmountSnapshot: decimal(couponUnitAmount!),
+          submittedAmount: decimal(couponTendered),
+          appliedAmount: decimal(couponApplied),
+          balancePolicySnapshot: couponOverage.cashChange > 0 ? "CASH_CHANGE" : customer.fixedCouponBalancePolicy,
+          cashChangeEnabledSnapshot: customer.fixedCouponCashChangeEnabled,
+          cashChangeMinPercentSnapshot: customer.fixedCouponCashChangeEnabled === 1 ? customer.fixedCouponCashChangeMinPercent : null,
+          cashChangeAmount: decimal(couponOverage.cashChange),
+          forfeitedAmount: decimal(couponOverage.forfeited),
+        });
+        await tx.insert(customerPrepaidLedger).values({ customerId, paymentId: createdPayment.paymentId, entryType: "CUSTOMER_PAYMENT", amount: signedDecimal(-couponLedgerDebit), memo: `${tableDescription}${couponMemo}`, requestKey, createdByStaffId: processedByStaffId });
+        const nextPaid = checkoutPaid + couponApplied;
+        const completed = paid + couponApplied >= total;
         requestPhase = "update customer checkout status";
         await tx.update(checkouts).set({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: decimal(nextPaid), status: completed ? "PAID" : "PARTIALLY_PAID", completedAt: completed ? sql`CURRENT_TIMESTAMP` : null }).where(eq(checkouts.checkoutId, checkoutId));
         if (completed) {
@@ -284,7 +317,7 @@ export async function POST(request: Request) {
           if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
           await tx.update(tableSessions).set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId: processedByStaffId }).where(inArray(tableSessions.sessionId, bill.sessionIds));
         }
-        return { completed, change: 0, tendered: amount, applied: amount, tableId };
+        return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId };
       }
       const isOther = action === "PAY_OTHER";
       requestPhase = isOther ? "load configured other payment method" : "load payment method";
@@ -342,20 +375,12 @@ export async function POST(request: Request) {
       let otherChange = 0;
       let forfeited = 0;
       if (isOther && configured && overpayment && prepaidCredit === 0) {
-        if (configured.cashChangeEnabled === 1) {
-          if (configured.cashChangeMinPercent === null) throw new CheckoutError("현금 거스름 가능 기준 설정을 확인해 주세요.", 409);
-          if (!meetsCashChangeThreshold(applied, tendered, configured.cashChangeMinPercent)) throw new CheckoutError(`${configured.cashChangeMinPercent}% 이상 사용 시 현금 거스름 가능`, 409);
-          otherChange = tendered - applied;
-        } else if (configured.cashChangeEnabled === 0) {
-          if (customerOverpaymentWithoutCredit || configured.balancePolicy !== "FORFEIT") {
-            throw new CheckoutError("이 결제수단은 현금 거스름을 사용할 수 없습니다.", 409);
-          }
-          forfeited = tendered - applied;
-        } else {
-          // NULL marks settings created before the threshold feature: preserve their policy.
-          otherChange = customerOverpaymentWithoutCredit || (customerId === null && configured.balancePolicy === "CASH_CHANGE") ? tendered - applied : 0;
-          forfeited = customerId === null && configured.balancePolicy === "FORFEIT" ? tendered - applied : 0;
-        }
+        const overage = resolveQuantityOverage({ tenderedAmount: tendered, appliedAmount: applied, balancePolicy: configured.balancePolicy, cashChangeEnabled: configured.cashChangeEnabled, cashChangeMinPercent: configured.cashChangeMinPercent, prepaidCredit, customerId, customerOverpaymentWithoutCredit });
+        if (overage.error === "THRESHOLD_MISSING") throw new CheckoutError("현금 거스름 가능 기준 설정을 확인해 주세요.", 409);
+        if (overage.error === "THRESHOLD_NOT_MET") throw new CheckoutError(`${configured.cashChangeMinPercent}% 이상 사용 시 현금 거스름 가능`, 409);
+        if (overage.error === "CHANGE_DISABLED") throw new CheckoutError("이 결제수단은 현금 거스름을 사용할 수 없습니다.", 409);
+        otherChange = overage.cashChange;
+        forfeited = overage.forfeited;
       }
       let checkoutId = checkout?.checkoutId;
       requestPhase = "create or update checkout rows";

@@ -28,9 +28,14 @@ export async function GET(request: Request) {
       name: customers.name,
       contactName: customers.contactName,
       phone: customers.phone,
+      usesFixedCoupon: customers.usesFixedCoupon,
+      fixedCouponAmount: customers.fixedCouponAmount,
+      fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy,
+      fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled,
+      fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent,
     }).from(customers).where(condition).orderBy(asc(customers.name), asc(customers.customerId));
 
-    if (!includeBalance || !rows.length) return json({ success: true, customers: rows });
+    if (!includeBalance || !rows.length) return json({ success: true, customers: rows.map(row => ({ ...row, usesFixedCoupon: row.usesFixedCoupon === 1, fixedCouponAmount: row.fixedCouponAmount === null ? null : Number(row.fixedCouponAmount) })) });
     const balanceRows = await db.select({
       customerId: customerPrepaidLedger.customerId,
       balance: sql<string>`COALESCE(SUM(${customerPrepaidLedger.amount}), 0)`,
@@ -38,7 +43,7 @@ export async function GET(request: Request) {
       .where(inArray(customerPrepaidLedger.customerId, rows.map(row => row.customerId)))
       .groupBy(customerPrepaidLedger.customerId);
     const balances = new Map(balanceRows.map(row => [row.customerId, Number(row.balance)]));
-    return json({ success: true, customers: rows.map(row => ({ ...row, tradeBalance: balances.get(row.customerId) ?? 0 })) });
+    return json({ success: true, customers: rows.map(row => ({ ...row, usesFixedCoupon: row.usesFixedCoupon === 1, fixedCouponAmount: row.fixedCouponAmount === null ? null : Number(row.fixedCouponAmount), tradeBalance: balances.get(row.customerId) ?? 0 })) });
   } catch (error) {
     console.error("Failed to search POS customers", error);
     return json({ success: false, message: "고객 목록을 불러오지 못했습니다." }, 500);

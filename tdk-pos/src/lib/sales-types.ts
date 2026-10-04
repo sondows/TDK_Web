@@ -51,6 +51,10 @@ export type SaleDetail = {
     method: string;
     methodCode: string;
     customerDisplayName: string | null;
+    customerCouponQuantity: number | null;
+    customerCouponUnitAmountSnapshot: number | null;
+    customerCouponCashChange: number;
+    customerCouponForfeitedAmount: number;
     amount: number;
     appliedAmount: number;
     prepaidCreditAmount: number;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { meetsCashChangeThreshold } from "./other-payment-cash-change.ts";
+import { meetsCashChangeThreshold, resolveQuantityOverage } from "./other-payment-cash-change.ts";
 
 test("60% cash change boundary for one voucher", () => {
   assert.equal(meetsCashChangeThreshold(5_000, 10_000, 60), false);
@@ -25,5 +25,11 @@ test("zero and full-use thresholds", () => {
 test("80% voucher cash-change boundary from the reported checkout", () => {
   assert.equal(meetsCashChangeThreshold(45_000, 50_000, 80), true);
   assert.equal(meetsCashChangeThreshold(40_000, 50_000, 80), true);
-  assert.equal(meetsCashChangeThreshold(39_000, 50_000, 80), false);
+assert.equal(meetsCashChangeThreshold(39_000, 50_000, 80), false);
+
+assert.deepEqual(resolveQuantityOverage({ tenderedAmount: 40_000, appliedAmount: 38_000, balancePolicy: "CASH_CHANGE", cashChangeEnabled: 1, cashChangeMinPercent: 80, customerId: 1 }), { cashChange: 2_000, forfeited: 0, error: null });
+assert.equal(resolveQuantityOverage({ tenderedAmount: 40_000, appliedAmount: 38_000, balancePolicy: "CASH_CHANGE", cashChangeEnabled: 1, cashChangeMinPercent: 80, customerId: 1 }).cashChange, 2_000);
+assert.equal(resolveQuantityOverage({ tenderedAmount: 40_000, appliedAmount: 30_000, balancePolicy: "CASH_CHANGE", cashChangeEnabled: 1, cashChangeMinPercent: 80, customerId: 1 }).error, "THRESHOLD_NOT_MET");
+assert.deepEqual(resolveQuantityOverage({ tenderedAmount: 40_000, appliedAmount: 38_000, balancePolicy: "FORFEIT", cashChangeEnabled: 0, cashChangeMinPercent: null, customerId: 1 }), { cashChange: 0, forfeited: 2_000, error: null });
+assert.equal(resolveQuantityOverage({ tenderedAmount: 40_000, appliedAmount: 38_000, balancePolicy: "CASH_CHANGE", cashChangeEnabled: 0, cashChangeMinPercent: null, customerId: 1 }).error, "CHANGE_DISABLED");
 });

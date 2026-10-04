@@ -21,6 +21,7 @@ type Payment = {
   note: string | null;
   methodNameSnapshot: string | null;
   quantity: number | null;
+  customerCouponQuantity: number | null;
   receivedAmount: number;
   changeAmount: number;
 };
@@ -44,9 +45,10 @@ type OverpaymentPrompt = {
   excess: number;
   requestBody: Record<string, unknown>;
 };
-type StagedCustomerPayment = { customerId: number; name: string; amount: number; requestKey: string };
+type StagedCustomerPayment = { customerId: number; name: string; amount: number; requestKey: string; couponQuantity: number | null };
 const money = (amount: number) => formatMoney(amount);
 const paymentMethodLabel = (payment: Payment) => {
+  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}장 고객결제`;
   if (payment.methodNameSnapshot) return payment.quantity ? `${payment.methodNameSnapshot} × ${payment.quantity}매` : payment.methodNameSnapshot;
   const labels: Record<string, string> = {
     CARD: "카드",
@@ -191,8 +193,8 @@ export default function PaymentModal({
     }
     return request(requestBody);
   };
-  const stageCustomerPayment = (customerId: number, name: string, amount: number) => {
-    setStagedCustomerPayment({ customerId, name, amount, requestKey: crypto.randomUUID() });
+  const stageCustomerPayment = (customerId: number, name: string, amount: number, coupon?: { quantity: number }) => {
+    setStagedCustomerPayment({ customerId, name, amount, requestKey: crypto.randomUUID(), couponQuantity: coupon?.quantity ?? null });
     setInput("");
     setError("");
   };
@@ -222,7 +224,7 @@ export default function PaymentModal({
     void request({ action: "PAY", methodCode, amount: amount || undefined, customerId: selectedCustomer?.customerId, otherLabel });
   };
   const complete = () => void request(stagedCustomerPayment
-    ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey }
+    ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey, couponQuantity: stagedCustomerPayment.couponQuantity }
     : { action: "COMPLETE" });
   const cancelPayment = async () => {
     if (!cancelTarget || busy) return;
@@ -344,7 +346,7 @@ export default function PaymentModal({
                   onClick={() => setStagedCustomerPayment(null)}
                   title="누르면 예정 고객결제를 삭제합니다."
                   type="button"
-                ><span className="min-w-0 truncate">고객결제({stagedCustomerPayment.name})</span><span className="ml-2 flex shrink-0 items-center gap-2"><b>{money(stagedCustomerPayment.amount)}</b><small className="text-sm text-slate-500">삭제</small></span></button>}
+                ><span className="min-w-0 truncate">고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}장` : ""}</span><span className="ml-2 flex shrink-0 items-center gap-2"><b>{money(stagedCustomerPayment.amount)}</b><small className="text-sm text-slate-500">삭제</small></span></button>}
               </div>
               <div className="mt-[17px] flex justify-between border-t border-slate-300 pt-[17px] text-2xl font-extrabold text-blue-700">
                 <span>받을금액</span>

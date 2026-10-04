@@ -6,6 +6,11 @@ export type CustomerSummary = {
   email: string | null;
   memo: string | null;
   isPaymentManaged: boolean;
+  usesFixedCoupon: boolean;
+  fixedCouponAmount: number | null;
+  fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
+  fixedCouponCashChangeEnabled: boolean;
+  fixedCouponCashChangeMinPercent: number | null;
   isActive: boolean;
   tradeBalance: number;
 };
@@ -17,9 +22,14 @@ export type CustomerCreateDraft = {
   email: string;
   memo: string;
   isPaymentManaged: boolean;
+  usesFixedCoupon: boolean;
+  fixedCouponAmount: string;
+  fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
+  fixedCouponCashChangeEnabled: boolean;
+  fixedCouponCashChangeMinPercent: string;
 };
 
-export type CustomerFieldErrors = Partial<Record<"name" | "contactName" | "phone" | "email" | "memo" | "isPaymentManaged", string>>;
+export type CustomerFieldErrors = Partial<Record<"name" | "contactName" | "phone" | "email" | "memo" | "isPaymentManaged" | "usesFixedCoupon" | "fixedCouponAmount" | "fixedCouponBalancePolicy" | "fixedCouponCashChangeEnabled" | "fixedCouponCashChangeMinPercent", string>>;
 
 export type CustomerCreateValues = {
   name: string;
@@ -28,6 +38,11 @@ export type CustomerCreateValues = {
   email: string | null;
   memo: string | null;
   isPaymentManaged: number;
+  usesFixedCoupon: number;
+  fixedCouponAmount: string | null;
+  fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
+  fixedCouponCashChangeEnabled: number;
+  fixedCouponCashChangeMinPercent: number | null;
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -56,6 +71,40 @@ export function validateCustomerCreate(input: unknown): { values: CustomerCreate
   if (body.isPaymentManaged !== undefined && typeof body.isPaymentManaged !== "boolean") {
     errors.isPaymentManaged = "결제관리 여부를 확인해 주세요.";
   }
+  if (body.usesFixedCoupon !== undefined && typeof body.usesFixedCoupon !== "boolean") {
+    errors.usesFixedCoupon = "정액쿠폰 사용 여부를 확인해 주세요.";
+  }
+  const usesFixedCoupon = body.usesFixedCoupon === true;
+  const rawPolicy = body.fixedCouponBalancePolicy;
+  const fixedCouponBalancePolicy = rawPolicy === "CASH_CHANGE" ? "CASH_CHANGE" : "FORFEIT";
+  if (usesFixedCoupon && rawPolicy !== "CASH_CHANGE" && rawPolicy !== "FORFEIT") {
+    errors.fixedCouponBalancePolicy = "쿠폰 초과금액 처리 방식을 선택해 주세요.";
+  }
+  const rawCashChangeEnabled = body.fixedCouponCashChangeEnabled;
+  if (usesFixedCoupon && typeof rawCashChangeEnabled !== "boolean") {
+    errors.fixedCouponCashChangeEnabled = "현금 거스름 사용 여부를 확인해 주세요.";
+  }
+  const fixedCouponCashChangeEnabled = rawCashChangeEnabled === true;
+  const rawCashChangePercent = body.fixedCouponCashChangeMinPercent;
+  let fixedCouponCashChangeMinPercent: number | null = null;
+  if (usesFixedCoupon && fixedCouponCashChangeEnabled) {
+    const percent = typeof rawCashChangePercent === "string" || typeof rawCashChangePercent === "number" ? Number(rawCashChangePercent) : NaN;
+    if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+      errors.fixedCouponCashChangeMinPercent = "현금 거스름 기준을 0~100 사이의 정수로 입력해 주세요.";
+    } else {
+      fixedCouponCashChangeMinPercent = percent;
+    }
+  }
+  const rawCouponAmount = body.fixedCouponAmount;
+  let fixedCouponAmount: string | null = null;
+  if (usesFixedCoupon) {
+    const couponAmount = typeof rawCouponAmount === "string" || typeof rawCouponAmount === "number" ? Number(rawCouponAmount) : NaN;
+    if (!Number.isSafeInteger(couponAmount) || couponAmount <= 0 || couponAmount > 999999999999) {
+      errors.fixedCouponAmount = "쿠폰 1장 금액을 1원 이상의 정수로 입력해 주세요.";
+    } else {
+      fixedCouponAmount = couponAmount.toFixed(2);
+    }
+  }
   if (Object.keys(errors).length) return { values: null, errors };
   return {
     values: {
@@ -65,6 +114,11 @@ export function validateCustomerCreate(input: unknown): { values: CustomerCreate
       email: email || null,
       memo: memo || null,
       isPaymentManaged: body.isPaymentManaged === true ? 1 : 0,
+      usesFixedCoupon: usesFixedCoupon ? 1 : 0,
+      fixedCouponAmount,
+      fixedCouponBalancePolicy,
+      fixedCouponCashChangeEnabled: fixedCouponCashChangeEnabled ? 1 : 0,
+      fixedCouponCashChangeMinPercent,
     },
     errors,
   };

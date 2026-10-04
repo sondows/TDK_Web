@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validateCustomerCreate, type CustomerCreateDraft, type CustomerFieldErrors, type CustomerSummary } from "@/lib/customer";
+import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import styles from "../admin.module.css";
 
 export default function CustomerCreateModal({ customer, onClose, onSaved }: { customer: CustomerSummary | null; onClose: () => void; onSaved: () => void }) {
@@ -10,6 +11,10 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
   const busyRef = useRef(false);
   const [draft, setDraft] = useState<CustomerCreateDraft>({
     name: customer?.name ?? "", contactName: customer?.contactName ?? "", phone: customer?.phone ?? "", email: customer?.email ?? "", memo: customer?.memo ?? "", isPaymentManaged: customer?.isPaymentManaged ?? false,
+    usesFixedCoupon: customer?.usesFixedCoupon ?? false, fixedCouponAmount: customer?.fixedCouponAmount ? String(customer.fixedCouponAmount) : "",
+    fixedCouponBalancePolicy: customer?.fixedCouponBalancePolicy ?? "FORFEIT",
+    fixedCouponCashChangeEnabled: customer?.fixedCouponCashChangeEnabled ?? false,
+    fixedCouponCashChangeMinPercent: customer?.fixedCouponCashChangeMinPercent === null ? "" : String(customer?.fixedCouponCashChangeMinPercent ?? ""),
   });
   const [isActive, setIsActive] = useState(customer?.isActive ?? true);
   const [errors, setErrors] = useState<CustomerFieldErrors>({});
@@ -81,8 +86,8 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
       ref={dialogRef}
     >
       <div className={styles.customerModalHeader}>
-        <h2 id="customer-create-title">{customer ? "고객 수정" : "고객등록"}</h2>
-        <button aria-label={customer ? "고객 수정 닫기" : "고객등록 닫기"} className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button>
+        {customer ? <div className="flex items-center gap-3"><AdminBackLink ariaLabel="고객관리로 돌아가기" title="고객관리로 돌아가기" disabled={busy} onNavigate={onClose} size={36} iconSize={18} /><h2 id="customer-create-title">고객 수정</h2></div> : <h2 id="customer-create-title">고객등록</h2>}
+        {!customer && <button aria-label="고객등록 닫기" className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button>}
       </div>
       <form noValidate onSubmit={submit}>
         <div className={styles.customerModalFields}>
@@ -157,7 +162,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
             />
             {errors.memo && <p className={styles.customerFieldError} role="alert">{errors.memo}</p>}
           </div>
-          <div className={styles.customerPaymentField}>
+          <div className={`${styles.customerPaymentField} ${styles.customerInlineSetting}`}>
             <label className={styles.customerPaymentLabel} htmlFor="customer-create-payment-managed">
               <input
                 checked={draft.isPaymentManaged}
@@ -170,7 +175,40 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
             </label>
             <p>선불금·미수금 등 고객별 결제관리가 필요한 경우 사용</p>
           </div>
-          {customer && <div className={styles.customerPaymentField}>
+          <div className={`${styles.customerPaymentField} ${styles.customerCouponSetting}`}>
+            <label className={styles.customerPaymentLabel} htmlFor="customer-fixed-coupon-enabled">
+              <input checked={draft.usesFixedCoupon} disabled={busy} id="customer-fixed-coupon-enabled" onChange={event => update("usesFixedCoupon", event.target.checked)} type="checkbox" />
+              정액쿠폰 사용
+            </label>
+            {draft.usesFixedCoupon && <div className={styles.customerCouponOptions}>
+              <div className={styles.customerCouponAmountRow}>
+                <label htmlFor="customer-fixed-coupon-amount">쿠폰 1장 금액</label>
+                <input aria-invalid={Boolean(errors.fixedCouponAmount)} className={`${styles.customerFieldInput} ${styles.customerCouponAmountInput}`} disabled={busy} id="customer-fixed-coupon-amount" inputMode="numeric" min="1" onChange={event => update("fixedCouponAmount", event.target.value.replace(/\D/g, ""))} type="number" value={draft.fixedCouponAmount} />
+                {errors.fixedCouponAmount && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponAmount}</p>}
+              </div>
+              <div aria-label="초과금액 처리" className={styles.customerCouponPolicyRow} role="group">
+                <span>초과금액 처리</span>
+                <div>
+                  <label><input checked={draft.fixedCouponBalancePolicy === "CASH_CHANGE"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "CASH_CHANGE")} type="radio" />잔액 현금반환</label>
+                  <label><input checked={draft.fixedCouponBalancePolicy === "FORFEIT"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "FORFEIT")} type="radio" />잔액 반환 없음</label>
+                </div>
+                {errors.fixedCouponBalancePolicy && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponBalancePolicy}</p>}
+              </div>
+              <div className={styles.customerCouponCashRow}>
+                <label className={styles.customerPaymentLabel} htmlFor="customer-fixed-coupon-cash-change">
+                  <input checked={draft.fixedCouponCashChangeEnabled} disabled={busy} id="customer-fixed-coupon-cash-change" onChange={event => update("fixedCouponCashChangeEnabled", event.target.checked)} type="checkbox" />현금 거스름 사용
+                </label>
+                {draft.fixedCouponCashChangeEnabled && <div className={styles.customerCouponThreshold}>
+                  <label htmlFor="customer-fixed-coupon-cash-change-percent">현금 반환 기준</label>
+                  <input aria-invalid={Boolean(errors.fixedCouponCashChangeMinPercent)} className={`${styles.customerFieldInput} ${styles.customerPercentInput}`} disabled={busy} id="customer-fixed-coupon-cash-change-percent" inputMode="numeric" min="0" max="100" onChange={event => update("fixedCouponCashChangeMinPercent", event.target.value.replace(/\D/g, ""))} type="number" value={draft.fixedCouponCashChangeMinPercent} />
+                  <span>% 이상 사용 시</span>
+                  {errors.fixedCouponCashChangeMinPercent && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponCashChangeMinPercent}</p>}
+                </div>}
+              </div>
+            </div>}
+            <p>사용 시 POS 고객결제에서 정해진 액면가의 쿠폰 매수를 선택할 수 있습니다.</p>
+          </div>
+          {customer && <div className={`${styles.customerPaymentField} ${styles.customerInlineSetting}`}>
             <label className={styles.customerPaymentLabel} htmlFor="customer-edit-active">
               <input checked={isActive} disabled={busy} id="customer-edit-active" onChange={event => setIsActive(event.target.checked)} type="checkbox" />
               사용
@@ -180,7 +218,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
           {notice && <p className={styles.customerModalNotice} role="status">{notice}</p>}
         </div>
         <div className={styles.customerModalFooter}>
-          <button className={styles.customerCancelButton} disabled={busy} onClick={onClose} type="button">취소</button>
+          {!customer && <button className={styles.customerCancelButton} disabled={busy} onClick={onClose} type="button">취소</button>}
           <button className={styles.customerSubmitButton} disabled={busy} type="submit">{busy ? "저장 중..." : customer ? "저장" : "등록"}</button>
         </div>
       </form>
