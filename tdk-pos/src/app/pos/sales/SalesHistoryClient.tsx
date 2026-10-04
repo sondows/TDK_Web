@@ -8,7 +8,7 @@ import { printReceipt as printLocalReceipt } from "@/lib/receipt-print";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SalesListResponse } from "@/lib/sales-types";
 import PosSubHeader from "../PosSubHeader";
 
-const salesGridColumns = "grid-cols-[55px_120px_400px_120px_200px_minmax(0,1fr)]";
+const salesGridColumns = "grid-cols-[minmax(0,10fr)_minmax(0,15fr)_minmax(0,35fr)_minmax(0,12fr)_minmax(0,15fr)_minmax(0,13fr)]";
 import AdminBackLink from "../admin/AdminBackLink";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
@@ -289,8 +289,8 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
           </>
         } />
 
-        <div className={`grid shrink-0 ${salesGridColumns} items-center gap-0 border-b border-slate-200 py-3 text-sm font-bold text-slate-500`}>
-          <span className="text-left">주문시간</span><span className="text-left">테이블</span><span className="text-left">메뉴</span><span className="text-right">결제금액</span><span className="text-left">결제수단</span><span className="text-center">거래상태</span>
+        <div className={`box-border grid w-full min-w-0 shrink-0 ${salesGridColumns} items-center gap-0 border-b border-slate-200 py-3 text-sm font-bold text-slate-500`}>
+          <span className="box-border min-w-0 pl-[15px] text-left">주문시간</span><span className="box-border min-w-0 text-left">테이블</span><span className="box-border min-w-0 text-left">메뉴</span><span className="box-border min-w-0 pl-2 text-left">결제금액</span><span className="box-border min-w-0 text-center">결제수단</span><span className="box-border min-w-0 text-center">거래상태</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
@@ -299,17 +299,17 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
             const status = statusStyle[sale.status];
             return (
               <button
-                className={`grid min-h-[72px] w-full ${salesGridColumns} items-center gap-0 border-b border-slate-100 text-left text-base transition hover:bg-blue-50 active:bg-blue-100`}
+                className={`box-border grid min-h-[72px] w-full min-w-0 ${salesGridColumns} items-center gap-0 border-b border-slate-100 text-left text-base transition hover:bg-blue-50 active:bg-blue-100`}
                 key={sale.checkoutId}
                 onClick={() => void openDetail(sale.checkoutId)}
                 type="button"
               >
-                <time className="whitespace-nowrap">{showOrderDates && `${orderDate(sale.orderedAt).monthDay} `}{time(sale.orderedAt)}</time>
-                <CompactTableLabel tableNos={sale.tableNos} />
-                <span className="truncate whitespace-nowrap">{sale.menuSummary}</span>
-                <strong className="text-right">{formatMoney(sale.totalAmount)}</strong>
-                <span className="min-w-0 overflow-hidden whitespace-nowrap text-left text-xs">{sale.paymentMethods}</span>
-                <strong className={`text-center ${status.className}`}>{status.label}</strong>
+                <time className="box-border min-w-0 truncate whitespace-nowrap pl-[15px] text-left">{showOrderDates && `${orderDate(sale.orderedAt).monthDay} `}{time(sale.orderedAt)}</time>
+                <span className="box-border min-w-0 overflow-hidden text-left"><CompactTableLabel tableNos={sale.tableNos} /></span>
+                <span className="box-border min-w-0 truncate whitespace-nowrap text-left">{sale.menuSummary}</span>
+                <strong className="box-border min-w-0 whitespace-nowrap pl-2 text-left">{formatMoney(sale.totalAmount)}</strong>
+                <span className="box-border min-w-0 truncate whitespace-nowrap text-center text-xs">{sale.paymentMethods}</span>
+                <strong className={`box-border min-w-0 text-center ${status.className}`}>{status.label}</strong>
               </button>
             );
           }) : (
