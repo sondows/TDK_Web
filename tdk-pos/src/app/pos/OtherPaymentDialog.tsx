@@ -128,7 +128,8 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
         const staged = submitCustomer(selectedCustomer.customerId, selectedCustomer.name, customerPaymentAmount, customerCouponQuantity === null ? undefined : { quantity: customerCouponQuantity });
         if (staged) close();
         else setError("고객결제를 결제내역에 추가하지 못했습니다.");
-      } catch {
+      } catch (reason) {
+        console.error("[customer payment] staging failed", reason);
         setError("고객결제를 결제내역에 추가하지 못했습니다.");
       } finally { submitting.current = false; }
       return;

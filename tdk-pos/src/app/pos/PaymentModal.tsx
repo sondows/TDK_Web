@@ -47,6 +47,14 @@ type OverpaymentPrompt = {
 };
 type StagedCustomerPayment = { customerId: number; name: string; amount: number; requestKey: string; couponQuantity: number | null };
 const money = (amount: number) => formatMoney(amount);
+const newCustomerPaymentRequestKey = () => {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const value = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+};
 const paymentMethodLabel = (payment: Payment) => {
   if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}장 고객결제`;
   if (payment.methodNameSnapshot) return payment.quantity ? `${payment.methodNameSnapshot} × ${payment.quantity}매` : payment.methodNameSnapshot;
@@ -194,7 +202,7 @@ export default function PaymentModal({
     return request(requestBody);
   };
   const stageCustomerPayment = (customerId: number, name: string, amount: number, coupon?: { quantity: number }): boolean => {
-    setStagedCustomerPayment({ customerId, name, amount, requestKey: crypto.randomUUID(), couponQuantity: coupon?.quantity ?? null });
+    setStagedCustomerPayment({ customerId, name, amount, requestKey: newCustomerPaymentRequestKey(), couponQuantity: coupon?.quantity ?? null });
     setInput("");
     setError("");
     setOtherOpen(false);
