@@ -27,7 +27,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
   customerRemaining: number;
   close: () => void;
   submit: (methodId: number, inputValue: number, tendered: number, methodName: string, cashChangeEnabled: boolean) => Promise<{ ok: boolean; message?: string }>;
-  submitCustomer: (customerId: number, name: string, amount: number, coupon?: { quantity: number }) => void;
+  submitCustomer: (customerId: number, name: string, amount: number, coupon?: { quantity: number }) => boolean;
   busy: boolean;
   allowOverpayment: boolean;
 }) {
@@ -121,9 +121,16 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
     if (busy || submitting.current) return;
     if (selectedCustomer) {
       if (!validCustomerPayment) { setError("고객결제 금액은 받을금액 이하여야 합니다."); return; }
+      if (submitting.current) return;
+      submitting.current = true;
       setError("");
-      submitCustomer(selectedCustomer.customerId, selectedCustomer.name, customerPaymentAmount, customerCouponQuantity === null ? undefined : { quantity: customerCouponQuantity });
-      close();
+      try {
+        const staged = submitCustomer(selectedCustomer.customerId, selectedCustomer.name, customerPaymentAmount, customerCouponQuantity === null ? undefined : { quantity: customerCouponQuantity });
+        if (staged) close();
+        else setError("고객결제를 결제내역에 추가하지 못했습니다.");
+      } catch {
+        setError("고객결제를 결제내역에 추가하지 못했습니다.");
+      } finally { submitting.current = false; }
       return;
     }
     if (!selected || !valid) return;

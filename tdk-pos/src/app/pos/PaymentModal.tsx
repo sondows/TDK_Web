@@ -193,10 +193,12 @@ export default function PaymentModal({
     }
     return request(requestBody);
   };
-  const stageCustomerPayment = (customerId: number, name: string, amount: number, coupon?: { quantity: number }) => {
+  const stageCustomerPayment = (customerId: number, name: string, amount: number, coupon?: { quantity: number }): boolean => {
     setStagedCustomerPayment({ customerId, name, amount, requestKey: crypto.randomUUID(), couponQuantity: coupon?.quantity ?? null });
     setInput("");
     setError("");
+    setOtherOpen(false);
+    return true;
   };
   const pay = (methodCode: string, otherLabel?: string) => {
     if (stagedCustomerPayment && entered > displayRemaining) {

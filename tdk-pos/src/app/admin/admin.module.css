@@ -846,6 +846,22 @@
 .dashboardSalesHeading { display: flex; align-items: center; justify-content: space-between; padding: 20px; }
 .dashboardSalesHeading h2 { font-size: 18px; font-weight: 700; }
 .dashboardSalesHeading span { color: #60717a; font-size: 13px; }
+.dashboardSalesTable { box-sizing: border-box; width: 100%; min-width: 0; table-layout: fixed; }
+.dashboardSalesTable th,
+.dashboardSalesTable td { box-sizing: border-box; padding: 9px 8px; }
+.dashboardSalesTable th:first-child,
+.dashboardSalesTable td:first-child { width: 10%; white-space: nowrap; }
+.dashboardSalesTable th:nth-child(2),
+.dashboardSalesTable td:nth-child(2) { width: 15%; text-align: left; }
+.dashboardSalesTable th:nth-child(3),
+.dashboardSalesTable td:nth-child(3) { width: 30%; text-align: left; }
+.dashboardSalesTable th:nth-child(4),
+.dashboardSalesTable td:nth-child(4) { width: 15%; text-align: right; white-space: nowrap; }
+.dashboardSalesTable th:nth-child(5),
+.dashboardSalesTable td:nth-child(5) { width: 15%; text-align: left; white-space: nowrap; }
+.dashboardSalesTable td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.dashboardSalesTable th:nth-child(6),
+.dashboardSalesTable td:nth-child(6) { width: 15%; text-align: center; white-space: nowrap; }
 .dashboardSaleRow { cursor: pointer; }
 .dashboardSaleRow:hover, .dashboardSaleRow:focus-visible { background: #f2f5f6; outline: 2px solid #b7cbd4; outline-offset: -2px; }
 .dashboardError { padding: 12px 20px; color: #bc3535; font-size: 13px; }

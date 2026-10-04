@@ -49,8 +49,11 @@ function dateRange(startDate: string, endDate: string) {
   return { startDate, endDate, start: `${startDate} 00:00:00`, end: `${endExclusive} 00:00:00` };
 }
 
-function paymentLabel(payment: { methodCode: string; methodName: string; methodNameSnapshot: string | null; quantity: number | null; customerCouponQuantity: number | null; note: string | null }) {
-  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}장 고객결제`;
+function paymentLabel(payment: { methodCode: string; methodName: string; methodNameSnapshot: string | null; quantity: number | null; customerCouponQuantity: number | null; customerCouponCustomerNameSnapshot: string | null; note: string | null }) {
+  if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) {
+    const customerName = payment.customerCouponCustomerNameSnapshot?.trim();
+    return `쿠폰 ${payment.customerCouponQuantity}매${customerName ? ` ${customerName}` : " 고객결제"}`;
+  }
   if (payment.methodNameSnapshot) return `${payment.methodNameSnapshot}${payment.quantity ? ` × ${payment.quantity}매` : ""}`;
   const labels: Record<string, string> = {
     CARD: "카드",

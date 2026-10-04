@@ -136,7 +136,7 @@ export default function AdminDashboard() {
     </section>
     <section className={styles.dashboardSales} aria-labelledby="today-sales-title">
       <div className={styles.dashboardSalesHeading}><h2 id="today-sales-title">오늘 판매내역</h2><span>{data?.date ?? ""}</span></div>
-      <div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>시간</th><th>테이블</th><th>메뉴</th><th>결제금액</th><th>결제수단</th><th>거래상태</th></tr></thead>
+      <div className={styles.customerTableScroll}><table className={`${styles.customerTable} ${styles.dashboardSalesTable}`}><thead><tr><th>시간</th><th>테이블</th><th>메뉴</th><th>결제금액</th><th>결제수단</th><th>거래상태</th></tr></thead>
         <tbody>{!loading && !data?.sales?.length ? <tr><td colSpan={6} className={styles.customerEmpty}>오늘 판매내역이 없습니다.</td></tr> : data?.sales?.map(sale =>
           <tr key={sale.checkoutId} className={styles.dashboardSaleRow} onClick={() => void openDetail(sale.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(sale.checkoutId); } }} role="button" tabIndex={0} aria-label={`${sale.tableLabel} ${sale.menuSummary} 거래 상세 보기`}>
             <td>{clockTime(sale.occurredAt)}</td><td>{sale.tableLabel}</td><td>{sale.menuSummary.replace(/ 외 (\d+)건$/, " 외 $1")}</td><td>{money(sale.totalAmount)}</td><td>{sale.paymentMethods}</td><td>{labels[sale.status]}</td>
