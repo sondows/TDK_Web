@@ -1,8 +1,22 @@
 {
   "version": 2,
-  "dgSpecHash": "OuGKJSS1b44=",
+  "dgSpecHash": "e7sk4xN9upI=",
   "success": true,
   "projectFilePath": "D:\\10_프로그래밍_소스\\01_TDK_Web\\tdk-device-agent\\tdk-device-agent.csproj",
-  "expectedPackageFiles": [],
-  "logs": []
+  "expectedPackageFiles": [
+    "C:\\Users\\sondo\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\10.0.12\\microsoft.netcore.app.runtime.win-x64.10.0.12.nupkg.sha512",
+    "C:\\Users\\sondo\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\10.0.12\\microsoft.windowsdesktop.app.runtime.win-x64.10.0.12.nupkg.sha512",
+    "C:\\Users\\sondo\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\10.0.12\\microsoft.aspnetcore.app.runtime.win-x64.10.0.12.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1900",
+      "level": "Warning",
+      "message": "패키지 취약성 데이터를 가져오는 동안 오류가 발생했습니다. https://api.nuget.org/v3/index.json 소스에 대한 서비스 인덱스를 로드할 수 없습니다.",
+      "projectPath": "D:\\10_프로그래밍_소스\\01_TDK_Web\\tdk-device-agent\\tdk-device-agent.csproj",
+      "warningLevel": 1,
+      "filePath": "D:\\10_프로그래밍_소스\\01_TDK_Web\\tdk-device-agent\\tdk-device-agent.csproj",
+      "targetGraphs": []
+    }
+  ]
 }

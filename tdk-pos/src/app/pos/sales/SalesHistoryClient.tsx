@@ -14,7 +14,7 @@ import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 
-type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; discountAmount: number; discountCount: number; cancelledAmount: number; cardAmount: number; cardCount: number; cashAmount: number; cashCount: number; otherAmount: number; otherCount: number; tableCount: number; knownGuestCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
+type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; discountAmount: number; discountCount: number; cancelledAmount: number; cardAmount: number; cardCount: number; cashAmount: number; cashCount: number; otherAmount: number; otherCount: number; pendingAmount: number | null; pendingCount: number | null; salesIncludingPending: number | null; countIncludingPending: number | null; tableCount: number; knownGuestCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
 type Employee = { staffId: number; staffCode: string; name: string; role: string; hasPin: boolean };
 
 const statusStyle: Record<SaleDisplayStatus, { label: string; className: string }> = {
@@ -323,6 +323,8 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
         <PosSubHeader onBack={closeSummary} title={summary ? "매출현황" : "관리자 확인"} trailing={summary ? <p className="text-lg font-bold text-white/90">{displayDate(period.startDate)}</p> : undefined} />
         {summary ? <div className="min-h-0 flex-1 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3">
           {([
+            ["미결포함매출", summary.salesIncludingPending === null ? "—" : `${formatMoney(summary.salesIncludingPending)} (${summary.countIncludingPending})`],
+            ["미결", summary.pendingAmount === null ? "—" : `${formatMoney(summary.pendingAmount)} (${summary.pendingCount})`],
             ["총매출", `${formatMoney(summary.grossSales)} (${summary.transactionCount})`],
             ["할인", `${formatMoney(summary.discountAmount)} (${summary.discountCount})`],
             ["취소", `${formatMoney(summary.cancelledAmount)} (${summary.cancellationCount})`],

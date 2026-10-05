@@ -1,0 +1,12 @@
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tdk-device-agent.exe
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\appsettings.Development.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\appsettings.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.deps.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.runtimeconfig.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.sourcelink.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tests\ReceiptRenderChecks\obj\project.assets.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tests\ReceiptRenderChecks\obj\ReceiptRenderChecks.csproj.nuget.dgspec.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tdk-device-agent.dll
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tdk-device-agent.deps.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tdk-device-agent.runtimeconfig.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-publish\tdk-device-agent.pdb

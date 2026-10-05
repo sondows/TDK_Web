@@ -519,6 +519,17 @@ export const payments = mysqlTable("payments", {
   note: varchar("note", { length: 500 }),
 }, (table) => [index("idx_payments_checkout_status").on(table.checkoutId, table.status), index("idx_payments_paid_at").on(table.paidAt), index("idx_payments_customer").on(table.customerId)]);
 
+/** Records which physical table session received each portion of a group checkout payment. */
+export const paymentSessionAllocations = mysqlTable("payment_session_allocations", {
+  paymentId: bigint("payment_id", { mode: "number", unsigned: true }).notNull().references(() => payments.paymentId),
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).notNull().references(() => tableSessions.sessionId),
+  appliedAmount: decimal("applied_amount", { precision: 14, scale: 2 }).notNull(),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  primaryKey({ columns: [table.paymentId, table.sessionId] }),
+  index("idx_payment_session_allocations_session").on(table.sessionId),
+]);
+
 /** Signed customer trade balance history. Payment entries retain their source payment link. */
 export const customerPrepaidLedger = mysqlTable("customer_prepaid_ledger", {
   ledgerId: bigint("ledger_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),

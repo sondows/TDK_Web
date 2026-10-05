@@ -53,3 +53,16 @@ D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\verify\tdk-device-a
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\verify\tdk-device-agent.runtimeconfig.json
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\verify\tdk-device-agent.dll
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\verify\tdk-device-agent.pdb
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\appsettings.Development.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\appsettings.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.deps.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.runtimeconfig.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.sourcelink.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tests\ReceiptRenderChecks\obj\project.assets.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tests\ReceiptRenderChecks\obj\ReceiptRenderChecks.csproj.nuget.dgspec.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.staticwebassets.endpoints.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.exe
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.deps.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.runtimeconfig.json
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.dll
+C:\Users\Public\Documents\ESTsoft\CreatorTemp\tdk-agent-pos-exit-build\tdk-device-agent.pdb

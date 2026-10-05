@@ -1,8 +1,9 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
+import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { resolveQuantityOverage } from "@/lib/other-payment-cash-change";
+import { allocatePaymentAcrossSessions } from "@/lib/table-payment-allocation";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
@@ -59,17 +60,48 @@ async function billScope(tx: Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 async function currentBill(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], tableId: number) {
   const scope = await billScope(tx, tableId);
-  const sessionOrders = await tx.select({ orderId: orders.orderId, status: orders.status }).from(orders).where(inArray(orders.sessionId, scope.sessionIds)).for("update");
+  const sessionOrders = await tx.select({ orderId: orders.orderId, sessionId: orders.sessionId, status: orders.status }).from(orders).where(inArray(orders.sessionId, scope.sessionIds)).for("update");
   const orderIds = sessionOrders.filter(order => order.status !== "CANCELLED").map(order => order.orderId);
-  const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
+  const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
   const itemIds = rows.map(row => row.orderItemId);
   const cancelled = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)) : [];
   const cancelledByItem = new Map<number, number>(); cancelled.forEach(row => cancelledByItem.set(row.orderItemId, (cancelledByItem.get(row.orderItemId) ?? 0) + row.qty));
-  const items = rows.map(row => ({ ...row, effectiveQty: row.status === "CANCELLED" ? 0 : Math.max(0, row.qty - (cancelledByItem.get(row.orderItemId) ?? 0)) })).filter(row => row.effectiveQty > 0);
+  const orderSessionById = new Map(sessionOrders.map(order => [order.orderId, order.sessionId]));
+  const items = rows.map(row => ({ ...row, sessionId: orderSessionById.get(row.orderId)!, effectiveQty: row.status === "CANCELLED" ? 0 : Math.max(0, row.qty - (cancelledByItem.get(row.orderItemId) ?? 0)) })).filter(row => row.effectiveQty > 0);
   const gross = won(items.reduce((sum, row) => sum + row.effectiveQty * Number(row.unitPrice), 0));
   const discountRows = scope.sessionIds.length ? await tx.select({ sessionId: tableSessionDiscounts.sessionId, label: tableSessionDiscounts.label, amount: tableSessionDiscounts.discountAmount, type: tableSessionDiscounts.discountType }).from(tableSessionDiscounts).where(inArray(tableSessionDiscounts.sessionId, scope.sessionIds)) : [];
   const discounts = discountRows.map(row => ({ ...row, amount: won(Number(row.amount)) }));
-  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)) };
+  const grossBySessionId = new Map<number, number>();
+  items.forEach(item => grossBySessionId.set(item.sessionId, (grossBySessionId.get(item.sessionId) ?? 0) + item.effectiveQty * Number(item.unitPrice)));
+  const discountBySessionId = new Map<number, number>();
+  discounts.forEach(discount => discountBySessionId.set(discount.sessionId, (discountBySessionId.get(discount.sessionId) ?? 0) + discount.amount));
+  const balanceBySessionId = new Map(scope.sessionIds.map(sessionId => [sessionId, Math.max(0, won((grossBySessionId.get(sessionId) ?? 0) - (discountBySessionId.get(sessionId) ?? 0)))]));
+  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)), balanceBySessionId };
+}
+
+async function savePaymentSessionAllocations(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  paymentId: number,
+  bill: Awaited<ReturnType<typeof currentBill>>,
+  appliedAmount: number,
+) {
+  const rows = bill.sessionIds.length
+    ? await tx.select({ sessionId: paymentSessionAllocations.sessionId, amount: paymentSessionAllocations.appliedAmount })
+      .from(paymentSessionAllocations)
+      .innerJoin(payments, eq(paymentSessionAllocations.paymentId, payments.paymentId))
+      .where(and(inArray(paymentSessionAllocations.sessionId, bill.sessionIds), eq(payments.status, "APPROVED")))
+      .for("update")
+    : [];
+  const paidBySessionId = new Map<number, number>();
+  rows.forEach(row => paidBySessionId.set(row.sessionId, (paidBySessionId.get(row.sessionId) ?? 0) + Number(row.amount)));
+  const allocations = allocatePaymentAcrossSessions({
+    baseSessionId: bill.baseSessionId,
+    appliedAmount,
+    balanceBySessionId: bill.balanceBySessionId,
+    paidBySessionId,
+  });
+  if (!allocations.length) throw new CheckoutError("테이블별 결제 금액을 배분할 수 없습니다.", 409);
+  await tx.insert(paymentSessionAllocations).values(allocations.map(allocation => ({ paymentId, sessionId: allocation.sessionId, appliedAmount: decimal(allocation.amount) })));
 }
 
 async function activeCheckout(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], itemIds: number[]) {
@@ -292,6 +324,7 @@ export async function POST(request: Request) {
         requestPhase = "insert customer payment and ledger";
         const couponMemo = couponQuantity === null ? "" : ` · 정액쿠폰 ${couponQuantity}장`;
         const [createdPayment] = await tx.insert(payments).values({ checkoutId, paymentMethodId: method.id, amount: decimal(couponQuantity === null ? amount : couponTendered), appliedAmount: decimal(couponApplied), customerId, customerCouponCustomerNameSnapshot: couponQuantity === null ? null : customer.name, customerCouponQuantity: couponQuantity, customerCouponUnitAmountSnapshot: couponUnitAmount === null ? null : decimal(couponUnitAmount), status: "APPROVED", processedByStaffId, note: tableDescription }).$returningId();
+        await savePaymentSessionAllocations(tx, createdPayment.paymentId, bill, couponApplied);
         if (couponQuantity !== null) await tx.insert(paymentOtherDetails).values({
           paymentId: createdPayment.paymentId,
           methodNameSnapshot: `${customer.name} 정액쿠폰`,
@@ -403,6 +436,7 @@ export async function POST(request: Request) {
       const recordedAmount = isCard || prepaidCredit > 0 || customerOverpaymentWithoutCredit ? tendered : applied;
       requestPhase = "insert payment row";
       const [createdPayment] = await tx.insert(payments).values({ checkoutId, paymentMethodId: method.id, amount: decimal(recordedAmount), appliedAmount: decimal(applied), customerId, status: "APPROVED", approvalNo: cardResult?.approvalNo ?? null, externalTransactionId: cardResult?.externalTransactionId ?? null, processedByStaffId, note: !isOther && method.type === "CASH" && overpayment ? `현금 수령 ${tendered}원 / 거스름돈 ${change}원` : cardResult ? "DEV/MOCK: VAN 단말 연동 전 수기 카드 처리" : isOther ? null : label }).$returningId();
+      await savePaymentSessionAllocations(tx, createdPayment.paymentId, bill, applied);
       if (prepaidCredit > 0 && customerId !== null) await tx.insert(customerPrepaidLedger).values({
         customerId,
         paymentId: createdPayment.paymentId,

@@ -48,6 +48,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
   const [selected, setSelected] = useState<number | null>(null);
   const [mode, setMode] = useState<Mode>("IDLE");
   const [moveSourceId, setMoveSourceId] = useState<number | null>(null);
+  const [movedDestinationId, setMovedDestinationId] = useState<number | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
   const [mergeSourceId, setMergeSourceId] = useState<number | null>(null);
   const [mergeBusy, setMergeBusy] = useState(false);
@@ -246,6 +247,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
       }
       const source = tables.find(table => table.tableId === moveSourceId);
       const destination = tables.find(table => table.tableId === destinationTableId);
+      setMovedDestinationId(destinationTableId);
       setMoveSourceId(null);
       setSelected(null);
       showStatus(`${source?.tableNo ?? ""}번 테이블을 ${destination?.tableNo ?? ""}번 테이블로 이동했습니다.`, true);
@@ -501,7 +503,12 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
   const selectedGroupId = mode === "PARTY_CREATE" ? null : mode === "PARTY_CANCEL" ? partyCancelGroupId : tables.find(table => table.tableId === selected)?.groupId ?? null;
 
   const Root = modal ? "div" : "main";
-  const close = () => modal && !closeToPos ? router.back() : router.push("/pos");
+  const close = () => {
+    const destination = movedDestinationId === null ? "" : `&selectedTableId=${movedDestinationId}`;
+    const returnUrl = `/pos?refreshTables=1${destination}`;
+    if (modal && !closeToPos) router.replace(returnUrl);
+    else router.push(returnUrl);
+  };
   return <Root className={`table-management-screen h-dvh overflow-hidden text-slate-900 ${modal ? "fixed inset-0 z-[60] bg-slate-950/55" : "bg-slate-100"}`}>
     <section aria-label="테이블 관리" aria-modal={modal ? true : undefined} className="table-management-card flex min-h-0 flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl" role={modal ? "dialog" : undefined} style={{ "--table-management-width-factor": MANAGEMENT_WIDTH_FACTOR } as CSSProperties}>
       <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={close} splitRatio title="테이블 관리" trailing={<div className="flex w-full min-w-0 items-center gap-4 border-l border-white/30 pl-5 text-xl font-semibold leading-tight text-white"><span aria-hidden="true" className="shrink-0 text-2xl text-white">ⓘ</span><span>{message}</span></div>} />

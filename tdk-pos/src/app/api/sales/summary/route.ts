@@ -6,6 +6,7 @@ import { getCurrentStaff, verifyActiveStaffCredentials } from "@/lib/auth";
 import { canViewSales } from "@/lib/permissions";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidPin } from "@/lib/pin";
+import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,12 @@ function dateRange(startDate: string, endDate: string) {
 }
 
 const won = (value: string | number) => Math.max(0, Math.floor(Number(value)));
+
+function todayInSeoul() {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const part = (type: string) => parts.find(value => value.type === type)!.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -42,12 +49,23 @@ export async function POST(request: Request) {
     const range = dateRange(startDate, endDate);
     if (!range) return Response.json({ success: false, message: "조회기간을 확인해 주세요." }, { status: 400 });
 
+    // Current open bills are exact; deleted records and changed grouping make
+    // historical open bills impossible to reconstruct from the existing schema.
+    const pending = startDate === endDate && startDate === todayInSeoul()
+      ? await loadCurrentPendingSales() : null;
+    const pendingFields = (grossSales: number, transactionCount: number) => ({
+      pendingAmount: pending?.amount ?? null,
+      pendingCount: pending?.count ?? null,
+      salesIncludingPending: pending === null ? null : grossSales + pending.amount,
+      countIncludingPending: pending === null ? null : transactionCount + pending.count,
+    });
+
     const checkoutRows = await db.select({ id: checkouts.checkoutId, total: checkouts.totalAmount, discount: checkouts.discountAmount, status: checkouts.status })
       .from(checkouts)
       .where(sql`${checkouts.completedAt} >= ${range.start} AND ${checkouts.completedAt} < ${range.end}`);
     const ids = checkoutRows.map(row => row.id);
     if (!ids.length) return Response.json({ success: true, summary: {
-      grossSales: 0, netSales: 0, transactionCount: 0, cancellationCount: 0,
+      grossSales: 0, netSales: 0, transactionCount: 0, cancellationCount: 0, ...pendingFields(0, 0),
       discountAmount: 0, discountCount: 0, cancelledAmount: 0,
       cardAmount: 0, cardCount: 0, cashAmount: 0, cashCount: 0, otherAmount: 0, otherCount: 0,
       tableCount: 0, knownGuestCount: 0,
@@ -148,6 +166,7 @@ export async function POST(request: Request) {
     const effectiveCount = transactionCount;
     return Response.json({ success: true, summary: {
       grossSales, netSales, transactionCount, cancellationCount, discountAmount, discountCount, cancelledAmount,
+      ...pendingFields(grossSales, transactionCount),
       cardAmount, cardCount, cashAmount, cashCount, otherAmount, otherCount,
       tableCount: effectiveCount, knownGuestCount: guestCount,
       tableAverage: effectiveCount ? Math.round(netSales / effectiveCount) : null,

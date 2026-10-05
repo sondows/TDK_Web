@@ -42,6 +42,8 @@ There is no complete baseline database migration in this repository. `drizzle.co
 6. `sql/add_other_payment_cash_change_threshold.sql`.
 7. `sql/allow_amount_other_payment_cash_change.sql`.
 8. `sql/add_customer_payment_method.sql`.
+9. `db-migrations/20261005_payment_session_allocations.sql` (adds per-session payment allocation and backfills payments linked to a single session; reconcile legacy multi-session checkout payments from their source records before assigning them).
+10. `db-migrations/20261005_reconcile_verified_party_payment.sql` is a one-time repair for the specifically verified payment 110 / checkout 61 in the current POS test database; do not apply it to another database unless those source records match.
 
 Most scripts are not idempotent. Check which columns, constraints, and rows are already present before running them; do not rerun applied ALTER scripts. `sql/proposed_customer_postpaid_permission.sql` is a proposal and must not be applied. Compose does not run migrations automatically.
 

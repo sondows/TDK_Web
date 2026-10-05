@@ -67,6 +67,10 @@ const paymentMethodLabel = (payment: Payment) => {
   };
   return labels[payment.methodCode] ?? payment.methodName;
 };
+const paymentInfoLabelStyle = "text-[24px] font-normal";
+const paymentInfoAmountStyle = "text-[24px] font-bold";
+const paymentInfoRowStyle = "flex justify-between leading-7";
+const paymentInfoRowGapStyle = "space-y-[7px]";
 export default function PaymentModal({
   tableId,
   tableNo,
@@ -285,49 +289,46 @@ export default function PaymentModal({
         className={`flex ${state.isPartyBill ? "h-[min(760px,calc(100dvh-2rem))]" : "h-[min(752px,calc(100dvh-2rem-8px))]"} w-full max-w-[782px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
         role="dialog"
       >
-        <PosSubHeader backLabel="결제창 닫기" className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" trailing={<div className="flex min-w-0 items-end gap-5">
-            <p className="flex min-w-0 items-end gap-2 whitespace-nowrap">
-              <b className={`${state.isPartyBill ? "text-4xl" : "text-5xl"} min-w-0 truncate leading-none`}>{displayedTableNos}</b>
-              <span className="shrink-0 pb-0.5 text-lg font-bold">테이블</span>
-            </p>
+        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="relative left-[50px] ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span className="text-[28px] leading-none">{displayedTableNos}</span><span className="text-[26px]">T</span></span>} trailing={<div className="flex min-w-0 items-end">
             <button
-              className="h-[52px] w-[136px] shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-base font-bold text-[#455A64] hover:bg-white active:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 disabled:opacity-50"
+              className="h-[52px] w-[136px] shrink-0 rounded-none border-0 bg-transparent px-3 text-2xl font-extrabold text-white/90 shadow-none transition-colors hover:text-white active:text-white focus-visible:outline-none disabled:opacity-50"
               disabled={busy}
               onClick={() => setCustomerSelectOpen(true)}
-              title={selectedCustomer?.name ?? "고객 선택"}
+              title={selectedCustomer?.name ?? "고객"}
               type="button"
-            ><span className="block truncate">{selectedCustomer?.name ?? "고객 선택"}</span></button>
+            ><span className="block truncate">{selectedCustomer?.name ?? "고객"}</span></button>
           </div>} />
         <div className="grid min-h-0 flex-1 grid-cols-[44%_56%]">
-          <section className="min-h-0 overflow-y-auto border-r border-slate-200 px-6 py-6">
-            <div className="space-y-[7px] border-b border-slate-300 pb-5 text-lg">
-              <div className="flex justify-between">
-                <span>주문금액</span>
-                <b>{money(state.gross)}</b>
+          <section className="min-h-0 overflow-y-auto border-r border-slate-200 px-6 py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
+            <div className="leading-7">
+              <div className={paymentInfoRowGapStyle}>
+              <div className={paymentInfoRowStyle}>
+                <span className={paymentInfoLabelStyle}>주문금액</span>
+                <b className={paymentInfoAmountStyle}>{money(state.gross)}</b>
               </div>
               {discountAmount > 0 && (
-                <div className="flex justify-between text-red-600">
-                  <span>할인금액</span>
-                  <b>-{money(discountAmount)}</b>
+                <div className={`${paymentInfoRowStyle} text-slate-900`}>
+                  <span className={paymentInfoLabelStyle}>할인금액</span>
+                  <b className={paymentInfoAmountStyle}>-{money(discountAmount)}</b>
                 </div>
               )}
-              {discountAmount > 0 && <div className="flex items-center justify-between gap-3 text-2xl font-extrabold text-blue-700">
-                <span>결제금액</span>
-                <b>
+              </div>
+              <div className={`mt-7 ${paymentInfoRowStyle} items-center gap-3 text-2xl leading-7 font-extrabold text-blue-700`}>
+                <span className={paymentInfoLabelStyle}>결제금액</span>
+                <b className={paymentInfoAmountStyle}>
                   {money(state.total)}
                 </b>
-              </div>}
+              </div>
             </div>
-            <div className="mt-[14px]">
-              <h2 className="text-xl font-bold">결제내역</h2>
-              <div className="mt-[14px] space-y-[7px]">
+            {(state.payments.length > 0 || stagedCustomerPayment) && <div className="mt-7">
+              <div className={paymentInfoRowGapStyle}>
                 {state.payments.map((payment) => {
                   const prepaid = initialPaymentIds.includes(payment.paymentId);
                   return (
-                  <div className="space-y-[7px]" key={payment.paymentId}>
+                  <div key={payment.paymentId}>
                   <button
                     aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제내역 삭제`}
-                    className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-lg transition hover:bg-slate-50 active:bg-slate-100 ${prepaid ? "text-blue-600" : "text-slate-900"}`}
+                    className={`${paymentInfoRowStyle} w-full rounded-lg py-0 text-left font-normal text-slate-900 transition hover:bg-slate-50 active:bg-slate-100`}
                     disabled={busy}
                     onClick={() => {
                       setCancelError("");
@@ -335,16 +336,16 @@ export default function PaymentModal({
                     }}
                     type="button"
                   >
-                    <span>
+                    <span className={paymentInfoLabelStyle}>
                       {prepaid ? "선불" : ""}
                       {paymentMethodLabel(payment)}
                     </span>
-                    <b>{money(payment.receivedAmount)}</b>
+                    <b className={paymentInfoAmountStyle}>{money(payment.receivedAmount)}</b>
                   </button>
                   {payment.changeAmount > 0 && (
-                    <div className="flex items-center justify-between px-2 text-lg text-red-600">
-                      <span>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
-                      <b>-{money(payment.changeAmount)}</b>
+                    <div className={`${paymentInfoRowStyle} mt-[7px] text-slate-900`}>
+                      <span className={paymentInfoLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
+                      <b className={paymentInfoAmountStyle}>-{money(payment.changeAmount)}</b>
                     </div>
                   )}
                   </div>
@@ -352,24 +353,27 @@ export default function PaymentModal({
                 })}
                 {stagedCustomerPayment && <button
                   aria-label={`${stagedCustomerPayment.name} 고객결제 예정 내역 삭제`}
-                  className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-lg text-slate-900 transition hover:bg-slate-50 active:bg-slate-100"
+                  className={`${paymentInfoRowStyle} w-full rounded-lg py-0 text-left font-normal text-slate-900 transition hover:bg-slate-50 active:bg-slate-100`}
                   disabled={busy}
                   onClick={() => { setCancelError(""); setDeletionTarget({ kind: "STAGED_CUSTOMER" }); }}
                   type="button"
-                ><span className="min-w-0 truncate">고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className="ml-2 shrink-0">{money(stagedCustomerPayment.amount)}</b></button>}
+                ><span className={`min-w-0 truncate ${paymentInfoLabelStyle}`}>고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(stagedCustomerPayment.amount)}</b></button>}
               </div>
-              <div className="mt-[17px] flex justify-between border-t border-slate-300 pt-[17px] text-2xl font-extrabold text-blue-700">
-                <span>받을금액</span>
-                <b>{money(displayRemaining)}</b>
+              <div className="relative mt-7">
+                <div aria-hidden="true" className="absolute -top-[14px] left-0 h-[3px] w-full -translate-y-1/2 bg-[#8F99A5]" />
+                <div className={`${paymentInfoRowStyle} text-2xl leading-7 font-extrabold ${displayRemaining > 0 ? "text-red-600" : "text-slate-900"}`}>
+                  <span className={paymentInfoLabelStyle}>받을금액</span>
+                  <b className={paymentInfoAmountStyle}>{money(displayRemaining)}</b>
+                </div>
               </div>
               {state.payments.filter(payment => payment.amount > payment.appliedAmount || payment.prepaidCreditAmount > 0).map(payment => (
-                <div className="mt-2 space-y-1 border-t border-blue-100 pt-2 text-lg font-bold text-blue-700" key={`prepaid-${payment.paymentId}`}>
-                  <div className="flex justify-between"><span>매출 적용</span><b>{money(payment.appliedAmount)}</b></div>
-                  {payment.prepaidCreditAmount > 0 && <div className="flex justify-between"><span>선불 적립</span><b>{money(payment.prepaidCreditAmount)}</b></div>}
-                   {payment.changeAmount > 0 && <div className="flex justify-between text-red-600"><span>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span><b>{money(payment.changeAmount)}</b></div>}
+                <div className={`mt-7 ${paymentInfoRowGapStyle} text-slate-900`} key={`prepaid-${payment.paymentId}`}>
+                  <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>매출 적용</span><b className={paymentInfoAmountStyle}>{money(payment.appliedAmount)}</b></div>
+                  {payment.prepaidCreditAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>선불 적립</span><b className={paymentInfoAmountStyle}>{money(payment.prepaidCreditAmount)}</b></div>}
+                   {payment.changeAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span><b className={paymentInfoAmountStyle}>{money(payment.changeAmount)}</b></div>}
                 </div>
               ))}
-            </div>
+            </div>}
           </section>
           <section className="flex min-h-0 flex-col px-6 py-6">
             <NumericInputKeypad disabled={busy} onKey={append} value={money(entered)} />
@@ -387,7 +391,7 @@ export default function PaymentModal({
                 role="group"
               >
               <button
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-slate-300 bg-white text-xl font-extrabold text-slate-900 ring-2 ring-inset ring-blue-600/50"
+                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy || displayRemaining <= 0}
                 onClick={() => pay("CARD")}
                 type="button"
@@ -395,7 +399,7 @@ export default function PaymentModal({
                 카드
               </button>
               <button
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-slate-300 bg-white text-xl font-extrabold text-slate-900 ring-2 ring-inset ring-blue-600/50"
+                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy || displayRemaining <= 0}
                 onClick={() => pay("CASH")}
                 type="button"
@@ -404,7 +408,7 @@ export default function PaymentModal({
               </button>
               <button
                 aria-label="기타결제"
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-slate-300 bg-white text-xl font-extrabold text-slate-900 ring-2 ring-inset ring-blue-600/50"
+                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy || displayRemaining <= 0}
                 onClick={() => setOtherOpen(true)}
                 type="button"
