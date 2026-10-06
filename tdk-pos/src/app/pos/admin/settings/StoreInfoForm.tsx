@@ -77,7 +77,7 @@ export default function StoreInfoForm({ initialStoreInfo, initialLogoFileName }:
       if (!response.ok || !result.success) {
         setIsError(true);
         setMessage(result.message ?? "매장정보 저장에 실패했습니다. 다시 시도해 주세요.");
-        if (response.status === 401 || response.status === 403) router.push("/pos/admin");
+        if (response.status === 401 || response.status === 403) router.push("/admin/settings/store");
         return;
       }
       if (result.storeInfo) setStoreInfo(result.storeInfo);

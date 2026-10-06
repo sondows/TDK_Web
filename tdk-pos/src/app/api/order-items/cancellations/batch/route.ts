@@ -34,9 +34,10 @@ export async function POST(request: Request) {
 
       const rows = await tx.select({
         orderItemId: orderItems.orderItemId,
+        parentOrderItemId: orderItems.parentOrderItemId,
         orderId: orderItems.orderId,
         sessionId: orders.sessionId,
-        qty: orderItems.qty,
+        qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`,
         unitPrice: orderItems.unitPrice,
         orderedAt: orderItems.orderedAt,
         orderStatus: orders.status,
@@ -45,12 +46,42 @@ export async function POST(request: Request) {
       if (rows.length !== sorted.length || rows.some(row => row.sessionStatus !== "OPEN" || row.orderStatus === "COMPLETED") || new Set(rows.map(row => row.sessionId)).size !== 1) throw new Error("취소할 수 없는 주문이 포함되어 있습니다.");
 
       const selectedSessionId = rows[0]?.sessionId;
-      const sessionItems = selectedSessionId === undefined ? [] : await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).where(and(eq(orders.sessionId, selectedSessionId), ne(orders.status, "COMPLETED")));
+      const sessionItems = selectedSessionId === undefined ? [] : await tx.select({ orderItemId: orderItems.orderItemId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})` }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).where(and(eq(orders.sessionId, selectedSessionId), ne(orders.status, "COMPLETED")));
       const sessionCancellationRows = sessionItems.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, sessionItems.map(item => item.orderItemId))) : [];
       const existingCancelledByItem = new Map<number, number>();
       for (const row of sessionCancellationRows) existingCancelledByItem.set(row.orderItemId, (existingCancelledByItem.get(row.orderItemId) ?? 0) + row.qty);
       const requestedByItem = new Map(sorted.map(item => [item.orderItemId, item.qty]));
-      const isFullOrderCancellation = sessionItems.length > 0 && sessionItems.every(item => item.qty - (existingCancelledByItem.get(item.orderItemId) ?? 0) - (requestedByItem.get(item.orderItemId) ?? 0) === 0);
+      const parentRequests = sorted.filter(item => rows.some(row => row.orderItemId === item.orderItemId && row.parentOrderItemId === null));
+      if (parentRequests.length) await tx.execute(sql`SELECT order_item_id FROM order_items WHERE parent_order_item_id IN (${sql.join(parentRequests.map(item => sql`${item.orderItemId}`), sql`, `)}) FOR UPDATE`);
+      const componentRows = parentRequests.length ? await tx.select({
+        orderItemId: orderItems.orderItemId,
+        parentOrderItemId: orderItems.parentOrderItemId,
+        orderId: orderItems.orderId,
+        sessionId: orders.sessionId,
+        qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`,
+        unitPrice: orderItems.unitPrice,
+        orderedAt: orderItems.orderedAt,
+        orderStatus: orders.status,
+        sessionStatus: tableSessions.status,
+      }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).innerJoin(tableSessions, eq(orders.sessionId, tableSessions.sessionId)).where(inArray(orderItems.parentOrderItemId, parentRequests.map(item => item.orderItemId))) : [];
+      const expandedRequests = new Map(requestedByItem);
+      for (const parentRequest of parentRequests) {
+        const parent = rows.find(row => row.orderItemId === parentRequest.orderItemId);
+        if (!parent || parent.qty <= 0) continue;
+        const parentPreviouslyCancelled = existingCancelledByItem.get(parent.orderItemId) ?? 0;
+        const targetParentCancelled = Math.min(parent.qty, parentPreviouslyCancelled + parentRequest.qty);
+        for (const component of componentRows.filter(row => row.parentOrderItemId === parent.orderItemId)) {
+          const targetComponentCancelled = Math.min(component.qty, Math.ceil(component.qty * targetParentCancelled / parent.qty));
+          const componentPreviouslyCancelled = existingCancelledByItem.get(component.orderItemId) ?? 0;
+          const explicitlyRequested = expandedRequests.get(component.orderItemId) ?? 0;
+          const automaticQty = Math.max(0, targetComponentCancelled - componentPreviouslyCancelled - explicitlyRequested);
+          if (automaticQty > 0) expandedRequests.set(component.orderItemId, explicitlyRequested + automaticQty);
+        }
+      }
+      const effectiveSorted = [...expandedRequests].map(([orderItemId, qty]) => ({ orderItemId, qty })).sort((a, b) => a.orderItemId - b.orderItemId);
+      const effectiveRows = [...rows, ...componentRows.filter(row => !rows.some(existing => existing.orderItemId === row.orderItemId))];
+      const effectiveRequestedByItem = new Map(effectiveSorted.map(item => [item.orderItemId, item.qty]));
+      const isFullOrderCancellation = sessionItems.length > 0 && sessionItems.every(item => item.qty - (existingCancelledByItem.get(item.orderItemId) ?? 0) - (effectiveRequestedByItem.get(item.orderItemId) ?? 0) === 0);
       const requiresReauth = shouldRequireCancellationPin(isFullOrderCancellation);
       const [sharedStaff] = sharedMode ? await tx.select({ staffId: staff.staffId }).from(staff).where(and(eq(staff.staffCode, "000"), eq(staff.isActive, 1))).limit(1) : [];
       let cancelledByStaffId = sharedMode ? sharedStaff?.staffId : current?.staffId;
@@ -62,12 +93,12 @@ export async function POST(request: Request) {
       }
       if (!cancelledByStaffId) throw new Error(sharedMode ? "매장 공용 취소 계정을 찾을 수 없습니다." : "취소 처리 직원이 필요합니다.");
 
-      const cancelledRows = await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, sorted.map(item => item.orderItemId)));
+      const cancelledRows = await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, effectiveSorted.map(item => item.orderItemId)));
       const cancelledByItem = new Map<number, number>();
       for (const row of cancelledRows) cancelledByItem.set(row.orderItemId, (cancelledByItem.get(row.orderItemId) ?? 0) + row.qty);
 
-      for (const requestItem of sorted) {
-        const row = rows.find(value => value.orderItemId === requestItem.orderItemId);
+      for (const requestItem of effectiveSorted) {
+        const row = effectiveRows.find(value => value.orderItemId === requestItem.orderItemId);
         if (!row) throw new Error("주문 항목을 찾을 수 없습니다.");
         const remaining = row.qty - (cancelledByItem.get(row.orderItemId) ?? 0);
         if (requestItem.qty > remaining) throw new Error("취소 가능 수량을 초과했습니다.");
@@ -76,12 +107,12 @@ export async function POST(request: Request) {
         if (requestItem.qty === remaining) await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId }).where(eq(orderItems.orderItemId, row.orderItemId));
       }
 
-      const affectedOrderIds = [...new Set(rows.map(row => row.orderId))];
+      const affectedOrderIds = [...new Set(effectiveRows.map(row => row.orderId))];
       for (const orderId of affectedOrderIds) {
         const allItems = await tx.select({ orderItemId: orderItems.orderItemId, totalAmount: orderItems.totalAmount }).from(orderItems).where(eq(orderItems.orderId, orderId));
         const allCancellationRows = allItems.length ? await tx.select({ cancelledAmount: orderItemCancellations.cancelledAmount }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, allItems.map(item => item.orderItemId))) : [];
         const remainingTotal = allItems.reduce((sum, item) => sum + cents(item.totalAmount), 0) - allCancellationRows.reduce((sum, item) => sum + cents(item.cancelledAmount), 0);
-        const source = rows.find(row => row.orderId === orderId);
+        const source = effectiveRows.find(row => row.orderId === orderId);
         await tx.update(orders).set({ subtotalAmount: decimal(remainingTotal), totalAmount: decimal(remainingTotal), status: remainingTotal === 0 ? "CANCELLED" : source?.orderStatus }).where(eq(orders.orderId, orderId));
       }
       return { reauth: false as const, isFullOrderCancellation };

@@ -1,13 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables } from "@/db/schema";
-import { getPrivilegedStaff } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 
 type Layout = { tableId: number; positionX: number; positionY: number; layoutWidth: number; layoutHeight: number; rotation: number; tableName?: string; capacity?: number; isActive?: number };
 const valid = (value: unknown, min: number, max: number) => Number.isFinite(Number(value)) && Number(value) >= min && Number(value) <= max;
 
 export async function PUT(request: Request) {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   if (!staff) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   if (staff.role !== "OWNER") return Response.json({ success: false, message: "OWNER만 테이블 배치를 저장할 수 있습니다." }, { status: 403 });
   try {

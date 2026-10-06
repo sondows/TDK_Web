@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
-import { getPrivilegedStaff } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 
 export async function GET() {
   return Response.json({ mode: await getConfiguredPosLoginMode() });
@@ -16,7 +16,7 @@ export async function PUT(request: Request) {
       return Response.json({ success: false, message: "로그인 방식을 확인하세요." }, { status: 400 });
     }
 
-    const approver = await getPrivilegedStaff();
+    const approver = await getManagementOwner();
     if (!approver) return Response.json({ success: false, message: "관리자 인증이 필요합니다." }, { status: 401 });
     if (approver.role !== "OWNER") return Response.json({ success: false, message: "OWNER만 로그인 방식을 변경할 수 있습니다." }, { status: 403 });
 

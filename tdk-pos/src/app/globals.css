@@ -1254,19 +1254,6 @@ section.flex.min-h-0.flex-col.bg-white.p-5 > div.mt-auto > h3 {
   color: #0f172a;
 }
 
-/* The discount modal uses a bold text chevron while preserving the existing button. */
-section[role="dialog"] > header > div:first-child > button[aria-label="돌아가기"] {
-  font-size: 0;
-}
-
-section[role="dialog"] > header > div:first-child > button[aria-label="돌아가기"]::after {
-  content: "<";
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1;
-  color: #334155;
-}
-
 /* The final direct-discount keypad key is a clear-all action. */
 section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounded-2xl.p-3 > button:last-child {
   font-size: 0;

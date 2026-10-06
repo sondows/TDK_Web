@@ -1,8 +1,10 @@
 import { asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { discountRules } from "@/db/schema";
-import { canManageSettings, getPrivilegedStaff } from "@/lib/permissions";
+import { canManageSettings } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 
 type PresetInput = { slot?: unknown; title?: unknown; type?: unknown; value?: unknown; isActive?: unknown };
@@ -10,13 +12,14 @@ type PresetInput = { slot?: unknown; title?: unknown; type?: unknown; value?: un
 const toWholeNumber = (value: unknown) => Number.isSafeInteger(Number(value)) ? Number(value) : NaN;
 
 async function requireOwner() {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   return staff && canManageSettings(staff.role) ? staff : null;
 }
 
 export async function GET() {
   const currentStaff = await getCurrentStaff();
-  if (!currentStaff && await getPosLoginMode() !== "SHARED") return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
+  const adminStaff = await getCurrentAdminStaff();
+  if (!currentStaff && !adminStaff && await getPosLoginMode() !== "SHARED") return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   const rules = await db.select({ ruleId: discountRules.discountRuleId, slot: discountRules.posPresetSlot, title: discountRules.discountName, type: discountRules.discountType, value: discountRules.discountValue, isActive: discountRules.isActive })
     .from(discountRules).where(isNotNull(discountRules.posPresetSlot)).orderBy(asc(discountRules.posPresetSlot));
   return Response.json({ success: true, presets: rules });

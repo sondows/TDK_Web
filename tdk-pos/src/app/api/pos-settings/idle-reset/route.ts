@@ -1,9 +1,10 @@
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { canManageSettings, getPrivilegedStaff } from "@/lib/permissions";
+import { canManageSettings } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 
 export async function PUT(request: Request) {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   if (!staff) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   if (!canManageSettings(staff.role)) return Response.json({ success: false, message: "OWNER만 POS 자동 초기화 설정을 변경할 수 있습니다." }, { status: 403 });
 

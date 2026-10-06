@@ -124,7 +124,7 @@ export default function CustomerManagement() {
           + 고객등록
         </button>
       </div>
-      <CustomerList canReorder={!loading && !search.trim() && (includeInactive || !hasInactiveCustomers)} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
+      <CustomerList canReorder={!loading && !search.trim()} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
       {createOpen && <CustomerCreateModal customer={null} onClose={closeCreate} onSaved={created} />}
       {editingCustomer && <CustomerCreateModal customer={editingCustomer} onClose={() => setEditingCustomer(null)} onSaved={updated} />}
       {tradingCustomer && <CustomerTradeModal customer={tradingCustomer} onChanged={() => setRefreshKey(value => value + 1)} onClose={() => setTradingCustomer(null)} />}

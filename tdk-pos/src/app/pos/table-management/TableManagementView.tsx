@@ -26,13 +26,15 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   }).from(diningTables).where(eq(diningTables.isActive, 1)).orderBy(diningTables.sortOrder),
   db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, groupId: tableSessions.groupId, personCount: tableSessions.personCount, babyCount: tableSessions.babyCount, openedAtEpoch: sql<number>`UNIX_TIMESTAMP(${tableSessions.openedAt})` }).from(tableSessions).where(eq(tableSessions.status, "OPEN")),
   db.select({ mergeId: tableSessionMerges.mergeId, sourceSessionId: tableSessionMerges.sourceSessionId, sourceTableId: tableSessionMerges.sourceTableId, destinationSessionId: tableSessionMerges.destinationSessionId, destinationTableId: tableSessionMerges.destinationTableId }).from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE"))]);
-  const mergedSourceSessionIds = new Set(activeMerges.map(merge => merge.sourceSessionId));
+  const openSessionIds = new Set(openSessions.map(session => session.sessionId));
+  const activeOpenMerges = activeMerges.filter(merge => openSessionIds.has(merge.sourceSessionId) && openSessionIds.has(merge.destinationSessionId));
+  const mergedSourceSessionIds = new Set(activeOpenMerges.map(merge => merge.sourceSessionId));
   const visibleSessionByTableId = new Map(openSessions.filter(session => !mergedSourceSessionIds.has(session.sessionId)).map(session => [session.tableId, session]));
   const tableNoById = new Map(tableLayouts.map(table => [table.tableId, table.tableNo]));
   const mergedSourceNosByDestinationId = new Map<number, string[]>();
   const activeMergeSourcesByDestinationId = new Map<number, Array<{ mergeId: number; sourceTableNo: string }>>();
-  activeMerges.forEach(merge => mergedSourceNosByDestinationId.set(merge.destinationTableId, [...(mergedSourceNosByDestinationId.get(merge.destinationTableId) ?? []), tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId)]));
-  activeMerges.forEach(merge => activeMergeSourcesByDestinationId.set(merge.destinationTableId, [...(activeMergeSourcesByDestinationId.get(merge.destinationTableId) ?? []), { mergeId: merge.mergeId, sourceTableNo: tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId) }]));
+  activeOpenMerges.forEach(merge => mergedSourceNosByDestinationId.set(merge.destinationTableId, [...(mergedSourceNosByDestinationId.get(merge.destinationTableId) ?? []), tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId)]));
+  activeOpenMerges.forEach(merge => activeMergeSourcesByDestinationId.set(merge.destinationTableId, [...(activeMergeSourcesByDestinationId.get(merge.destinationTableId) ?? []), { mergeId: merge.mergeId, sourceTableNo: tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId) }]));
   const tables = tableLayouts.map(table => ({ ...table, ...(visibleSessionByTableId.get(table.tableId) ?? { sessionId: null, groupId: null, personCount: 0, babyCount: 0, openedAtEpoch: null }), mergedSourceTableNos: (mergedSourceNosByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })), activeMergeSources: (activeMergeSourcesByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.sourceTableNo.localeCompare(b.sourceTableNo, "ko", { numeric: true })) }));
   const sessionIds = openSessions.map(session => session.sessionId);
   const sessionOrders = sessionIds.length ? await db.select({ orderId: orders.orderId, sessionId: orders.sessionId }).from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
@@ -52,7 +54,7 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   const physicalAmountByTableId = new Map<number, number>();
   tables.forEach(table => {
     if (!table.sessionId) return;
-    const sessionIds = new Set([table.sessionId, ...activeMerges.filter(merge => merge.destinationTableId === table.tableId).map(merge => merge.sourceSessionId)]);
+    const sessionIds = new Set([table.sessionId, ...activeOpenMerges.filter(merge => merge.destinationTableId === table.tableId).map(merge => merge.sourceSessionId)]);
     physicalAmountByTableId.set(table.tableId, [...sessionIds].reduce((sum, sessionId) => sum + (amountDueBySession.get(sessionId) ?? 0), 0));
   });
 

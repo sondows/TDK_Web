@@ -1,10 +1,10 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables, tableSessions } from "@/db/schema";
-import { getPrivilegedStaff } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 
 async function requireOwner() {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   if (!staff) return { error: Response.json({ message: "로그인이 필요합니다." }, { status: 401 }) };
   if (staff.role !== "OWNER") return { error: Response.json({ message: "OWNER만 이 작업을 할 수 있습니다." }, { status: 403 }) };
   return { staff };

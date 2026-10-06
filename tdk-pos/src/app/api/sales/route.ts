@@ -152,7 +152,7 @@ export async function POST(request: Request) {
         statusLabel: partialCancellation ? "일부취소" : null,
         tableLabel: sale.tableNos.map(tableNo => `${tableNo}T`).join("+"),
         orderedAt: sale.orderedAt.slice(0, 16).replace("T", " "),
-        items: sale.items,
+        items: sale.items.filter(item => item.printOnReceipt && !(item.itemType === "COMPONENT" && item.unitPrice === 0)),
         subtotalAmount: sale.subtotalAmount,
         discountAmount: sale.discountAmount,
         discounts: itemizedDiscounts,
@@ -231,6 +231,9 @@ async function listResponse(startDate: string, endDate: string) {
       checkoutItemId: checkoutItems.checkoutItemId,
       tableNo: diningTables.tableNo,
       itemName: orderItems.itemName,
+      itemType: orderItems.itemType,
+      unitPrice: checkoutItems.unitPrice,
+      printOnReceipt: orderItems.printOnReceipt,
       orderedAt: sql<string>`CONCAT(DATE_FORMAT(${orders.orderedAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00')`,
     })
       .from(checkoutItems)
@@ -275,7 +278,7 @@ async function listResponse(startDate: string, endDate: string) {
       .sort((a, b) => a.checkoutItemId - b.checkoutItemId);
     const tables = [...new Set(checkoutTransactionRows.map((row) => row.tableNo))]
       .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
-    const menuNames = [...new Set(checkoutTransactionRows.map((row) => row.itemName))];
+    const menuNames = [...new Set(checkoutTransactionRows.filter(row => !(row.itemType === "COMPONENT" && Number(row.unitPrice) === 0)).map((row) => row.itemName))];
     const firstOrderedAt = checkoutTransactionRows.reduce<string | null>((earliest, row) => !earliest || row.orderedAt < earliest ? row.orderedAt : earliest, null);
     const methods = [...new Set(transactionPayments.map(paymentLabel))];
     const latestPaymentAt = transactionPayments.reduce<string | null>((latest, payment) => !latest || payment.paidAt > latest ? payment.paidAt : latest, null);
@@ -327,6 +330,8 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     checkoutItemId: checkoutItems.checkoutItemId,
     orderItemId: checkoutItems.orderItemId,
     itemName: orderItems.itemName,
+    itemType: orderItems.itemType,
+    printOnReceipt: orderItems.printOnReceipt,
     unitPrice: checkoutItems.unitPrice,
     qty: checkoutItems.qty,
     amount: checkoutItems.amount,
@@ -416,7 +421,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     discountAmount: won(checkout.discountAmount),
     totalAmount: won(checkout.totalAmount),
     approvedAmount: relevantPayments.filter((payment) => payment.status === "APPROVED").reduce((sum, payment) => sum + won(payment.appliedAmount), 0),
-    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, itemName: item.itemName, unitPrice: won(item.unitPrice), qty: item.qty, amount: won(item.amount) })),
+    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, itemName: item.itemName, unitPrice: won(item.unitPrice), qty: item.qty, amount: won(item.amount), itemType: item.itemType, printOnReceipt: item.printOnReceipt === 1 })),
     discounts: discountRows
       .filter(discount => !checkout.completedAt || discount.createdAt <= checkout.completedAt)
       .map(discount => ({ label: discount.label, amount: won(discount.amount) })),

@@ -58,7 +58,7 @@ export default function IdleResetSettingsForm({
       if (!result.success) {
         if (response.status === 401 || response.status === 403) {
           setLoginModeMessage("관리자 인증이 필요합니다. 관리 화면에서 다시 인증해주세요.");
-          router.push("/pos/admin");
+          router.push("/admin/settings/store");
         } else {
           setLoginModeMessage(result.message ?? "로그인 방식 저장에 실패했습니다.");
         }

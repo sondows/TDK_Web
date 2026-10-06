@@ -1,10 +1,11 @@
-import { canManageSettings, getPrivilegedStaff } from "@/lib/permissions";
+import { canManageSettings } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 import { getReceiptLogoFileName, readReceiptLogo } from "@/lib/receipt-logo-storage";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   if (!staff) return new Response(null, { status: 401 });
   if (!canManageSettings(staff.role) || staff.staffCode === "000") return new Response(null, { status: 403 });
   try {

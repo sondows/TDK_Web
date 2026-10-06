@@ -67,10 +67,16 @@ const paymentMethodLabel = (payment: Payment) => {
   };
   return labels[payment.methodCode] ?? payment.methodName;
 };
-const paymentInfoLabelStyle = "text-[24px] font-normal";
-const paymentInfoAmountStyle = "text-[24px] font-bold";
+const paymentInfoLabelStyle = "text-[22px] font-normal";
+const paymentInfoAmountStyle = "text-[22px] font-bold";
+const paymentInfoSmallLabelStyle = "text-[20px] font-normal";
+const paymentInfoSmallAmountStyle = "text-[20px] font-bold";
+const paymentInfoSmallAlignedAmountStyle = "text-[20px] font-bold pr-[13px]";
+const paymentInfoAlignedAmountStyle = `${paymentInfoAmountStyle} pr-[13px]`;
 const paymentInfoRowStyle = "flex justify-between leading-7";
+const paymentSummaryRowStyle = "grid min-h-11 grid-cols-[1fr_auto] items-center leading-7";
 const paymentInfoRowGapStyle = "space-y-[7px]";
+const paymentHistoryRowGapStyle = "space-y-[14px]";
 export default function PaymentModal({
   tableId,
   tableNo,
@@ -93,7 +99,9 @@ export default function PaymentModal({
   const [customerSelectOpen, setCustomerSelectOpen] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<PaymentDeletionTarget | null>(null);
   const [cancelError, setCancelError] = useState("");
+  const [resetPaymentsConfirm, setResetPaymentsConfirm] = useState(false);
   const [overpaymentPrompt, setOverpaymentPrompt] = useState<OverpaymentPrompt | null>(null);
+  const [overpaymentBlockDialog, setOverpaymentBlockDialog] = useState(false);
   const [cardErrorDialog, setCardErrorDialog] = useState("");
   const [initialPaymentIds, setInitialPaymentIds] = useState<number[]>([]);
   const { ref: paymentMethodsRef, hints: scrollHints, handlers: paymentScrollHandlers } = useHorizontalScroll(state !== null);
@@ -113,6 +121,7 @@ export default function PaymentModal({
   }, [tableId]);
   const entered = Number(input || 0);
   const displayRemaining = Math.max(0, (state?.remaining ?? 0) - (stagedCustomerPayment?.amount ?? 0));
+  const displayOverpayment = Math.max(0, (state?.paid ?? 0) - (state?.total ?? 0));
   const append = (key: string) => {
     if (busy) return;
     setInput((current) =>
@@ -188,11 +197,11 @@ export default function PaymentModal({
     await request(body);
     setOverpaymentPrompt(null);
   };
-  const submitOtherPayment = (paymentMethodId: number, inputValue: number, tendered: number, methodName: string, cashChangeEnabled: boolean) => {
+  const submitOtherPayment = (paymentMethodId: number, inputValue: number, tendered: number, methodName: string, cashChangeEnabled: boolean, quantityMode: boolean) => {
     if (stagedCustomerPayment && tendered > displayRemaining) {
       return Promise.resolve({ ok: false, message: "고객결제 예정액을 제외한 받을금액 이내로 입력해 주세요." });
     }
-    const requestBody = { action: "PAY_OTHER", paymentMethodId, inputValue, customerId: selectedCustomer?.customerId };
+    const requestBody = { action: "PAY_OTHER", paymentMethodId, inputValue, quantityMode, customerId: selectedCustomer?.customerId };
     if (state && selectedCustomer && tendered > state.remaining && !cashChangeEnabled) {
       setOverpaymentPrompt({ kind: "OTHER", methodLabel: methodName, amount: tendered, due: state.remaining, excess: tendered - state.remaining, requestBody });
       setOtherOpen(false);
@@ -208,6 +217,11 @@ export default function PaymentModal({
     return true;
   };
   const pay = (methodCode: string, otherLabel?: string) => {
+    if (displayRemaining <= 0) {
+      setError("");
+      setCardErrorDialog("받을 금액이 없습니다.");
+      return;
+    }
     if (stagedCustomerPayment && entered > displayRemaining) {
       setError("고객결제 예정액을 제외한 받을금액 이내로 입력해 주세요.");
       return;
@@ -232,9 +246,15 @@ export default function PaymentModal({
     }
     void request({ action: "PAY", methodCode, amount: amount || undefined, customerId: selectedCustomer?.customerId, otherLabel });
   };
-  const complete = () => void request(stagedCustomerPayment
-    ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey, couponQuantity: stagedCustomerPayment.couponQuantity }
-    : { action: "COMPLETE" });
+  const complete = () => {
+    if (displayOverpayment > 0) {
+      setOverpaymentBlockDialog(true);
+      return;
+    }
+    void request(stagedCustomerPayment
+      ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey, couponQuantity: stagedCustomerPayment.couponQuantity }
+      : { action: "COMPLETE" });
+  };
   const cancelPayment = async () => {
     if (!deletionTarget || busy) return;
     if (deletionTarget.kind === "STAGED_CUSTOMER") {
@@ -263,6 +283,42 @@ export default function PaymentModal({
       setBusy(false);
     }
   };
+  const resetPayments = async () => {
+    if (!state || busy) return;
+    const paymentIds = state.payments.map(payment => payment.paymentId);
+    setBusy(true);
+    requestInFlight.current = true;
+    setCancelError("");
+    try {
+      let refreshedState = state;
+      for (const paymentId of paymentIds) {
+        const response = await fetch("/api/checkouts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tableId, action: "CANCEL_PAYMENT", paymentId }),
+        });
+        const result = await response.json() as { success?: boolean; message?: string; state?: State };
+        if (!response.ok || !result.success || !result.state) throw new Error(result.message ?? "결제를 초기화할 수 없습니다.");
+        refreshedState = result.state;
+        setState(refreshedState);
+      }
+      setStagedCustomerPayment(null);
+      setInput("");
+      setResetPaymentsConfirm(false);
+    } catch (resetError) {
+      setCancelError(resetError instanceof Error ? resetError.message : "결제 초기화 중 오류가 발생했습니다.");
+      try {
+        const response = await fetch(`/api/checkouts?tableId=${tableId}`);
+        const refreshed = await response.json() as { success?: boolean } & State;
+        if (response.ok && refreshed.success) setState(refreshed);
+      } catch {
+        // Keep the last successfully refreshed payment state visible.
+      }
+    } finally {
+      requestInFlight.current = false;
+      setBusy(false);
+    }
+  };
   // Approved payments are already persisted by the payment API.  Closing this
   // modal intentionally leaves a partial checkout and its OPEN table session
   // untouched so that it can be resumed as a prepaid payment later.
@@ -286,42 +342,41 @@ export default function PaymentModal({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
         aria-modal="true"
-        className={`flex ${state.isPartyBill ? "h-[min(760px,calc(100dvh-2rem))]" : "h-[min(752px,calc(100dvh-2rem-8px))]"} w-full max-w-[782px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
+        className={`flex ${state.isPartyBill ? "h-[min(760px,calc(100dvh-2rem))]" : "h-[min(752px,calc(100dvh-2rem-8px))]"} w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
         role="dialog"
       >
-        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="relative left-[50px] ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span className="text-[28px] leading-none">{displayedTableNos}</span><span className="text-[26px]">T</span></span>} trailing={<div className="flex min-w-0 items-end">
+        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="-ml-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span aria-hidden="true">..</span><span className="text-[35px] leading-none">{displayedTableNos}</span><span className="text-[33px]">T</span></span>} trailing={<div className="relative left-[20px] flex min-w-0 items-end">
             <button
-              className="h-[52px] w-[136px] shrink-0 rounded-none border-0 bg-transparent px-3 text-2xl font-extrabold text-white/90 shadow-none transition-colors hover:text-white active:text-white focus-visible:outline-none disabled:opacity-50"
+              className="h-[52px] w-fit min-w-[136px] max-w-[360px] shrink-0 rounded-none border-0 bg-transparent px-3 text-2xl font-extrabold text-white/90 shadow-none transition-colors hover:text-white active:text-white focus-visible:outline-none disabled:opacity-50"
               disabled={busy}
               onClick={() => setCustomerSelectOpen(true)}
               title={selectedCustomer?.name ?? "고객"}
               type="button"
-            ><span className="block truncate">{selectedCustomer?.name ?? "고객"}</span></button>
+            ><span className="inline-flex max-w-full items-center justify-center gap-1"><span className="whitespace-nowrap">{selectedCustomer?.name ?? "고객"}</span><span aria-hidden="true" className="shrink-0 text-[22px] leading-none">⋮</span></span></button>
           </div>} />
         <div className="grid min-h-0 flex-1 grid-cols-[44%_56%]">
-          <section className="min-h-0 overflow-y-auto border-r border-slate-200 px-6 py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
-            <div className="leading-7">
-              <div className={paymentInfoRowGapStyle}>
-              <div className={paymentInfoRowStyle}>
-                <span className={paymentInfoLabelStyle}>주문금액</span>
-                <b className={paymentInfoAmountStyle}>{money(state.gross)}</b>
-              </div>
-              {discountAmount > 0 && (
-                <div className={`${paymentInfoRowStyle} text-slate-900`}>
-                  <span className={paymentInfoLabelStyle}>할인금액</span>
-                  <b className={paymentInfoAmountStyle}>-{money(discountAmount)}</b>
+          <section className="flex min-h-0 flex-col border-r border-slate-200 px-6 py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
+            <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4">
+            <div className="rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-4 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
+              <div className="space-y-2.5">
+                <div className={paymentSummaryRowStyle}>
+                  <span className="text-[20px] font-normal">주문금액</span>
+                  <b className="text-[20px] font-bold">{money(state.gross)}</b>
                 </div>
-              )}
-              </div>
-              <div className={`mt-7 ${paymentInfoRowStyle} items-center gap-3 text-2xl leading-7 font-extrabold text-blue-700`}>
-                <span className={paymentInfoLabelStyle}>결제금액</span>
-                <b className={paymentInfoAmountStyle}>
-                  {money(state.total)}
-                </b>
+                {discountAmount > 0 && (
+                  <div className={`${paymentSummaryRowStyle} text-slate-900`}>
+                    <span className="text-[20px] font-normal">할인금액</span>
+                    <b className={`text-[20px] font-bold text-red-600`}>-{money(discountAmount)}</b>
+                  </div>
+                )}
+                <div className={`${paymentSummaryRowStyle} gap-3 text-[20px] font-extrabold text-blue-700`}>
+                  <span className={`text-[20px] font-normal text-slate-900`}>결제금액</span>
+                  <b className={`text-[20px] font-bold text-blue-700`}>{money(state.total)}</b>
+                </div>
               </div>
             </div>
             {(state.payments.length > 0 || stagedCustomerPayment) && <div className="mt-7">
-              <div className={paymentInfoRowGapStyle}>
+              <div className={`${paymentHistoryRowGapStyle} rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]`}>
                 {state.payments.map((payment) => {
                   const prepaid = initialPaymentIds.includes(payment.paymentId);
                   return (
@@ -336,16 +391,16 @@ export default function PaymentModal({
                     }}
                     type="button"
                   >
-                    <span className={paymentInfoLabelStyle}>
+                    <span className={`${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle} pl-3`}>
                       {prepaid ? "선불" : ""}
                       {paymentMethodLabel(payment)}
                     </span>
-                    <b className={paymentInfoAmountStyle}>{money(payment.receivedAmount)}</b>
+                    <b className={prepaid ? paymentInfoSmallAlignedAmountStyle : paymentInfoAlignedAmountStyle}>{money(payment.receivedAmount)}</b>
                   </button>
                   {payment.changeAmount > 0 && (
                     <div className={`${paymentInfoRowStyle} mt-[7px] text-slate-900`}>
-                      <span className={paymentInfoLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
-                      <b className={paymentInfoAmountStyle}>-{money(payment.changeAmount)}</b>
+                      <span className={`${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle} pl-3`}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
+                      <b className={paymentInfoAlignedAmountStyle}>-{money(payment.changeAmount)}</b>
                     </div>
                   )}
                   </div>
@@ -357,31 +412,35 @@ export default function PaymentModal({
                   disabled={busy}
                   onClick={() => { setCancelError(""); setDeletionTarget({ kind: "STAGED_CUSTOMER" }); }}
                   type="button"
-                ><span className={`min-w-0 truncate ${paymentInfoLabelStyle}`}>고객결제({stagedCustomerPayment.name}){stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(stagedCustomerPayment.amount)}</b></button>}
+                ><span className={`min-w-0 truncate pl-3 ${paymentInfoLabelStyle}`}>{stagedCustomerPayment.name}{stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className={`shrink-0 ${paymentInfoAlignedAmountStyle}`}>{money(stagedCustomerPayment.amount)}</b></button>}
               </div>
               <div className="relative mt-7">
-                <div aria-hidden="true" className="absolute -top-[14px] left-0 h-[3px] w-full -translate-y-1/2 bg-[#8F99A5]" />
-                <div className={`${paymentInfoRowStyle} text-2xl leading-7 font-extrabold ${displayRemaining > 0 ? "text-red-600" : "text-slate-900"}`}>
-                  <span className={paymentInfoLabelStyle}>받을금액</span>
-                  <b className={paymentInfoAmountStyle}>{money(displayRemaining)}</b>
+                <div className="overflow-hidden rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
+                  <div className={`${paymentInfoRowStyle} text-[20px] leading-7 font-extrabold ${displayOverpayment > 0 || displayRemaining > 0 ? "text-red-600" : "text-slate-900"}`}>
+                    <span className={`${paymentInfoSmallLabelStyle} text-slate-900`}>{displayOverpayment > 0 ? "초과결제" : "받을금액"}</span>
+                    <b className={paymentInfoSmallAmountStyle}>{money(displayOverpayment > 0 ? displayOverpayment : displayRemaining)}</b>
+                  </div>
                 </div>
               </div>
               {state.payments.filter(payment => payment.amount > payment.appliedAmount || payment.prepaidCreditAmount > 0).map(payment => (
-                <div className={`mt-7 ${paymentInfoRowGapStyle} text-slate-900`} key={`prepaid-${payment.paymentId}`}>
-                  <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>매출 적용</span><b className={paymentInfoAmountStyle}>{money(payment.appliedAmount)}</b></div>
-                  {payment.prepaidCreditAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>선불 적립</span><b className={paymentInfoAmountStyle}>{money(payment.prepaidCreditAmount)}</b></div>}
-                   {payment.changeAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span><b className={paymentInfoAmountStyle}>{money(payment.changeAmount)}</b></div>}
+                <div className={`mt-7 rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)] ${paymentInfoRowGapStyle} text-slate-900`} key={`prepaid-${payment.paymentId}`}>
+                  <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>매출 적용</span><b className={paymentInfoSmallAmountStyle}>{money(payment.appliedAmount)}</b></div>
+                  {payment.prepaidCreditAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>선불 적립</span><b className={paymentInfoSmallAmountStyle}>{money(payment.prepaidCreditAmount)}</b></div>}
+                   {payment.changeAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span><b className={paymentInfoSmallAmountStyle}>{money(payment.changeAmount)}</b></div>}
                 </div>
               ))}
             </div>}
+            </div>
+            <button
+              className="mt-3 min-h-[72px] w-full shrink-0 rounded-lg border border-slate-300 bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 disabled:opacity-40"
+              disabled={busy || (!state.payments.length && !stagedCustomerPayment)}
+              onClick={() => { setCancelError(""); setResetPaymentsConfirm(true); }}
+              type="button"
+            >결제 초기화</button>
           </section>
           <section className="flex min-h-0 flex-col px-6 py-6">
-            <NumericInputKeypad disabled={busy} onKey={append} value={money(entered)} />
-            {error && (
-              <p className="mt-2 text-center text-base font-bold text-red-600">
-                {error}
-              </p>
-            )}
+            <NumericInputKeypad disabled={busy} inputLabel="" inputOffset={-2} onKey={append} value={money(entered)} />
+            {error && <p className="mt-2 text-center text-base font-bold text-red-600">{error}</p>}
             <div className="relative z-10 mt-4 w-[365px] self-center bg-white">
               <div
                 aria-label="결제수단 선택"
@@ -392,7 +451,7 @@ export default function PaymentModal({
               >
               <button
                 className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy || displayRemaining <= 0}
+                disabled={busy}
                 onClick={() => pay("CARD")}
                 type="button"
               >
@@ -400,7 +459,7 @@ export default function PaymentModal({
               </button>
               <button
                 className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy || displayRemaining <= 0}
+                disabled={busy}
                 onClick={() => pay("CASH")}
                 type="button"
               >
@@ -409,8 +468,8 @@ export default function PaymentModal({
               <button
                 aria-label="기타결제"
                 className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy || displayRemaining <= 0}
-                onClick={() => setOtherOpen(true)}
+                disabled={busy}
+                onClick={() => { if (displayRemaining <= 0) { setError(""); setCardErrorDialog("받을 금액이 없습니다."); return; } setError(""); setOtherOpen(true); }}
                 type="button"
               >
                 기타결제
@@ -430,9 +489,7 @@ export default function PaymentModal({
               disabled={busy || displayRemaining > 0}
               onClick={complete}
               type="button"
-            >
-              결제완료
-            </button>
+            >결제완료</button>
           </section>
         </div>
       </section>
@@ -449,6 +506,7 @@ export default function PaymentModal({
         confirm={() => void resolveOverpayment(true)}
       />}
       {cardErrorDialog && <CardErrorDialog message={cardErrorDialog} close={() => setCardErrorDialog("")} />}
+      {overpaymentBlockDialog && <OverpaymentBlockDialog amount={displayOverpayment} close={() => setOverpaymentBlockDialog(false)} />}
       {customerSelectOpen && <CustomerSelectDialog
         selected={selectedCustomer}
         onClose={() => setCustomerSelectOpen(false)}
@@ -464,6 +522,15 @@ export default function PaymentModal({
             setDeletionTarget(null);
           }}
           submit={() => void cancelPayment()}
+        />
+      )}
+      {resetPaymentsConfirm && (
+        <PaymentResetDialog
+          busy={busy}
+          error={cancelError}
+          close={() => { if (!busy) { setResetPaymentsConfirm(false); setCancelError(""); } }}
+          submit={() => void resetPayments()}
+          paymentCount={state.payments.length}
         />
       )}
     </div>
@@ -498,6 +565,19 @@ function PaymentDeletionDialog({
   );
 }
 
+function PaymentResetDialog({ paymentCount, error, busy, close, submit }: { paymentCount: number; error: string; busy: boolean; close: () => void; submit: () => void }) {
+  return <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-950/45 p-4">
+    <section aria-modal="true" className="w-full max-w-[440px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
+      <PosSubHeader backIconSize={19} backLabel="결제 초기화 닫기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={close} title="결제 초기화" />
+      <div className="px-7 py-6">
+        <p className="text-center text-lg font-bold text-slate-800">등록된 결제 {paymentCount}건을 취소하고<br />결제 입력을 초기화하시겠습니까?</p>
+        {error && <p aria-live="polite" className="mt-4 text-center text-sm font-bold text-red-600">{error}</p>}
+        <button className="mt-6 min-h-[53px] w-full rounded-xl bg-red-600 text-base font-extrabold text-white disabled:opacity-40" disabled={busy} onClick={submit} type="button">{busy ? "초기화 중..." : "결제 초기화"}</button>
+      </div>
+    </section>
+  </div>;
+}
+
 function ConfirmOverpaymentDialog({ methodLabel, amount, due, excess, busy, cancel, confirm }: { methodLabel: string; amount: number; due: number; excess: number; busy: boolean; cancel: () => void; confirm: () => void }) {
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4">
     <section aria-modal="true" className="w-full max-w-[480px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
@@ -513,6 +593,18 @@ function ConfirmOverpaymentDialog({ methodLabel, amount, due, excess, busy, canc
           <button className="min-h-12 rounded-lg border border-slate-300 px-6 font-bold" disabled={busy} onClick={cancel} type="button">취소</button>
           <button className="min-h-12 rounded-lg bg-blue-600 px-6 font-bold text-white disabled:opacity-50" disabled={busy} onClick={confirm} type="button">{busy ? "처리 중..." : "확인"}</button>
         </div>
+      </div>
+    </section>
+  </div>;
+}
+
+function OverpaymentBlockDialog({ amount, close }: { amount: number; close: () => void }) {
+  return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
+    <section aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
+      <PosSubHeader title="초과결제" />
+      <div className="px-7 py-7 text-center text-xl font-bold text-slate-800">
+        <p>결제금액보다 {money(amount)}원이 초과되었습니다.<br />기존 결제를 취소한 후 다시 결제해주세요.</p>
+        <button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-extrabold text-white" onClick={close} type="button">확인</button>
       </div>
     </section>
   </div>;

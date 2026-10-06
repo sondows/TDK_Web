@@ -88,15 +88,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       const eligibleOrderIds = sourceOrders.filter(order => order.status === "OPEN" || order.status === "ACCEPTED").map(order => order.orderId);
       const sourceItems = eligibleOrderIds.length ? await tx.select({
         orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId,
+        parentOrderItemId: orderItems.parentOrderItemId, actualComponentQty: orderItems.actualComponentQty,
         itemName: orderItems.itemName, qty: orderItems.qty, unitPrice: orderItems.unitPrice,
         prepStationId: orderItems.prepStationId, itemType: orderItems.itemType, status: orderItems.status, printOnReceipt: orderItems.printOnReceipt, note: orderItems.note,
-      }).from(orderItems).where(inArray(orderItems.orderId, eligibleOrderIds)) : [];
+      }).from(orderItems).where(inArray(orderItems.orderId, eligibleOrderIds)).orderBy(orderItems.orderItemId) : [];
       const cancellationRows = sourceItems.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty })
         .from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, sourceItems.map(item => item.orderItemId))) : [];
       const cancelledByItem = new Map<number, number>();
       cancellationRows.forEach(row => cancelledByItem.set(row.orderItemId, (cancelledByItem.get(row.orderItemId) ?? 0) + row.cancelledQty));
-      const effectiveItems = sourceItems.map(item => ({ ...item, effectiveQty: item.qty - (cancelledByItem.get(item.orderItemId) ?? 0) }))
-        .filter(item => item.status !== "CANCELLED" && item.effectiveQty > 0);
+      const effectiveItems = sourceItems.map(item => ({ ...item, effectiveQty: Math.max(0, (item.actualComponentQty ?? item.qty) - (cancelledByItem.get(item.orderItemId) ?? 0)) }))
+        .filter(item => item.status !== "CANCELLED" ? item.itemType === "COMPONENT" || item.effectiveQty > 0 : item.itemType === "COMPONENT" && item.effectiveQty === 0);
       if (!effectiveItems.length) throw new CopyValidationError("복사할 주문이 없습니다.");
 
       const sourceOptions = await tx.select({
@@ -143,13 +144,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
           acceptedAt: new Date(),
         });
         const destinationOrderId = Number(orderInsert.insertId);
+        const copiedItemIds = new Map<number, number>();
         for (const item of effectiveItems) {
+          const copiedParentId = item.parentOrderItemId === null ? null : copiedItemIds.get(item.parentOrderItemId);
+          if (item.parentOrderItemId !== null && copiedParentId === undefined) continue;
           const itemTotal = decimal(cents(item.unitPrice) * BigInt(item.effectiveQty));
           const [itemInsert] = await tx.insert(orderItems).values({
             orderId: destinationOrderId,
+            parentOrderItemId: copiedParentId ?? null,
             menuId: item.menuId,
             itemName: item.itemName,
-            qty: item.effectiveQty,
+            qty: item.itemType === "COMPONENT" ? Math.max(1, item.effectiveQty) : item.effectiveQty,
+            actualComponentQty: item.itemType === "COMPONENT" ? item.effectiveQty : null,
             unitPrice: item.unitPrice,
             discountAmount: "0.00",
             totalAmount: itemTotal,
@@ -160,6 +166,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
             note: item.note,
           });
           const destinationItemId = Number(itemInsert.insertId);
+          copiedItemIds.set(item.orderItemId, destinationItemId);
           const options = optionsByItem.get(item.orderItemId) ?? [];
           if (options.length) await tx.insert(orderItemOptions).values(options.map(option => ({
             orderItemId: destinationItemId,

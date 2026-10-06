@@ -40,6 +40,8 @@ export type SaleDetail = {
     unitPrice: number;
     qty: number;
     amount: number;
+    itemType: "NORMAL" | "COMPONENT" | "SERVICE";
+    printOnReceipt: boolean;
   }>;
   discounts: Array<{
     label: string;

@@ -268,6 +268,28 @@ export const menus = mysqlTable("menus", {
     .default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("uq_menu_code").on(table.menuCode)]);
 
+/** Existing stock item catalog from the store inventory schema. */
+export const inventoryItems = mysqlTable("inventory_items", {
+  inventoryItemId: bigint("inventory_item_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  itemCode: varchar("item_code", { length: 40 }),
+  itemName: varchar("item_name", { length: 150 }).notNull(),
+  itemType: mysqlEnum("item_type", ["INGREDIENT", "PREPARED", "BEVERAGE", "LIQUOR", "SUPPLY", "OTHER"]).notNull().default("OTHER"),
+  baseUnit: varchar("base_unit", { length: 20 }).notNull(),
+  trackingType: mysqlEnum("tracking_type", ["REALTIME", "THEORETICAL", "NONE"]).notNull().default("REALTIME"),
+  currentQty: bigint("current_qty", { mode: "number" }).notNull().default(0),
+  lowStockQty: bigint("low_stock_qty", { mode: "number" }),
+  isActive: tinyint("is_active").notNull().default(1),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("uq_inventory_item_code").on(table.itemCode), index("idx_inventory_item_name").on(table.itemName)]);
+
+/** Existing recipe link from a sellable menu to a reusable inventory item. */
+export const menuInventory = mysqlTable("menu_inventory", {
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),
+  inventoryItemId: bigint("inventory_item_id", { mode: "number", unsigned: true }).notNull().references(() => inventoryItems.inventoryItemId),
+  qtyUsed: bigint("qty_used", { mode: "number" }).notNull().default(1),
+}, (table) => [primaryKey({ columns: [table.menuId, table.inventoryItemId] })]);
+
 export const menuImages = mysqlTable("menu_images", {
   menuImageId: bigint("menu_image_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),
@@ -303,6 +325,16 @@ export const menuModifierGroups = mysqlTable("menu_modifier_groups", {
   modifierGroupId: bigint("modifier_group_id", { mode: "number", unsigned: true }).notNull().references(() => modifierGroups.modifierGroupId, { onDelete: "cascade" }),
   sortOrder: int("sort_order").notNull().default(0),
 }, (table) => [primaryKey({ columns: [table.menuId, table.modifierGroupId] }), index("fk_menu_modifier_groups_group").on(table.modifierGroupId)]);
+
+export const menuComponents = mysqlTable("menu_components", {
+  menuComponentId: bigint("menu_component_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  parentMenuId: bigint("parent_menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId),
+  componentMenuId: bigint("component_menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId),
+  qtyPerUnit: int("qty_per_unit").notNull().default(1),
+  printOnKitchen: tinyint("print_on_kitchen").notNull().default(1),
+  printOnReceipt: tinyint("print_on_receipt").notNull().default(0),
+  sortOrder: int("sort_order").notNull().default(0),
+}, (table) => [uniqueIndex("uq_menu_component").on(table.parentMenuId, table.componentMenuId)]);
 
 export const orders = mysqlTable("orders", {
   orderId: bigint("order_id", {
@@ -415,6 +447,7 @@ export const orderItems = mysqlTable("order_items", {
   }).notNull(),
   itemName: varchar("item_name", { length: 200 }).notNull(),
   qty: int("qty").notNull(),
+  actualComponentQty: int("actual_component_qty"),
   unitPrice: decimal("unit_price", { precision: 14, scale: 2 })
     .notNull()
     .default("0"),

@@ -1,12 +1,14 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { menus } from "@/db/schema";
-import { canManageMenu, getPrivilegedStaff } from "@/lib/permissions";
+import { canManageMenu } from "@/lib/permissions";
+import { getMenuManager } from "@/lib/management-auth";
 
 async function requireOwner() {
-  const staff = await getPrivilegedStaff();
-  if (!staff) return { error: Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 }) };
-  if (!canManageMenu(staff.role)) return { error: Response.json({ success: false, message: "메뉴 관리 권한이 없습니다." }, { status: 403 }) };
+  const actor = await getMenuManager();
+  if (!actor) return { error: Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 }) };
+  if (!canManageMenu(actor.role)) return { error: Response.json({ success: false, message: "메뉴 관리 권한이 없습니다." }, { status: 403 }) };
+  const staff = actor.staff;
   return { staff };
 }
 

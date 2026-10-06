@@ -1,7 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { tableSessions } from "@/db/schema";
+import { tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 
@@ -16,8 +16,16 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
     const [tableSession] = await db.select({ status: tableSessions.status }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).limit(1);
     if (!tableSession) return Response.json({ success: false, message: "테이블 세션을 찾을 수 없습니다." }, { status: 404 });
     if (tableSession.status !== "OPEN") return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
-    const [updateResult] = await db.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN")));
-    if (updateResult.affectedRows !== 1) return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
+    const closed = await db.transaction(async tx => {
+      const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN")));
+      if (updateResult.affectedRows !== 1) return false;
+      await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(and(
+        eq(tableSessionMerges.status, "ACTIVE"),
+        or(eq(tableSessionMerges.sourceSessionId, sessionId), eq(tableSessionMerges.destinationSessionId, sessionId)),
+      ));
+      return true;
+    });
+    if (!closed) return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
     return Response.json({ success: true, message: "테이블 사용을 종료했습니다." });
   } catch {
     return Response.json({ success: false, message: "테이블 종료 처리에 실패했습니다." }, { status: 500 });

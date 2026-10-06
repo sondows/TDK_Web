@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
@@ -15,6 +15,28 @@ const decimal = (value: number) => won(value).toFixed(2);
 const signedDecimal = (value: number) => Math.trunc(value).toFixed(2);
 
 class CheckoutError extends Error { constructor(message: string, readonly status = 409) { super(message); } }
+
+async function closeSessionsAndMerges(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  sessionIds: number[],
+  closedByStaffId: number | null,
+) {
+  if (!sessionIds.length) return;
+  await tx.update(tableSessions)
+    .set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId })
+    .where(inArray(tableSessions.sessionId, sessionIds));
+  // Keep the merge row for history, but make every edge touching a closed
+  // session inactive. Other still-open edges in a larger merge group survive.
+  await tx.update(tableSessionMerges)
+    .set({ status: "SEPARATED", separatedAt: sql`CURRENT_TIMESTAMP` })
+    .where(and(
+      eq(tableSessionMerges.status, "ACTIVE"),
+      or(
+        inArray(tableSessionMerges.sourceSessionId, sessionIds),
+        inArray(tableSessionMerges.destinationSessionId, sessionIds),
+      ),
+    ));
+}
 
 async function actor() {
   const current = await getCurrentStaff();
@@ -47,12 +69,18 @@ async function billScope(tx: Parameters<Parameters<typeof db.transaction>[0]>[0]
       .where(and(eq(tableSessionMerges.status, "ACTIVE"), inArray(tableSessionMerges.destinationSessionId, physicalSessionIds)))
       .for("update")
     : [];
+  const openMergeSources = merges.length
+    ? await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
+      .where(and(eq(tableSessions.status, "OPEN"), inArray(tableSessions.sessionId, merges.map(row => row.sourceSessionId))))
+      .for("update")
+    : [];
+  const openMergeSourceIds = new Set(openMergeSources.map(row => row.sessionId));
   const tableNos = groupedSessions
     .map((session) => session.tableNo)
     .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
   return {
     baseSessionId: base.sessionId,
-    sessionIds: [...new Set([...physicalSessionIds, ...merges.map((row) => row.sourceSessionId)])],
+    sessionIds: [...new Set([...physicalSessionIds, ...merges.map((row) => row.sourceSessionId).filter(sessionId => openMergeSourceIds.has(sessionId))])],
     isPartyBill: base.groupId !== null && groupedSessions.length > 1,
     tableNos,
   };
@@ -190,7 +218,7 @@ export async function POST(request: Request) {
   try {
     const processedByStaffId = await actor();
     requestPhase = "request parsing";
-    const body = await request.json() as { tableId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
+    const body = await request.json() as { tableId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; quantityMode?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
     const tableId = Number(body.tableId);
     if (!Number.isInteger(tableId) || tableId <= 0) throw new CheckoutError("테이블을 확인해 주세요.", 400);
     const action = body.action;
@@ -212,11 +240,13 @@ export async function POST(request: Request) {
         const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
         const paid = won((await paymentStateForCheckouts(tx, checkoutIds)).reduce((sum, row) => sum + row.appliedAmount, 0));
         const total = Math.max(0, bill.gross - bill.discount);
+        const overpaid = won(paid - total);
+        if (overpaid > 0) throw new CheckoutError(`결제금액보다 ${overpaid.toLocaleString("ko-KR")}원이 초과되었습니다. 기존 결제를 취소한 후 다시 결제해주세요.`, 409);
         if (paid < total) throw new CheckoutError("받을금액이 남아 있어 결제를 완료할 수 없습니다.");
         if (checkoutIds.length) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
         const orderIds = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, bill.sessionIds));
         if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
-        await tx.update(tableSessions).set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId: processedByStaffId }).where(inArray(tableSessions.sessionId, bill.sessionIds));
+        await closeSessionsAndMerges(tx, bill.sessionIds, processedByStaffId);
         return { completed: true, change: 0, tendered: 0, applied: 0, tableId };
       }
       if (action === "CANCEL_PAYMENT") {
@@ -348,7 +378,7 @@ export async function POST(request: Request) {
           if (checkoutIds.length > 1) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
           const orderIds = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, bill.sessionIds));
           if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
-          await tx.update(tableSessions).set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId: processedByStaffId }).where(inArray(tableSessions.sessionId, bill.sessionIds));
+          await closeSessionsAndMerges(tx, bill.sessionIds, processedByStaffId);
         }
         return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId };
       }
@@ -387,7 +417,7 @@ export async function POST(request: Request) {
       if (!remaining) throw new CheckoutError("이미 결제가 완료되었습니다.");
       requestPhase = "validate amount and cash change threshold";
       const entered = Number(body.amount);
-      const quantity = configured?.inputType === "QUANTITY" ? inputValue : null;
+      const quantity = configured?.inputType === "QUANTITY" && body.quantityMode !== false ? inputValue : null;
       const unitAmount = configured?.inputType === "QUANTITY" ? Number(configured.unitAmount) : null;
       if (quantity !== null && (!Number.isSafeInteger(unitAmount) || !unitAmount || unitAmount <= 0)) throw new CheckoutError("쿠폰 단가 설정을 확인해 주세요.", 409);
       const tendered = isOther ? (quantity !== null ? quantity * unitAmount! : inputValue) : Number.isSafeInteger(entered) && entered > 0 ? entered : remaining;

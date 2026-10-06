@@ -75,7 +75,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
 
   return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4">
     <section aria-modal="true" className={`flex h-[min(560px,calc(100dvh-2rem))] w-full ${expanded ? "max-w-[757px]" : "max-w-[420px]"} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`} role="dialog">
-      <PosSubHeader backLabel="고객 선택 닫기" onBack={onClose} title="고객 선택" trailing={<button className="min-h-11 shrink-0 rounded-lg bg-white px-4 text-base font-bold text-[#455A64]" onClick={() => expanded ? closeSearch() : setExpanded(true)} type="button">{expanded ? "검색 종료" : "전화 검색"}</button>} />
+      <PosSubHeader backLabel="고객 선택 닫기" backIconSize={19} backVisualSize={39} onBack={onClose} title="고객 선택" trailingClassName={expanded ? "w-[337px] justify-end" : ""} trailing={<button className={`h-[52px] shrink-0 rounded-none border-0 bg-transparent text-right text-2xl font-extrabold text-white/90 shadow-none transition-colors hover:text-white active:text-white focus-visible:outline-none ${expanded ? "w-full pr-0" : "min-w-[160px] px-0"}`} onClick={() => expanded ? closeSearch() : setExpanded(true)} type="button"><span className="inline-flex max-w-full items-center justify-end gap-1"><span>{expanded ? "검색 종료" : "전화검색"}</span><span aria-hidden="true" className="shrink-0 text-[22px] leading-none">⋮</span></span></button>} />
       <div className={`grid min-h-0 flex-1 ${expanded ? "grid-cols-[minmax(0,420px)_337px]" : "grid-cols-1"}`}>
         <div aria-label="고객 목록" className="min-h-0 overflow-y-auto p-5" role="listbox">
           {loading ? <p>불러오는 중...</p> : error ? <p className="text-red-600" role="alert">{error}</p> : rows.map(customer => <button

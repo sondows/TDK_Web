@@ -1,13 +1,14 @@
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { canManageSettings, getPrivilegedStaff } from "@/lib/permissions";
+import { canManageSettings } from "@/lib/permissions";
+import { getManagementOwner } from "@/lib/management-auth";
 import { getReceiptLogoFileName, receiptLogoSettingKey, removeReceiptLogo, saveReceiptLogo } from "@/lib/receipt-logo-storage";
 import { getStoreInfo, storeInfoSettingKeys, type StoreInfo } from "@/lib/store-info";
 
 export const runtime = "nodejs";
 
 async function authorizedStaff() {
-  const staff = await getPrivilegedStaff();
+  const staff = await getManagementOwner();
   if (!staff) return { error: Response.json({ success: false, message: "관리자 인증이 필요합니다." }, { status: 401 }) };
   if (!canManageSettings(staff.role) || staff.staffCode === "000")
     return { error: Response.json({ success: false, message: "OWNER만 매장정보를 변경할 수 있습니다." }, { status: 403 }) };

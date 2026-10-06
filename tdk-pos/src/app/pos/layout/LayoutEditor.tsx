@@ -12,7 +12,7 @@ type NewTable = { tableNo: string; capacity: number };
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const snap = (value: number) => Math.round(value / 2) * 2;
 
-export default function LayoutEditor({ tables: initial }: { tables: Table[] }) {
+export default function LayoutEditor({ tables: initial, returnPath = "/admin", embedded = false }: { tables: Table[]; returnPath?: "/admin" | "/pos/admin"; embedded?: boolean }) {
   const router = useRouter();
   const board = useRef<HTMLDivElement>(null);
   const [tables, setTables] = useState(initial);
@@ -58,7 +58,7 @@ export default function LayoutEditor({ tables: initial }: { tables: Table[] }) {
     const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", end);
   };
-  const leave = (path: "/pos/admin" | "/pos") => {
+  const leave = (path: "/admin" | "/pos/admin") => {
     if (!dirty || window.confirm("저장하지 않은 변경사항이 있습니다. 나가시겠습니까?")) router.push(path);
   };
   const save = async () => {
@@ -87,10 +87,10 @@ export default function LayoutEditor({ tables: initial }: { tables: Table[] }) {
     setSelected(null);
   };
 
-  return <main className="h-dvh overflow-hidden bg-slate-100 p-3 text-slate-900">
-    <div className="rounded-xl bg-white px-4 shadow-sm"><ManagementPageHeader maxWidth="max-w-[1800px]" onBack={() => leave("/pos/admin")} title="테이블 배치" actions={<><button className="min-h-12 rounded-xl border border-slate-300 bg-white px-5 font-semibold" onClick={() => setNewTable({ tableNo: "", capacity: 4 })} type="button">+ 테이블</button><button className="min-h-12 rounded-xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-400" disabled={saving} onClick={save} type="button">{saving ? "저장 중" : "저장"}</button></>} /></div>
+  return <main className={`${embedded ? "h-full" : "h-dvh"} overflow-hidden bg-slate-100 p-3 text-slate-900`}>
+    <div className="rounded-xl bg-white px-4 shadow-sm"><ManagementPageHeader maxWidth="max-w-[1800px]" onBack={() => leave(returnPath)} title="테이블 배치" actions={<><button className="min-h-12 rounded-xl border border-slate-300 bg-white px-5 font-semibold" onClick={() => setNewTable({ tableNo: "", capacity: 4 })} type="button">+ 테이블</button><button className="min-h-12 rounded-xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-400" disabled={saving} onClick={save} type="button">{saving ? "저장 중" : "저장"}</button></>} /></div>
     {message && <p className="mx-auto mt-2 max-w-[1800px] text-sm font-semibold text-blue-700">{message}</p>}
-    <div className="mx-auto mt-3 grid h-[calc(100dvh-5.75rem)] max-w-[1800px] min-h-0 grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className={`mx-auto mt-3 grid ${embedded ? "h-[calc(100%-3.75rem)]" : "h-[calc(100dvh-5.75rem)]"} max-w-[1800px] min-h-0 grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm`}>
       <TableLayoutCanvas ref={board} className="touch-none bg-slate-50" style={{ backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: "20px 20px" }}>
         {tables.filter((table) => table.isActive).map((table) => <TableShape key={table.tableId} {...table} amountDue={0} editable guestCount={0} onClick={() => setSelected(table.tableId)} onPointerDown={(event) => drag(event, table)} onResizePointerDown={(event) => resize(event, table)} selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />)}
       </TableLayoutCanvas>

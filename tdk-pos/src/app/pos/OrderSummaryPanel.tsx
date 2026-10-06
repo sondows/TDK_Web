@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import PinAuthPanel from "@/components/PinAuthPanel";
+import PinKeypad from "@/components/PinKeypad";
 import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
@@ -28,6 +30,8 @@ type Item = [string, { qty: number; total: number; unitPrice: number }];
 type DetailItem = {
   orderItemId: number;
   menuId: number;
+  parentOrderItemId: number | null;
+  itemType: "NORMAL" | "COMPONENT" | "SERVICE";
   itemName: string;
   qty: number;
   unitPrice: string;
@@ -71,12 +75,23 @@ type CancelState = {
   pin: string;
   busy: boolean;
   error: string;
+  pinError: boolean;
+};
+export type PendingCartComponent = {
+  menuComponentId: number;
+  componentMenuId: number;
+  itemName: string;
+  perMenuQty: number;
+  qty: number;
+  touched: boolean;
+  unitPrice: number;
 };
 export type PendingCartItem = {
   menuId: number;
   menuName: string;
   unitPrice: number;
   qty: number;
+  components?: PendingCartComponent[];
   options?: Array<{
     modifierGroupId: number;
     modifierOptionId: number;
@@ -126,6 +141,7 @@ const empty = (key: string): CancelState => ({
   pin: "",
   busy: false,
   error: "",
+  pinError: false,
 });
 export default function OrderSummaryPanel({
   selected,
@@ -138,6 +154,7 @@ export default function OrderSummaryPanel({
   submitCart,
   clearCart,
   adjustCartItem,
+  adjustCartComponent,
   submitting,
   submitError,
   orderDetails,
@@ -160,6 +177,7 @@ export default function OrderSummaryPanel({
   submitCart: () => void;
   clearCart: () => void;
   adjustCartItem: (i: PendingCartItem, d: number) => void;
+  adjustCartComponent: (parent: PendingCartItem, component: PendingCartComponent, d: number) => void;
   submitting: boolean;
   submitError: string;
   orderDetails: OrderDetail[];
@@ -251,7 +269,7 @@ export default function OrderSummaryPanel({
     );
   };
   const execute = async (credentials?: { staffCode: string; pin: string }) => {
-    update((x) => ({ ...x, busy: true, error: "" }));
+    update((x) => ({ ...x, busy: true, error: "", pinError: false }));
     try {
       const r = await fetch("/api/order-items/cancellations/batch", {
         method: "POST",
@@ -276,9 +294,12 @@ export default function OrderSummaryPanel({
         return;
       }
       if (!r.ok || !v.success) {
+        const pinError = r.status === 409 && Boolean(credentials);
         update((x) => ({
           ...x,
           busy: false,
+          pin: pinError ? "" : x.pin,
+          pinError,
           error: v.message ?? "주문 취소에 실패했습니다.",
         }));
         return;
@@ -393,32 +414,18 @@ export default function OrderSummaryPanel({
     </div>
   ));
   const pendingRows = cart.map((i) => (
-    <div
-      className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm"
-      key={`${i.menuId}:${i.unitPrice}`}
-    >
-      <span className="truncate font-medium">{i.menuName}</span>
-      <span className="text-right text-slate-500">
-        {new Intl.NumberFormat("ko-KR").format(i.unitPrice)}
-      </span>
-      <span className="grid grid-cols-3 text-center">
-        <button
-          disabled={submitting}
-          onClick={() => adjustCartItem(i, -1)}
-          type="button"
-        >
-          −
-        </button>
-        <b>{i.qty}</b>
-        <button
-          disabled={submitting}
-          onClick={() => adjustCartItem(i, 1)}
-          type="button"
-        >
-          +
-        </button>
-      </span>
-      <b className="text-right">{money(i.unitPrice * i.qty)}</b>
+    <div className="space-y-1" key={`${i.menuId}:${i.unitPrice}:${JSON.stringify(i.options ?? [])}`}>
+      <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
+        <span className="truncate font-medium">{i.menuName}</span>
+        <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.unitPrice)}</span>
+        <span className="grid grid-cols-3 text-center"><button disabled={submitting} onClick={() => adjustCartItem(i, -1)} type="button">−</button><b>{i.qty}</b><button disabled={submitting} onClick={() => adjustCartItem(i, 1)} type="button">+</button></span>
+        <b className="text-right">{money(i.unitPrice * i.qty)}</b>
+      </div>
+      {(i.components ?? []).map(component => <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 pl-3 text-sm text-slate-600" key={component.menuComponentId}>
+        <span className="truncate"><span aria-hidden="true" className="mr-1 text-slate-400">└</span>{component.itemName}</span><span className="text-right">{new Intl.NumberFormat("ko-KR").format(component.unitPrice)}</span>
+        <span className="grid grid-cols-3 items-center text-center"><button aria-label={`${component.itemName} 수량 감소`} className="min-h-8" disabled={submitting || component.qty <= 0} onClick={() => adjustCartComponent(i, component, -1)} type="button">−</button><b>{component.qty}</b><button aria-label={`${component.itemName} 수량 증가`} className="min-h-8" disabled={submitting} onClick={() => adjustCartComponent(i, component, 1)} type="button">+</button></span>
+        <b className="text-right">{money(component.unitPrice * component.qty)}</b>
+      </div>)}
     </div>
   ));
   const partyItemMap = new Map<
@@ -499,7 +506,7 @@ export default function OrderSummaryPanel({
       <div className="mt-3">
         {effectiveEntries.map((discount, index) => (
           <div
-            className="flex justify-between text-sm text-red-600"
+            className="flex justify-between text-sm text-slate-900"
             key={`${discount.sessionId}:${discount.discountType}:${index}`}
           >
             <span>
@@ -507,7 +514,7 @@ export default function OrderSummaryPanel({
                 ? "SNS 리뷰 할인"
                 : discount.label}
             </span>
-            <b>-{money(Number(discount.discountAmount))}</b>
+            <b className="text-red-600">-{money(Number(discount.discountAmount))}</b>
           </div>
         ))}
       </div>
@@ -531,9 +538,9 @@ export default function OrderSummaryPanel({
     (selected?.paymentTotal ?? total) - prepaidAmount,
   );
   const prepaidRow = prepaidAmount > 0 ? (
-    <div className="mt-2 flex justify-between text-sm text-blue-600">
+    <div className="mt-2 flex justify-between text-sm text-slate-900">
       <span>선불금액</span>
-      <b>- {money(prepaidAmount)}</b>
+      <b className="text-blue-600">- {money(prepaidAmount)}</b>
     </div>
   ) : null;
   const partyOrdersSection =
@@ -659,7 +666,7 @@ export default function OrderSummaryPanel({
             <div className="pos-order-content">
               <div className="pos-order-items-scroll py-3">
                 {summaryRows.length ? (
-                  summaryRows
+                  <div className="flex flex-col gap-y-[7px]">{summaryRows}</div>
                 ) : (
                   <p className="py-6 text-center text-sm text-slate-400">
                     현재 주문 내역이 없습니다.
@@ -671,9 +678,9 @@ export default function OrderSummaryPanel({
                 </div>}
                 {discountRows(billingDiscounts)}
                 {prepaidRow}
-                <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-blue-700">
+                <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-900">
                   <span>받을금액</span>
-                  <b className="text-lg font-extrabold">{money(receivableAmount)}</b>
+                  <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
                 </div>
                 {partyOrdersSection}
               </div>
@@ -714,9 +721,9 @@ export default function OrderSummaryPanel({
               )}
               {discountRows(billingDiscounts)}
               {prepaidRow}
-              <div className="mt-3 flex justify-between border-t border-violet-200 pt-3 text-base font-bold text-blue-700">
+              <div className="mt-3 flex justify-between border-t border-violet-200 pt-3 text-base font-bold text-slate-900">
                 <span>받을금액</span>
-                <b className="text-lg font-extrabold">{money(receivableAmount)}</b>
+                <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
               </div>
               {partyOrdersSection}
             </div>
@@ -823,11 +830,12 @@ export default function OrderSummaryPanel({
       {c.reauth && (
         <Reauth
           c={c}
-          close={() => update((x) => ({ ...x, reauth: false, error: "" }))}
+          close={() => update((x) => ({ ...x, reauth: false, error: "", pinError: false }))}
           set={(staffCode, pin) =>
-            update((x) => ({ ...x, staffCode, pin, error: "" }))
+            update((x) => ({ ...x, staffCode, pin, error: "", pinError: false }))
           }
-          submit={() => void execute({ staffCode: c.staffCode, pin: c.pin })}
+          dismissPinError={() => update((x) => ({ ...x, error: "", pinError: false }))}
+          submit={(staffCode, pin) => void execute({ staffCode, pin })}
         />
       )}
       {paymentOpen && selected?.sessionId && (
@@ -941,15 +949,17 @@ function Reauth({
   c,
   close,
   set,
+  dismissPinError,
   submit,
 }: {
   c: CancelState;
   close: () => void;
   set: (a: string, b: string) => void;
-  submit: () => void;
+  dismissPinError: () => void;
+  submit: (staffCode: string, pin: string) => void;
 }) {
   const [employees, setEmployees] = useState<
-    Array<{ staffId: number; staffCode: string; name: string; role: string }>
+    Array<{ staffId: number; staffCode: string; name: string; role: string; hasPin: boolean }>
   >([]);
   useEffect(() => {
     let mounted = true;
@@ -962,71 +972,67 @@ function Reauth({
               staffCode: string;
               name: string;
               role: string;
+              hasPin: boolean;
             }>;
           }>,
       )
       .then((data) => {
-        if (mounted) setEmployees((data.staff ?? []).filter(employee => employee.staffCode !== "000"));
+        if (mounted) setEmployees((data.staff ?? []).filter(employee => employee.staffCode !== "000" && employee.hasPin));
       })
       .catch(() => undefined);
     return () => {
       mounted = false;
     };
   }, []);
+  const enterDigit = (digit: string) => {
+    if (!c.staffCode || c.busy || c.pin.length >= PIN_LENGTH) return;
+    const pin = `${c.pin}${digit}`;
+    set(c.staffCode, pin);
+    if (pin.length === PIN_LENGTH) submit(c.staffCode, pin);
+  };
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-4">
-      <section className="w-full max-w-sm rounded-2xl bg-white p-5">
-        <h2 className="text-lg font-extrabold">취소자 재확인</h2>
-        <p className="mt-2 text-sm">
-          취소 담당 직원을 선택하고 PIN을 입력하세요.
-        </p>
-        {employees.length > 0 ? (
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {employees.map((employee) => (
-              <button
-                className={`min-h-11 rounded-lg border px-2 text-sm font-bold ${c.staffCode === employee.staffCode ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-200"}`}
-                key={employee.staffId}
-                onClick={() => set(employee.staffCode, c.pin)}
-                type="button"
-              >
-                {employee.name}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <input
-            autoFocus
-            className="mt-4 min-h-11 w-full rounded-lg border px-3"
-            onChange={(e) => set(e.target.value, c.pin)}
-            placeholder="직원번호"
-            value={c.staffCode}
-          />
-        )}
-        <PinInput
-          ariaLabel="취소자 PIN"
-          autoFocus={employees.length > 0}
-          disabled={c.busy}
-          onChange={(pin) => set(c.staffCode, pin)}
-          value={c.pin}
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-3">
+      <section aria-label="취소자 재확인" aria-modal="true" className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[390px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl" role="dialog">
+        <PosSubHeader backLabel="취소 인증 취소" onBack={close} title="취소자 재확인" />
+        <p className="shrink-0 px-5 pt-3 text-center text-sm text-slate-600">취소 담당 직원을 선택하고 PIN을 입력하세요.</p>
+        <PinAuthPanel
+          label="직원 선택"
+          people={employees}
+          selectedCode={c.staffCode}
+          selectionDisabled={c.busy}
+          onSelect={(employee) => set(employee.staffCode, "")}
+          emptyMessage="선택할 수 있는 직원이 없습니다."
+          pinInput={
+            <PinInput
+              ariaLabel="취소자 PIN"
+              autoFocus={Boolean(c.staffCode)}
+              disabled={!c.staffCode || c.busy}
+              keypadAligned
+              onChange={(pin) => set(c.staffCode, pin)}
+              onComplete={(pin) => c.staffCode && submit(c.staffCode, pin)}
+              value={c.pin}
+            />
+          }
+          keypad={
+            <PinKeypad
+              digitDisabled={!c.staffCode || c.busy || c.pin.length >= PIN_LENGTH}
+              actionDisabled={!c.staffCode || c.busy || !c.pin.length}
+              onDigit={enterDigit}
+              onBackspace={() => set(c.staffCode, c.pin.slice(0, -1))}
+              onClear={() => set(c.staffCode, "")}
+            />
+          }
+          footer={c.error && !c.pinError ? <p className="pt-2 text-center text-sm text-red-600">{c.error}</p> : undefined}
         />
-        {c.error && <p className="mt-2 text-sm text-red-600">{c.error}</p>}
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          <button
-            className="min-h-12 rounded-xl bg-slate-100 font-bold"
-            onClick={close}
-            type="button"
-          >
-            취소
-          </button>
-          <button
-            className="min-h-12 rounded-xl bg-[#7C3AED] font-bold text-white"
-            disabled={!c.staffCode || c.pin.length !== PIN_LENGTH || c.busy}
-            onClick={submit}
-            type="button"
-          >
-            {c.busy ? "확인 중..." : "확인"}
-          </button>
-        </div>
+        {c.pinError && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/45 p-5">
+            <section aria-label="PIN 오류" aria-modal="true" className="w-full max-w-xs rounded-2xl bg-white p-5 text-center shadow-xl" role="alertdialog">
+              <h2 className="text-lg font-extrabold text-slate-800">PIN 오류</h2>
+              <p className="mt-2 text-sm text-slate-600">직원 또는 PIN이 올바르지 않습니다.</p>
+              <button className="mt-5 min-h-11 w-full rounded-xl bg-blue-600 font-bold text-white" onClick={dismissPinError} type="button">확인</button>
+            </section>
+          </div>
+        )}
       </section>
     </div>
   );
