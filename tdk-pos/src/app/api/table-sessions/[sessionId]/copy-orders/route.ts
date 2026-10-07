@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 const CENTS = BigInt(100);
 
@@ -166,6 +167,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
             note: item.note,
           });
           const destinationItemId = Number(itemInsert.insertId);
+          await syncRiceOrderItemStock(tx, destinationItemId, item.menuId, item.effectiveQty, currentStaff?.staffId ?? null, true);
           copiedItemIds.set(item.orderItemId, destinationItemId);
           const options = optionsByItem.get(item.orderItemId) ?? [];
           if (options.length) await tx.insert(orderItemOptions).values(options.map(option => ({

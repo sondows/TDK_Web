@@ -1,6 +1,6 @@
 "use client";
 
-const keys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "000", "0", "C"];
+const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "000", "0", "C"];
 
 export default function NumericKeypad({ disabled, onKey }: { disabled: boolean; onKey: (key: string) => void }) {
   return <div className="h-full w-[337px] max-w-full overflow-hidden rounded-xl border border-slate-300 p-2">

@@ -1,6 +1,6 @@
 "use client";
 
-const defaultKeys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "000", "0", "C"];
+const defaultKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "000", "0", "C"];
 
 type NumericInputKeypadProps = {
   value: string;

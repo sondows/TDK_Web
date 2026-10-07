@@ -1,10 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { diningTables, orderItemCancellations, orderItems, orders, staff, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyPin } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidPin } from "@/lib/pin";
+import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "서비스", "에러", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -100,7 +101,7 @@ export async function POST(request: Request) {
         .from(orders).where(inArray(orders.sessionId, sessionIds)).for("update");
       if (scopeOrders.some(order => order.status === "COMPLETED")) throw new Error("결제 완료 주문이 포함되어 테이블 취소를 처리할 수 없습니다.");
       const orderIds = scopeOrders.map(order => order.orderId);
-      const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, qty: orderItems.qty, unitPrice: orderItems.unitPrice })
+      const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`, unitPrice: orderItems.unitPrice })
         .from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
       const itemIds = scopeItems.map(item => item.orderItemId);
       const cancellations = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty })
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
         if (!effectiveQty) continue;
         await tx.insert(orderItemCancellations).values({ orderItemId: item.orderItemId, cancelledQty: effectiveQty, cancelledAmount: decimal(cents(item.unitPrice) * effectiveQty), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId: checker.staffId });
         await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId: checker.staffId }).where(eq(orderItems.orderItemId, item.orderItemId));
+        await syncRiceOrderItemStock(tx, item.orderItemId, item.menuId, 0, checker.staffId);
       }
       for (const orderId of orderIds) await tx.update(orders).set({ subtotalAmount: "0.00", totalAmount: "0.00", status: "CANCELLED" }).where(eq(orders.orderId, orderId));
       if (merges.length) await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(inArray(tableSessionMerges.mergeId, merges.map(merge => merge.mergeId)));

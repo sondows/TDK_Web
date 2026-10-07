@@ -431,6 +431,22 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   display: none;
 }
 
+[data-pos-shell] .pos-footer-scroll > button.rice-stock-count {
+  padding-inline: 2px;
+  font-size: clamp(2.5rem, 3.3vw, 3.75rem);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-pos-shell] .pos-footer-scroll > button.rice-stock-count[data-digits="3"] {
+  font-size: clamp(2.15rem, 2.9vw, 3.3rem);
+}
+
+[data-pos-shell] .pos-footer-scroll > button.rice-stock-count:is([data-digits="4"], [data-digits="5"], [data-digits="6"], [data-digits="7"]) {
+  font-size: clamp(1.4rem, 2vw, 2.5rem);
+}
+
 /* Table management uses real, scaled layout dimensions; dialogs keep their own sizing. */
 .table-management-screen {
   --table-management-ui-scale: 0.7;
@@ -664,30 +680,28 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   padding: calc(24px * var(--table-cancel-scale));
 }
 
-.table-cancellation-dialog .table-cancel-details > div:first-child {
-  min-height: calc(86px * var(--table-cancel-scale));
-  padding: calc(20px * var(--table-cancel-scale));
-  padding-right: calc(160px * var(--table-cancel-scale));
+.table-cancellation-dialog .table-cancel-amount-card {
+  display: flex;
+  min-height: calc(140px * var(--table-cancel-scale));
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(16px * var(--table-cancel-scale));
   border-radius: calc(12px * var(--table-cancel-scale));
 }
 
-.table-cancellation-dialog .table-cancel-details > div:first-child > p:nth-child(2) {
-  font-size: calc(28px * var(--table-cancel-scale));
+.table-cancellation-dialog .table-cancel-amount-card > p {
+  margin: 0;
+  color: #334155;
+  font-size: calc(16px * var(--table-cancel-scale));
+  font-weight: 700;
 }
 
-.table-cancellation-dialog .table-cancel-details > div:nth-child(2) {
-  top: calc(28px * var(--table-cancel-scale));
-  right: calc(24px * var(--table-cancel-scale));
-  gap: calc(2px * var(--table-cancel-scale));
-  padding-right: calc(10px * var(--table-cancel-scale));
-}
-
-.table-cancellation-dialog .table-cancel-details > div:nth-child(2) > span {
-  font-size: calc(18px * var(--table-cancel-scale));
-}
-
-.table-cancellation-dialog .table-cancel-details > div:nth-child(2) > strong {
+.table-cancellation-dialog .table-cancel-amount-card > strong {
+  margin-left: auto;
+  text-align: right;
+  color: #b91c1c;
   font-size: calc(30px * var(--table-cancel-scale));
+  font-weight: 800;
 }
 
 .table-cancellation-dialog .table-cancel-details > section {

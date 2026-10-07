@@ -91,7 +91,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
           </button>)}
         </div>
         {expanded && <div className="flex flex-col border-l bg-slate-50 p-4">
-          <NumericInputKeypad disabled={noResults} keys={["7", "8", "9", "4", "5", "6", "1", "2", "3", "BS", "0", "C"]} onKey={handleKey} value={displayInput} />
+          <NumericInputKeypad disabled={noResults} keys={["1", "2", "3", "4", "5", "6", "7", "8", "9", "BS", "0", "C"]} onKey={handleKey} value={displayInput} />
           <button className="mt-3 min-h-16 rounded-xl bg-blue-600 text-xl font-bold text-white disabled:bg-slate-300" disabled={!input || loading || noResults} onClick={() => void searchPhone()} type="button">검색</button>
         </div>}
       </div>

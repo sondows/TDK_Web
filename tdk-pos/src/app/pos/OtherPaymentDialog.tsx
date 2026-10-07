@@ -195,7 +195,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, close
                   : <p className="w-full text-center text-sm font-semibold text-red-600" role="alert">{selected?.cashChangeMinPercent}% 이상 사용 시 현금 거스름 가능</p>)}
               </>}
               </div><div className="mt-3 flex h-[396px] min-h-0 shrink flex-col">
-              <NumericInputKeypad disabled={busy || (!selected && !selectedCustomer)} inputAlign="right" inputLabel="" inputOffset={-4} onKey={append} keys={quantityMode || customerCouponMode ? ["7", "8", "9", "4", "5", "6", "1", "2", "3", "BS", "0", "C"] : undefined} smallBackspace value={customerCouponMode || quantityMode ? String(entered) : formatMoney(entered)} />
+              <NumericInputKeypad disabled={busy || (!selected && !selectedCustomer)} inputAlign="right" inputLabel="" inputOffset={-4} onKey={append} keys={quantityMode || customerCouponMode ? ["1", "2", "3", "4", "5", "6", "7", "8", "9", "BS", "0", "C"] : undefined} smallBackspace value={customerCouponMode || quantityMode ? String(entered) : formatMoney(entered)} />
             </div>
             {error && <p aria-live="polite" className="mt-2 text-center font-bold text-red-600">{error}</p>}
             <button className="mt-4 min-h-[72px] w-full shrink-0 rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400" disabled={busy || (selectedCustomer ? !validCustomerPayment : !valid)} onClick={() => void confirm()} type="button">확인</button>

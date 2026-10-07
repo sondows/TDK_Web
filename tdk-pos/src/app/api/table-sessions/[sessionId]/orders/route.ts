@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { menuComponents, menus, orderItems, orders, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 type RequestedItem = { menuId: number; qty: number; components: Array<{ menuComponentId: number; qty: number }> };
 const CENTS_PER_UNIT = BigInt(100);
@@ -111,8 +112,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       for (const snapshot of snapshots) {
         const [parent] = await tx.insert(orderItems).values({ orderId, menuId: snapshot.menu.menuId, itemName: snapshot.menu.posName, qty: snapshot.qty, unitPrice: snapshot.menu.price, discountAmount: "0.00", totalAmount: snapshot.menuAmount, prepStationId: snapshot.menu.prepStationId, itemType: "NORMAL", status: "ORDERED", printOnReceipt: 1 });
         const parentOrderItemId = Number(parent.insertId);
+        await syncRiceOrderItemStock(tx, parentOrderItemId, snapshot.menu.menuId, snapshot.qty, currentStaff?.staffId ?? null, true);
         for (const component of snapshot.components) {
-          await tx.insert(orderItems).values({ orderId, parentOrderItemId, menuId: component.componentMenuId, itemName: component.itemName, qty: Math.max(1, component.qty), actualComponentQty: component.qty, unitPrice: "0.00", discountAmount: "0.00", totalAmount: "0.00", prepStationId: component.prepStationId, itemType: "COMPONENT", status: "ORDERED", printOnReceipt: component.printOnReceipt });
+          const [inserted] = await tx.insert(orderItems).values({ orderId, parentOrderItemId, menuId: component.componentMenuId, itemName: component.itemName, qty: Math.max(1, component.qty), actualComponentQty: component.qty, unitPrice: "0.00", discountAmount: "0.00", totalAmount: "0.00", prepStationId: component.prepStationId, itemType: "COMPONENT", status: "ORDERED", printOnReceipt: component.printOnReceipt });
+          await syncRiceOrderItemStock(tx, Number(inserted.insertId), component.componentMenuId, component.qty, currentStaff?.staffId ?? null, true);
         }
       }
     });

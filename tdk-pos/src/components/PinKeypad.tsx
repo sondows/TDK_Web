@@ -8,7 +8,7 @@ type PinKeypadProps = {
   onClear: () => void;
 };
 
-const digits = ["7", "8", "9", "4", "5", "6", "1", "2", "3"];
+const digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 export default function PinKeypad({ digitDisabled, actionDisabled, onDigit, onBackspace, onClear }: PinKeypadProps) {
   return <div className="mt-3 grid min-h-0 flex-1 grid-cols-3 grid-rows-4 gap-1.5">

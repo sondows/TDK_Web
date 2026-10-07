@@ -613,17 +613,12 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4" onClick={() => !busy && close()}>
       <section aria-modal="true" className="table-cancellation-dialog flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
-        <PosSubHeader backLabel="뒤로가기" disabled={busy} onBack={close} title="테이블 취소" />
+        <PosSubHeader backButtonSize={40} backLabel="뒤로가기" disabled={busy} onBack={close} title="테이블 취소" titleTrailing={<span className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xl font-bold"><span aria-hidden="true">..</span><span>{preview.tableNos.map(tableNo => `${tableNo}T`).join(" · ")}</span></span>} />
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_min(336px,45%)] divide-x divide-slate-200">
           <div className="table-cancel-details min-h-0 overflow-y-auto p-6">
-            <div className="rounded-xl border border-red-200 bg-red-50 p-5">
-              <p className="text-base font-bold text-red-800">취소 대상</p>
-              <p className="mt-2 text-2xl font-extrabold text-slate-900">{preview.tableNos.map(tableNo => tableNo + "T").join(" · ")}</p>
-              <p className="mt-3 text-base leading-relaxed text-red-700">일행/합석을 포함한 현재 이용 전체가 취소됩니다.</p>
-            </div>
-            <div className="mt-5 flex items-center justify-between border-t border-slate-200 pt-5">
-              <span className="text-lg font-bold text-slate-700">취소 금액</span>
-              <strong className="text-3xl font-extrabold text-red-700">{money}</strong>
+            <div className="table-cancel-amount-card rounded-xl border border-red-200 bg-red-50 p-5" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" }}>
+              <p style={{ margin: 0, textAlign: "left" }}>취소금액</p>
+              <strong style={{ marginLeft: "auto", textAlign: "right" }}>{money}</strong>
             </div>
             <section className="mt-6">
               <h3 className="text-lg font-bold text-slate-800">취소 사유</h3>

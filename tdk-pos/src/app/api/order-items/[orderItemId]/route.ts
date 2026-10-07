@@ -3,6 +3,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItems, orders, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 const CENTS_PER_UNIT = BigInt(100);
 
@@ -56,6 +57,7 @@ export async function PATCH(
       const [orderItem] = await tx
         .select({
           orderItemId: orderItems.orderItemId,
+          menuId: orderItems.menuId,
           itemStatus: orderItems.status,
           orderId: orders.orderId,
           orderStatus: orders.status,
@@ -96,6 +98,8 @@ export async function PATCH(
       if (cancelResult.affectedRows !== 1) {
         throw new CancellationError("이미 취소된 주문 항목입니다.", 409);
       }
+
+      await syncRiceOrderItemStock(tx, orderItemId, orderItem.menuId, 0, currentStaff.staffId);
 
       const remainingItems = await tx
         .select({ totalAmount: orderItems.totalAmount })

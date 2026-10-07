@@ -283,6 +283,20 @@ export const inventoryItems = mysqlTable("inventory_items", {
   updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("uq_inventory_item_code").on(table.itemCode), index("idx_inventory_item_name").on(table.itemName)]);
 
+/** Existing stock movement ledger; each row records the resulting balance. */
+export const inventoryTransactions = mysqlTable("inventory_transactions", {
+  inventoryTransactionId: bigint("inventory_transaction_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  inventoryItemId: bigint("inventory_item_id", { mode: "number", unsigned: true }).notNull().references(() => inventoryItems.inventoryItemId),
+  transactionType: mysqlEnum("transaction_type", ["OPENING", "PURCHASE", "SALE", "PRODUCTION", "WASTE", "SERVICE", "ADJUSTMENT", "RETURN_IN", "RETURN_OUT", "OTHER"]).notNull(),
+  qtyChange: bigint("qty_change", { mode: "number" }).notNull(),
+  balanceAfter: bigint("balance_after", { mode: "number" }),
+  orderItemId: bigint("order_item_id", { mode: "number", unsigned: true }).references(() => orderItems.orderItemId),
+  purchaseItemId: bigint("purchase_item_id", { mode: "number", unsigned: true }),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  transactionAt: datetime("transaction_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  remark: varchar("remark", { length: 500 }),
+}, (table) => [index("idx_inventory_tx_item_time").on(table.inventoryItemId, table.transactionAt), index("idx_inventory_tx_type_time").on(table.transactionType, table.transactionAt)]);
+
 /** Existing recipe link from a sellable menu to a reusable inventory item. */
 export const menuInventory = mysqlTable("menu_inventory", {
   menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),

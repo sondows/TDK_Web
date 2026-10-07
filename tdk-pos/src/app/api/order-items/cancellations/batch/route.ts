@@ -5,6 +5,7 @@ import { orderItemCancellations, orderItems, orders, staff, tableSessions } from
 import { getCurrentStaff, verifyPin } from "@/lib/auth";
 import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "이물질", "클레임", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
 
       const rows = await tx.select({
         orderItemId: orderItems.orderItemId,
+        menuId: orderItems.menuId,
         parentOrderItemId: orderItems.parentOrderItemId,
         orderId: orderItems.orderId,
         sessionId: orders.sessionId,
@@ -55,6 +57,7 @@ export async function POST(request: Request) {
       if (parentRequests.length) await tx.execute(sql`SELECT order_item_id FROM order_items WHERE parent_order_item_id IN (${sql.join(parentRequests.map(item => sql`${item.orderItemId}`), sql`, `)}) FOR UPDATE`);
       const componentRows = parentRequests.length ? await tx.select({
         orderItemId: orderItems.orderItemId,
+        menuId: orderItems.menuId,
         parentOrderItemId: orderItems.parentOrderItemId,
         orderId: orderItems.orderId,
         sessionId: orders.sessionId,
@@ -105,6 +108,7 @@ export async function POST(request: Request) {
         const amount = cents(row.unitPrice) * requestItem.qty;
         await tx.insert(orderItemCancellations).values({ orderItemId: row.orderItemId, cancelledQty: requestItem.qty, cancelledAmount: decimal(amount), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId });
         if (requestItem.qty === remaining) await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId }).where(eq(orderItems.orderItemId, row.orderItemId));
+        await syncRiceOrderItemStock(tx, row.orderItemId, row.menuId, remaining - requestItem.qty, cancelledByStaffId);
       }
 
       const affectedOrderIds = [...new Set(effectiveRows.map(row => row.orderId))];
