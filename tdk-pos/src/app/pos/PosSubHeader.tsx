@@ -19,11 +19,12 @@ type PosSubHeaderProps = {
   backButtonSize?: number;
   backVisualSize?: number;
   showBackButton?: boolean;
+  compact?: boolean;
 };
 
-export default function PosSubHeader({ title, onBack, backLabel, disabled = false, trailing, titleTrailing, titleId, level = 2, splitRatio = false, className = "", trailingClassName = "", backIconSize, backButtonSize = 46, backVisualSize, showBackButton = true }: PosSubHeaderProps) {
+export default function PosSubHeader({ title, onBack, backLabel, disabled = false, trailing, titleTrailing, titleId, level = 2, splitRatio = false, className = "", trailingClassName = "", backIconSize, backButtonSize = 46, backVisualSize, showBackButton = true, compact = false }: PosSubHeaderProps) {
   const Heading = level === 1 ? "h1" : "h2";
-  return <header className={`min-h-[70px] shrink-0 items-center bg-[#455A64] px-5 py-3 text-white ${splitRatio ? "grid grid-cols-[30%_70%]" : "flex justify-between gap-4"} ${className}`}>
+  return <header className={`${compact ? "min-h-14 px-4 py-1" : "min-h-[70px] px-5 py-3"} shrink-0 items-center bg-[#455A64] text-white ${splitRatio ? "grid grid-cols-[30%_70%]" : "flex justify-between gap-4"} ${className}`}>
     <div className="flex min-w-0 items-center gap-3">
       {showBackButton && <AdminBackLink ariaLabel={backLabel ?? `${title} 닫기`} disabled={disabled} iconSize={backIconSize} onNavigate={onBack} size={backButtonSize} title={backLabel ?? `${title} 닫기`} tone="dark" visualSize={backVisualSize} />}
       <Heading className="min-w-0 truncate text-left text-2xl font-extrabold" id={titleId}>{title}</Heading>

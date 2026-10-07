@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import PosSubHeader from "../PosSubHeader";
 import TableLayoutCanvas from "../TableLayoutCanvas";
 import TableShape from "../TableShape";
-import type { TableLayoutValues } from "@/lib/table-layout";
+import { tableSizeAsCanvasPercent, type TableLayoutValues } from "@/lib/table-layout";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
@@ -25,8 +25,8 @@ function scaledLayout(table: Table): TableLayoutValues {
   return {
     positionX: table.positionX,
     positionY: table.positionY,
-    layoutWidth: table.layoutWidth * MANAGEMENT_DISPLAY_SCALE / MANAGEMENT_WIDTH_FACTOR,
-    layoutHeight: table.layoutHeight * MANAGEMENT_DISPLAY_SCALE,
+    layoutWidth: tableSizeAsCanvasPercent(table.layoutWidth, "width") * MANAGEMENT_DISPLAY_SCALE / MANAGEMENT_WIDTH_FACTOR,
+    layoutHeight: tableSizeAsCanvasPercent(table.layoutHeight, "height") * MANAGEMENT_DISPLAY_SCALE,
     rotation: table.rotation,
   };
 }

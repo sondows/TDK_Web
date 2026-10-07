@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { resolveQuantityOverage } from "@/lib/other-payment-cash-change";
 import { allocatePaymentAcrossSessions } from "@/lib/table-payment-allocation";
+import { summarizeSessionFinancials } from "@/lib/table-session-financials";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
@@ -103,8 +104,9 @@ async function currentBill(tx: Parameters<Parameters<typeof db.transaction>[0]>[
   items.forEach(item => grossBySessionId.set(item.sessionId, (grossBySessionId.get(item.sessionId) ?? 0) + item.effectiveQty * Number(item.unitPrice)));
   const discountBySessionId = new Map<number, number>();
   discounts.forEach(discount => discountBySessionId.set(discount.sessionId, (discountBySessionId.get(discount.sessionId) ?? 0) + discount.amount));
+  const financials = summarizeSessionFinancials({ sessionIds: scope.sessionIds, grossBySessionId, discountBySessionId, prepaidBySessionId: new Map() });
   const balanceBySessionId = new Map(scope.sessionIds.map(sessionId => [sessionId, Math.max(0, won((grossBySessionId.get(sessionId) ?? 0) - (discountBySessionId.get(sessionId) ?? 0)))]));
-  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)), balanceBySessionId };
+  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)), total: financials.total, balanceBySessionId };
 }
 
 async function savePaymentSessionAllocations(
@@ -130,6 +132,18 @@ async function savePaymentSessionAllocations(
   });
   if (!allocations.length) throw new CheckoutError("테이블별 결제 금액을 배분할 수 없습니다.", 409);
   await tx.insert(paymentSessionAllocations).values(allocations.map(allocation => ({ paymentId, sessionId: allocation.sessionId, appliedAmount: decimal(allocation.amount) })));
+}
+
+async function paidForBillSessions(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  bill: Awaited<ReturnType<typeof currentBill>>,
+) {
+  if (!bill.sessionIds.length) return 0;
+  const [row] = await tx.select({ total: sql<string>`COALESCE(SUM(${paymentSessionAllocations.appliedAmount}), 0)` })
+    .from(paymentSessionAllocations)
+    .innerJoin(payments, eq(paymentSessionAllocations.paymentId, payments.paymentId))
+    .where(and(inArray(paymentSessionAllocations.sessionId, bill.sessionIds), eq(payments.status, "APPROVED")));
+  return won(Number(row?.total ?? 0));
 }
 
 async function activeCheckout(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], itemIds: number[]) {
@@ -193,11 +207,11 @@ async function snapshot(tableId: number) {
   return db.transaction(async tx => {
     const bill = await currentBill(tx, tableId);
     const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
-    const paid = won((await paymentStateForCheckouts(tx, checkoutIds)).reduce((sum, row) => sum + row.appliedAmount, 0));
+    const paid = await paidForBillSessions(tx, bill);
     const prepaidRows = checkoutIds.length
       ? await tx.select({ total: sql<string>`COALESCE(SUM(${customerPrepaidLedger.amount}), 0)` }).from(customerPrepaidLedger).innerJoin(payments, eq(payments.paymentId, customerPrepaidLedger.paymentId)).where(inArray(payments.checkoutId, checkoutIds))
       : [];
-    return { bill, checkoutIds, checkoutId: checkoutIds[0] ?? null, paid, prepaidCredit: won(Number(prepaidRows[0]?.total ?? 0)), remaining: Math.max(0, bill.gross - bill.discount - paid) };
+    return { bill, checkoutIds, checkoutId: checkoutIds[0] ?? null, paid, prepaidCredit: won(Number(prepaidRows[0]?.total ?? 0)), remaining: Math.max(0, bill.total - paid) };
   });
 }
 
@@ -209,7 +223,7 @@ export async function GET(request: Request) {
     const state = await snapshot(tableId);
     const methods = await db.select({ code: paymentMethods.methodCode, name: paymentMethods.methodName, type: paymentMethods.methodType }).from(paymentMethods).where(eq(paymentMethods.isActive, 1));
     const history = state.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
-    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: Math.max(0, state.bill.gross - state.bill.discount), paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos });
+    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos });
   } catch (error) { const e = error instanceof CheckoutError ? error : new CheckoutError("결제 정보를 불러올 수 없습니다.", 500); return Response.json({ success: false, message: e.message }, { status: e.status }); }
 }
 
@@ -225,7 +239,7 @@ export async function POST(request: Request) {
     const result = await db.transaction(async tx => {
       requestPhase = `load bill (${String(action)})`;
       const bill = await currentBill(tx, tableId);
-      const beforeDiscount = Math.max(0, bill.gross - bill.discount);
+      const beforeDiscount = bill.total;
       if (action === "ROUND") {
         const unit = Number(body.roundUnit);
         if (unit !== 100 && unit !== 1000) throw new CheckoutError("절사 단위를 확인해 주세요.", 400);
@@ -238,8 +252,8 @@ export async function POST(request: Request) {
       }
       if (action === "COMPLETE") {
         const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
-        const paid = won((await paymentStateForCheckouts(tx, checkoutIds)).reduce((sum, row) => sum + row.appliedAmount, 0));
-        const total = Math.max(0, bill.gross - bill.discount);
+        const paid = await paidForBillSessions(tx, bill);
+        const total = bill.total;
         const overpaid = won(paid - total);
         if (overpaid > 0) throw new CheckoutError(`결제금액보다 ${overpaid.toLocaleString("ko-KR")}원이 초과되었습니다. 기존 결제를 취소한 후 다시 결제해주세요.`, 409);
         if (paid < total) throw new CheckoutError("받을금액이 남아 있어 결제를 완료할 수 없습니다.");
@@ -310,8 +324,8 @@ export async function POST(request: Request) {
         if (existingRequest) throw new CheckoutError("이미 처리된 고객결제입니다. 결제내역을 확인해 주세요.", 409);
         const checkout = await activeCheckout(tx, bill.items.map(item => item.orderItemId));
         const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
-        const paid = won((await paymentStateForCheckouts(tx, checkoutIds)).reduce((sum, row) => sum + row.appliedAmount, 0));
-        const total = Math.max(0, bill.gross - bill.discount);
+        const paid = await paidForBillSessions(tx, bill);
+        const total = bill.total;
         const remaining = Math.max(0, total - paid);
         if (!remaining) throw new CheckoutError("이미 결제가 완료되었습니다.");
         if (couponQuantity === null && amount > remaining) throw new CheckoutError("고객결제 금액이 받을금액보다 많습니다.", 409);
@@ -400,10 +414,9 @@ export async function POST(request: Request) {
       const method = isOther ? configured : legacy;
       if (!method) throw new CheckoutError("사용할 수 없는 결제수단입니다.", 409);
       const checkout = await activeCheckout(tx, bill.items.map(item => item.orderItemId));
-      const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
-      const paid = won((await paymentStateForCheckouts(tx, checkoutIds)).reduce((sum, row) => sum + row.appliedAmount, 0));
+      const paid = await paidForBillSessions(tx, bill);
       const checkoutPaid = checkout ? won((await paymentState(tx, checkout.checkoutId)).reduce((sum, row) => sum + row.appliedAmount, 0)) : 0;
-      const total = Math.max(0, bill.gross - bill.discount); const remaining = Math.max(0, total - paid);
+      const total = bill.total; const remaining = Math.max(0, total - paid);
       const customerId = body.customerId === undefined || body.customerId === null ? null : Number(body.customerId);
       if (customerId !== null) {
         if (!Number.isSafeInteger(customerId) || customerId <= 0) throw new CheckoutError("\uACE0\uAC1D \uC815\uBCF4\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694.", 400);
@@ -497,7 +510,7 @@ export async function POST(request: Request) {
     const state = result.completed ? null : await snapshot(tableId);
     requestPhase = "load payment history after payment";
     const history = state?.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
-    return Response.json({ success: true, ...result, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: Math.max(0, state.bill.gross - state.bill.discount), paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos } });
+    return Response.json({ success: true, ...result, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos } });
   } catch (error) {
     console.error(`[POST /api/checkouts] failed during ${requestPhase}`, error);
     const knownError = error instanceof CheckoutError;

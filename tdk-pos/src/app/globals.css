@@ -167,6 +167,13 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   padding: var(--pos-table-top-left-inset) var(--pos-table-right-inset) 6px var(--pos-table-top-left-inset);
 }
 
+.pos-table-surface-open {
+  box-shadow:
+    var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000),
+    3px 4px 6px rgba(0, 0, 0, 0.10);
+}
+
 .pos-table-occupied-label {
   display: grid;
   min-width: 0;
@@ -1342,4 +1349,112 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   [data-pos-shell] .pos-table-occupied-usage { font-size: 15px; }
   [data-pos-shell] .pos-table-info-row { line-height: 16px; }
   [data-pos-shell] .pos-table-occupied-general > .pos-table-occupied-amount:nth-child(2) { transform: translateX(3.5px); }
+}
+
+/* Main POS table units use fixed geometry and retain the 1280px POS typography. */
+.pos-table-unit-fixed .pos-table-occupied-content {
+  --pos-table-right-inset: 3px;
+  --pos-table-top-left-inset: 6px;
+  grid-template-columns: minmax(0, 31%) minmax(0, 1fr);
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  column-gap: 5px;
+  row-gap: 2px;
+  padding: 6px 3px;
+}
+
+.pos-table-unit-fixed.pos-table-fixed-size .text-2xl { font-size: 30px; }
+.pos-table-fixed-size .text-2xl { font-size: 14px; }
+.pos-table-unit-fixed .pos-table-main-number {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  justify-self: center;
+  transform: none;
+}
+.pos-table-unit-fixed .pos-table-occupied-number-multi { left: 0; }
+.pos-table-unit-fixed .pos-table-info-slot {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid #cbd5e1;
+  border-radius: 0;
+  padding: 0 5px;
+  background: transparent;
+  box-shadow: none;
+  text-align: right;
+  white-space: nowrap;
+}
+.pos-table-unit-fixed .pos-table-slot-received {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.pos-table-unit-fixed .pos-table-slot-prepaid {
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+}
+.pos-table-unit-fixed .pos-table-slot-usage {
+  grid-column: 2;
+  grid-row: 3;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+}
+.pos-table-unit-fixed .pos-table-slot-usage-second { grid-row: 2; }
+.pos-table-unit-fixed .pos-table-slot-customer {
+  grid-column: 2;
+  grid-row: 4;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+.pos-table-unit-fixed .pos-table-relation-label {
+  grid-column: 1;
+  grid-row: 4;
+  align-self: center;
+  justify-self: center;
+  color: #334155;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+.pos-table-unit-fixed .pos-table-qr-order-marker {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: center;
+}
+.pos-table-unit-fixed .pos-table-qr-language-marker {
+  grid-column: 1;
+  grid-row: 3;
+  justify-self: center;
+}
+.pos-table-unit-fixed .pos-table-qr-marker {
+  position: static;
+  align-self: center;
+  margin-left: 0;
+  font-size: 9px;
+}
+.pos-table-fixed-size > span:nth-of-type(-n+4) { border-radius: 3.5px; }
+.pos-table-fixed-size > span:nth-of-type(5) { border-radius: 12px; }
+
+.pos-layout-editor-canvas {
+  width: min(100%, calc(100dvh - 10rem));
+  height: auto;
+  aspect-ratio: 447 / 401;
+  align-self: center;
+  justify-self: center;
 }

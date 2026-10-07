@@ -6,6 +6,7 @@ import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
 import { formatSessionElapsed } from "@/lib/session-time";
+import type { TableFinancials } from "@/lib/table-session-financials";
 import type { SummaryRow } from "@/lib/pos-order-summary-rows";
 import PaymentModal from "./PaymentModal";
 import PosSubHeader from "./PosSubHeader";
@@ -190,6 +191,7 @@ export default function OrderSummaryPanel({
     sessionIds: number[];
     tableNos: string[];
     totals: { adult: number; baby: number };
+    financials: TableFinancials;
   } | null;
   physicalSessionIds: number[];
   discounts: SessionDiscount[];
@@ -491,6 +493,7 @@ export default function OrderSummaryPanel({
   );
   const partyTableNos = party?.tableNos ?? [];
   const partyTotals = party?.totals ?? null;
+  const partyFinancials = party?.financials ?? null;
   const partySessionIds = party?.sessionIds ?? [];
   const selectedDiscounts = discounts.filter((discount) =>
     physicalSessionIds.includes(discount.sessionId),
@@ -520,11 +523,13 @@ export default function OrderSummaryPanel({
       </div>
     ) : null;
   };
-  const partyDiscountTotal = partyDiscounts.reduce(
+  const partyGross = partyFinancials?.gross ?? partyTotal;
+  const partyDiscountTotal = partyFinancials?.discount ?? partyDiscounts.reduce(
     (sum, discount) => sum + Number(discount.discountAmount),
     0,
   );
-  const partyNetTotal = Math.max(0, partyTotal - partyDiscountTotal);
+  const partyPrepaidTotal = partyFinancials?.prepaid ?? 0;
+  const partyReceivable = partyFinancials?.remaining ?? Math.max(0, partyGross - partyDiscountTotal - partyPrepaidTotal);
   // The upper billing area always represents the selected physical table.
   // Party aggregates are displayed separately in the party-order section.
   const billingDiscounts = selectedDiscounts;
@@ -579,11 +584,15 @@ export default function OrderSummaryPanel({
             </div>
           ))}
         </div>
-        {discountRows(partyDiscounts)}
-        <div className="flex justify-between border-t border-violet-200 pt-3 text-base font-extrabold">
-          <span>일행 주문 합계</span>
+        <div className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm">
+          <div className="flex justify-between"><span>일행 주문금액</span><b>{money(partyGross)}</b></div>
+          {partyDiscountTotal > 0 && <div className="flex justify-between"><span>할인금액</span><b className="text-red-600">- {money(partyDiscountTotal)}</b></div>}
+          {partyPrepaidTotal > 0 && <div className="flex justify-between"><span>선불금액</span><b className="text-blue-600">- {money(partyPrepaidTotal)}</b></div>}
+        </div>
+        <div className="mt-2 flex justify-between border-t border-violet-200 pt-3 text-base font-extrabold">
+          <span>일행 받을금액</span>
           <b className="text-xl font-extrabold text-violet-700">
-            {money(partyNetTotal)}
+            {money(partyReceivable)}
           </b>
         </div>
       </section>

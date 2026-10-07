@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables } from "@/db/schema";
 import { getManagementOwner } from "@/lib/management-auth";
+import { isValidStoredTableSize } from "@/lib/table-layout";
 
 type Layout = { tableId: number; positionX: number; positionY: number; layoutWidth: number; layoutHeight: number; rotation: number; tableName?: string; capacity?: number; isActive?: number };
 const valid = (value: unknown, min: number, max: number) => Number.isFinite(Number(value)) && Number(value) >= min && Number(value) <= max;
@@ -16,7 +17,7 @@ export async function PUT(request: Request) {
     const layouts = body.layouts;
     await db.transaction(async (tx) => {
       for (const item of layouts) {
-        if (!Number.isInteger(item.tableId) || !valid(item.positionX, 0, 100) || !valid(item.positionY, 0, 100) || !valid(item.layoutWidth, 5, 60) || !valid(item.layoutHeight, 5, 60) || ![0, 90, 180, 270].includes(Number(item.rotation))) throw new Error("invalid");
+        if (!Number.isInteger(item.tableId) || !valid(item.positionX, 0, 100) || !valid(item.positionY, 0, 100) || !isValidStoredTableSize(item.layoutWidth, "width") || !isValidStoredTableSize(item.layoutHeight, "height") || ![0, 90, 180, 270].includes(Number(item.rotation))) throw new Error("invalid");
         const capacity = Number(item.capacity);
         await tx.update(diningTables).set({ positionX: String(item.positionX), positionY: String(item.positionY), layoutWidth: String(item.layoutWidth), layoutHeight: String(item.layoutHeight), rotation: Number(item.rotation), ...(Number.isInteger(capacity) && capacity >= 0 ? { capacity } : {}) }).where(eq(diningTables.tableId, item.tableId));
       }
