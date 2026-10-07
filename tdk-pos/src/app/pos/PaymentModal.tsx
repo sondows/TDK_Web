@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/format-money";
 import OtherPaymentDialog from "./OtherPaymentDialog";
 import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
+import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
 
 type Discount = { label: string; amount: number; type: string };
 type Payment = {
@@ -67,8 +68,8 @@ const paymentMethodLabel = (payment: Payment) => {
   };
   return labels[payment.methodCode] ?? payment.methodName;
 };
-const paymentInfoLabelStyle = "text-[22px] font-normal";
-const paymentInfoAmountStyle = "text-[22px] font-bold";
+const paymentInfoLabelStyle = "text-[20px] font-normal";
+const paymentInfoAmountStyle = "text-[20px] font-bold";
 const paymentInfoSmallLabelStyle = "text-[20px] font-normal";
 const paymentInfoSmallAmountStyle = "text-[20px] font-bold";
 const paymentInfoSmallAlignedAmountStyle = "text-[20px] font-bold pr-[13px]";
@@ -332,8 +333,8 @@ export default function PaymentModal({
       </div>
     );
   const displayedTableNos = state.isPartyBill && state.tableNos.length > 1
-    ? state.tableNos.join(" 쨌 ")
-    : tableNo;
+    ? state.tableNos
+    : [tableNo];
   const discountAmount = state.discounts.reduce(
     (sum, discount) => sum + discount.amount,
     0,
@@ -342,20 +343,12 @@ export default function PaymentModal({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
         aria-modal="true"
-        className={`flex ${state.isPartyBill ? "h-[min(760px,calc(100dvh-2rem))]" : "h-[min(752px,calc(100dvh-2rem-8px))]"} w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`}
+        className="flex max-h-[calc(100dvh-32px)] w-full max-w-[638px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         role="dialog"
       >
-        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="-ml-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span aria-hidden="true">..</span><span className="text-[35px] leading-none">{displayedTableNos}</span><span className="text-[33px]">T</span></span>} trailing={<div className="relative left-[20px] flex min-w-0 items-end">
-            <button
-              className="h-[52px] w-fit min-w-[136px] max-w-[360px] shrink-0 rounded-none border-0 bg-transparent px-3 text-2xl font-extrabold text-white/90 shadow-none transition-colors hover:text-white active:text-white focus-visible:outline-none disabled:opacity-50"
-              disabled={busy}
-              onClick={() => setCustomerSelectOpen(true)}
-              title={selectedCustomer?.name ?? "고객"}
-              type="button"
-            ><span className="inline-flex max-w-full items-center justify-center gap-1"><span className="whitespace-nowrap">{selectedCustomer?.name ?? "고객"}</span><span aria-hidden="true" className="shrink-0 text-[22px] leading-none">⋮</span></span></button>
-          </div>} />
-        <div className="grid min-h-0 flex-1 grid-cols-[44%_56%]">
-          <section className="flex min-h-0 flex-col border-r border-slate-200 px-6 py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
+        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="-ml-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span aria-hidden="true">..</span><span className="inline-flex items-baseline gap-1 whitespace-nowrap"><span className="text-[35px] leading-none">{displayedTableNos.join(" · ")}</span><span className="text-[33px]">T</span></span></span>} trailing={<button className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy} onClick={() => setCustomerSelectOpen(true)} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ? `${selectedCustomer.name} ⋮` : "고객 ⋮"}</button>} />
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px]">
+          <section className="flex min-h-0 flex-col border-r border-slate-200 px-[18px] py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
             <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4">
             <div className="rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-4 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
               <div className="space-y-2.5">
@@ -400,7 +393,7 @@ export default function PaymentModal({
                   {payment.changeAmount > 0 && (
                     <div className={`${paymentInfoRowStyle} mt-[7px] text-slate-900`}>
                       <span className={`${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle} pl-3`}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
-                      <b className={paymentInfoAlignedAmountStyle}>-{money(payment.changeAmount)}</b>
+                      <b className={`${paymentInfoAlignedAmountStyle} ${payment.methodCode === "CASH" || payment.methodNameSnapshot ? "text-blue-600" : ""}`}>-{money(payment.changeAmount)}</b>
                     </div>
                   )}
                   </div>
@@ -438,19 +431,19 @@ export default function PaymentModal({
               type="button"
             >결제 초기화</button>
           </section>
-          <section className="flex min-h-0 flex-col px-6 py-6">
-            <NumericInputKeypad disabled={busy} inputLabel="" inputOffset={-2} onKey={append} value={money(entered)} />
+          <section className="flex min-h-0 flex-col px-4 pt-6 pb-4">
+            <NumericInputKeypad className="h-[395.25px]" disabled={busy} inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
             {error && <p className="mt-2 text-center text-base font-bold text-red-600">{error}</p>}
-            <div className="relative z-10 mt-4 w-[365px] self-center bg-white">
+            <div className="relative z-10 mt-4 w-[286.45px] max-w-full self-center bg-white">
               <div
                 aria-label="결제수단 선택"
-                className="horizontal-select-scroll payment-method-scroll flex w-full flex-nowrap gap-3 overflow-x-auto overflow-y-hidden overscroll-x-contain bg-white px-[14px] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-x]"
+                className="horizontal-select-scroll payment-method-scroll flex w-full flex-nowrap gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain bg-white [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-x]"
                 {...paymentScrollHandlers}
                 ref={paymentMethodsRef}
                 role="group"
               >
               <button
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy}
                 onClick={() => pay("CARD")}
                 type="button"
@@ -458,7 +451,7 @@ export default function PaymentModal({
                 카드
               </button>
               <button
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy}
                 onClick={() => pay("CASH")}
                 type="button"
@@ -466,17 +459,15 @@ export default function PaymentModal({
                 현금
               </button>
               <button
-                aria-label="기타결제"
-                className="min-h-[76px] w-[104px] shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                aria-label="기타"
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
                 disabled={busy}
                 onClick={() => { if (displayRemaining <= 0) { setError(""); setCardErrorDialog("받을 금액이 없습니다."); return; } setError(""); setOtherOpen(true); }}
                 type="button"
               >
-                기타결제
+                기타
               </button>
               </div>
-              <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-[10px] bg-white" />
-              <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-[10px] bg-white" />
               {scrollHints.left && (
                 <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 flex w-[14px] items-center justify-center text-[32px] leading-none text-slate-500">⋮</span>
               )}
@@ -485,7 +476,7 @@ export default function PaymentModal({
               )}
             </div>
             <button
-              className="mt-3 min-h-[72px] w-[337px] self-center rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
+              className="mt-3 min-h-[72px] w-[286.45px] max-w-full self-center rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
               disabled={busy || displayRemaining > 0}
               onClick={complete}
               type="button"
@@ -516,6 +507,8 @@ export default function PaymentModal({
         <PaymentDeletionDialog
           busy={busy}
           error={cancelError}
+          paymentLabel={deletionTarget.kind === "SAVED" ? paymentMethodLabel(deletionTarget.payment) : `${stagedCustomerPayment?.name ?? "고객"} 고객결제`}
+          paymentAmount={deletionTarget.kind === "SAVED" ? deletionTarget.payment.receivedAmount : stagedCustomerPayment?.amount ?? 0}
           close={() => {
             if (busy) return;
             setCancelError("");
@@ -540,11 +533,15 @@ export default function PaymentModal({
 function PaymentDeletionDialog({
   error,
   busy,
+  paymentLabel,
+  paymentAmount,
   close,
   submit,
 }: {
   error: string;
   busy: boolean;
+  paymentLabel: string;
+  paymentAmount: number;
   close: () => void;
   submit: () => void;
 }) {
@@ -553,7 +550,10 @@ function PaymentDeletionDialog({
       <section aria-modal="true" aria-describedby="payment-deletion-prompt" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
         <PosSubHeader title="결제내역 삭제" />
         <div className="px-7 py-7">
-          <p className="text-center text-xl font-bold text-slate-900" id="payment-deletion-prompt">이 결제내역을<br />삭제하시겠습니까?</p>
+          <div className="space-y-3 text-center">
+            <div className="flex items-baseline justify-center gap-5 text-lg text-slate-800"><span>{paymentLabel}</span><strong className="text-xl font-extrabold tabular-nums">{money(paymentAmount)}</strong></div>
+            <p className="text-center text-xl font-bold text-slate-900" id="payment-deletion-prompt">삭제하시겠습니까?</p>
+          </div>
           {error && <p aria-live="polite" className="mt-4 text-center text-base font-bold text-red-600">{error}</p>}
           <div className="mt-8 grid grid-cols-2 gap-3">
             <button className="min-h-14 rounded-xl border border-slate-300 text-lg font-bold text-slate-700 disabled:opacity-40" disabled={busy} onClick={close} type="button">취소</button>

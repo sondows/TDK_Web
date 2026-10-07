@@ -14,28 +14,32 @@ type NumericInputKeypadProps = {
   smallBackspace?: boolean;
   className?: string;
   inputHeight?: number;
+  inputDivider?: boolean;
+  scale?: number;
 };
 
-export default function NumericInputKeypad({ value, onKey, disabled = false, disabledKeys = [], keys = defaultKeys, inputLabel = "입력", inputOffset = 2, inputAlign = "right", smallBackspace = false, className = "", inputHeight = 60 }: NumericInputKeypadProps) {
-  return <div className={`flex min-h-0 w-[337px] max-w-full flex-1 flex-col self-center overflow-hidden rounded-xl border border-slate-300 p-2 ${className}`}>
-    <div className="grid shrink-0 grid-cols-3 items-center gap-x-1 border-b border-slate-300" style={{ height: inputHeight }}>
+export default function NumericInputKeypad({ value, onKey, disabled = false, disabledKeys = [], keys = defaultKeys, inputLabel = "입력", inputOffset = 2, inputAlign = "right", smallBackspace = false, className = "", inputHeight = 60, inputDivider = true, scale = 1 }: NumericInputKeypadProps) {
+  const scaled = scale !== 1;
+  return <div className={`flex min-h-0 max-w-full flex-col self-center overflow-hidden border border-slate-300 ${scaled ? "flex-none rounded-[10px]" : "w-[337px] flex-1 rounded-xl p-2"} ${className}`} style={scaled ? { width: `${337 * scale}px`, padding: `${8 * scale}px` } : undefined}>
+    <div className={`grid shrink-0 grid-cols-3 items-center rounded-t-lg ${scaled ? "" : "gap-x-1"} ${inputDivider ? "border-b border-slate-300" : ""} bg-slate-50 text-slate-900`} style={scaled ? { height: inputHeight * scale, columnGap: 4 * scale } : { height: inputHeight }}>
       <div className="col-start-3 flex justify-center">
-        <div className={`relative text-3xl font-bold ${inputAlign === "center" ? "w-full" : ""}`}>
+        <div className={`relative font-bold ${scaled ? "" : "text-3xl"} ${inputAlign === "center" ? "w-full" : ""}`} style={scaled ? { fontSize: 30 * scale } : undefined}>
           <span aria-hidden="true" className="invisible">9</span>
           <div className={`absolute flex -translate-y-1/2 flex-col whitespace-nowrap ${inputAlign === "center" ? "left-1/2 -translate-x-1/2 items-center text-center" : "right-0 items-end"}`} style={{ top: `calc(50% + ${inputOffset}px)` }}>
-            {inputLabel && <span className="text-xs font-medium leading-3 text-slate-500">{inputLabel}</span>}
-            <b className="text-4xl font-extrabold">{value}</b>
+            {inputLabel && <span className={`${scaled ? "" : "text-xs"} font-medium leading-3 text-slate-500`} style={scaled ? { fontSize: 12 * scale } : undefined}>{inputLabel}</span>}
+            <b className="font-extrabold" style={scaled ? { fontSize: 36 * scale } : { fontSize: "2.25rem" }}>{value}</b>
           </div>
         </div>
       </div>
     </div>
-    <div className="mt-1 grid min-h-0 flex-1 translate-y-[2px] grid-cols-3 grid-rows-4 gap-x-1 gap-y-0.5">
+    <div className={`grid min-h-0 flex-1 grid-cols-3 grid-rows-4 ${scaled ? "" : "mt-1 translate-y-[2px] gap-x-1 gap-y-0.5"}`} style={scaled ? { marginTop: 4 * scale, transform: `translateY(${2 * scale}px)`, columnGap: 4 * scale, rowGap: 2 * scale } : undefined}>
       {keys.map((key) => (
         <button
-          className={`font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "000" ? "text-2xl" : "text-3xl"}`}
+          className={`font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${scaled ? "" : key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "000" ? "text-2xl" : "text-3xl"}`}
           disabled={disabled || disabledKeys.includes(key)}
           key={key}
           onClick={() => onKey(key)}
+          style={scaled ? { borderRadius: 8 * scale, fontSize: (key === "000" ? 24 : 30) * scale } : undefined}
           type="button"
         >
           {key}

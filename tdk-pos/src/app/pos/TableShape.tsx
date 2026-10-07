@@ -10,7 +10,7 @@ type Props = TableLayoutValues & { tableNumber: string; guestCount: number; amou
 export default function TableShape({ tableNumber, guestCount, amountDue, prepaidAmount = 0, customerName = null, startedAt, hasOpenSession, posMainTable = false, fixedPosition, fixedSize, sageOccupied = false, hasQrOrder = false, qrLanguageCode = null, mergedSourceTableNos = [], partyTableNos = [], partyRelationHighlight = false, mergeSplitCandidate = false, mergeSplitSelected = false, scale = 1, enhancedText = false, dataTableManagementItem = false, grouped = false, blocked = false, partyGroupBadge = null, partyGroupColor, partyGroupSelected = false, partyHighlight = false, thickSelection = false, selected = false, editable = false, onClick, onPointerDown, onResizePointerDown, ...layout }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const occupied = hasOpenSession ?? (guestCount > 0 && startedAt !== null);
-  const fixedTextLayout = !dataTableManagementItem;
+  const fixedTextLayout = posMainTable || !dataTableManagementItem;
   const relationLabels = [partyTableNos.length > 0 ? "일행" : "", mergedSourceTableNos.length > 0 ? "합석" : ""].filter(Boolean).join(" · ");
   const activeChairs = occupied ? Math.min(4, guestCount) : 0;
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);

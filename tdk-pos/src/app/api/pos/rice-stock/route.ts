@@ -1,9 +1,9 @@
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { inventoryItems, inventoryTransactions, staff } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
-import { adjustRiceStock, ensureRiceBusinessDay, RICE_DAY_RESET_REMARK, RICE_ITEM_CODE } from "@/lib/rice-stock";
+import { adjustRiceStock, ensureRiceBusinessDay, RICE_DAY_RESET_REMARK, RICE_ITEM_CODE, RICE_MANUAL_ADJUSTMENT_REMARKS } from "@/lib/rice-stock";
 
 const actions = new Set(["ADD", "SUBTRACT", "SET", "ADD_ONE", "SUBTRACT_ONE"]);
 type RiceAction = "ADD" | "SUBTRACT" | "SET" | "ADD_ONE" | "SUBTRACT_ONE";
@@ -33,7 +33,13 @@ export async function GET(request: Request) {
     }
     const [history, [totals]] = await Promise.all([
       db.select({ id: inventoryTransactions.inventoryTransactionId, time: sql<string>`DATE_FORMAT(${inventoryTransactions.transactionAt}, '%Y-%m-%d %H:%i')`, change: inventoryTransactions.qtyChange, balanceAfter: inventoryTransactions.balanceAfter })
-        .from(inventoryTransactions).where(before === null ? eq(inventoryTransactions.inventoryItemId, item.id) : and(eq(inventoryTransactions.inventoryItemId, item.id), lt(inventoryTransactions.inventoryTransactionId, before)))
+        .from(inventoryTransactions).where(and(
+          eq(inventoryTransactions.inventoryItemId, item.id),
+          eq(inventoryTransactions.transactionType, "ADJUSTMENT"),
+          isNull(inventoryTransactions.orderItemId),
+          inArray(inventoryTransactions.remark, [...RICE_MANUAL_ADJUSTMENT_REMARKS]),
+          ...(before === null ? [] : [lt(inventoryTransactions.inventoryTransactionId, before)]),
+        ))
         .orderBy(desc(inventoryTransactions.inventoryTransactionId)).limit(101),
       db.select({ added: sql<string>`COALESCE(SUM(CASE WHEN ${inventoryTransactions.qtyChange} > 0 THEN ${inventoryTransactions.qtyChange} ELSE 0 END), 0)`, subtracted: sql<string>`COALESCE(SUM(CASE WHEN ${inventoryTransactions.qtyChange} < 0 THEN -${inventoryTransactions.qtyChange} ELSE 0 END), 0)` })
         .from(inventoryTransactions)

@@ -163,6 +163,7 @@ export default function LoginPage() {
           keypad={<PinKeypad
             actionDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || !pin}
             digitDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH}
+            largeKeys
             onBackspace={remove}
             onClear={clear}
             onDigit={append}
@@ -180,6 +181,8 @@ export default function LoginPage() {
             />}
           selectedCode={selectedStaff?.staffCode}
           selectionDisabled={loading || isSubmitting}
+          largePeopleButtons
+          showLabels={false}
         />
       </section>
 

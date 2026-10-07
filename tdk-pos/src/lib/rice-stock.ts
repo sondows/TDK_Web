@@ -4,6 +4,7 @@ import { inventoryItems, inventoryTransactions, menuInventory, systemSettings } 
 
 export const RICE_ITEM_CODE = "PREPARED_RICE";
 export const RICE_DAY_RESET_REMARK = "영업시작 초기화";
+export const RICE_MANUAL_ADJUSTMENT_REMARKS = ["공기밥 실사 보정", "공기밥 수량 조정"] as const;
 const RICE_DAY_RESET_SETTING_KEY = "rice_stock_reset_date";
 export type RiceStockTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -91,5 +92,5 @@ export async function syncRiceOrderItemStock(tx: RiceStockTransaction, orderItem
 export async function adjustRiceStock(tx: RiceStockTransaction, action: "ADD" | "SUBTRACT" | "SET" | "ADD_ONE" | "SUBTRACT_ONE", input: number, staffId: number | null) {
   const item = await lockedRiceItem(tx);
   const change = action === "ADD" ? input : action === "SUBTRACT" ? -input : action === "SET" ? input - item.currentQty : action === "ADD_ONE" ? 1 : -1;
-  return writeRiceMovement(tx, item, change, "ADJUSTMENT", staffId, null, action === "SET" ? "공기밥 실사 보정" : "공기밥 수량 조정");
+  return writeRiceMovement(tx, item, change, "ADJUSTMENT", staffId, null, action === "SET" ? RICE_MANUAL_ADJUSTMENT_REMARKS[0] : RICE_MANUAL_ADJUSTMENT_REMARKS[1]);
 }

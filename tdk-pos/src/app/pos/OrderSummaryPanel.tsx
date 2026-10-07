@@ -7,7 +7,7 @@ import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
 import { formatSessionElapsed } from "@/lib/session-time";
 import type { TableFinancials } from "@/lib/table-session-financials";
-import type { SummaryRow } from "@/lib/pos-order-summary-rows";
+import { buildPartyOrderRows, type SummaryRow } from "@/lib/pos-order-summary-rows";
 import PaymentModal from "./PaymentModal";
 import PosSubHeader from "./PosSubHeader";
 type SessionDiscount = {
@@ -36,6 +36,7 @@ type DetailItem = {
   itemName: string;
   qty: number;
   unitPrice: string;
+  discountAmount: string;
   totalAmount: string;
   cancelledQty: number;
   effectiveQty: number;
@@ -123,6 +124,7 @@ const reasons = [
   "클레임",
   "기타",
 ];
+const cancelDetailGridStyle = { gridTemplateColumns: "minmax(0, 1fr) 75px 40px 44px 96px" };
 const money = (n: number) => formatMoney(n);
 const time = (d: string) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -203,7 +205,10 @@ export default function OrderSummaryPanel({
   const details =
     sessionId === null
       ? []
-      : orderDetails.filter((o) => o.sessionId === sessionId);
+      : orderDetails
+          .filter((o) => o.sessionId === sessionId)
+          .slice()
+          .sort((a, b) => a.orderId - b.orderId);
   const cancelables = details
     .flatMap((o) => o.items)
     .filter((i) => i.effectiveQty > 0);
@@ -316,6 +321,39 @@ export default function OrderSummaryPanel({
       }));
     }
   };
+  const orderedItems = (items: DetailItem[]) => {
+    const childrenByParent = new Map<number, DetailItem[]>();
+    const roots: DetailItem[] = [];
+    for (const item of items) {
+      if (item.itemType === "COMPONENT" && item.parentOrderItemId !== null) {
+        childrenByParent.set(item.parentOrderItemId, [
+          ...(childrenByParent.get(item.parentOrderItemId) ?? []),
+          item,
+        ]);
+      } else {
+        roots.push(item);
+      }
+    }
+    roots.sort((a, b) => a.orderItemId - b.orderItemId);
+    for (const children of childrenByParent.values()) {
+      children.sort((a, b) => a.orderItemId - b.orderItemId);
+    }
+    const attached = new Set<number>();
+    const ordered = roots.flatMap((item) => {
+      const children = childrenByParent.get(item.orderItemId) ?? [];
+      children.forEach((child) => attached.add(child.orderItemId));
+      return [item, ...children];
+    });
+    return [
+      ...ordered,
+      ...items.filter(
+        (item) =>
+          item.itemType === "COMPONENT" &&
+          item.parentOrderItemId !== null &&
+          !attached.has(item.orderItemId),
+      ),
+    ];
+  };
   const rows = details.map((o, n) => (
     <section
       className="border-b border-violet-200 py-2 last:border-0"
@@ -325,7 +363,7 @@ export default function OrderSummaryPanel({
         <span>{n + 1}차 주문</span>
         <time className="font-medium text-violet-700">({time(o.orderedAt)})</time>
       </header>
-      {o.items.map((i) => {
+      {orderedItems(o.items).map((i) => {
         const d = draft(i),
           selectable = c.mode && i.effectiveQty > 0,
           selectedForCancellation = selectable && d.checked,
@@ -333,7 +371,7 @@ export default function OrderSummaryPanel({
           effectiveAmount = Number(i.unitPrice) * i.effectiveQty;
         return (
           <div
-            className={`mt-2 rounded-lg ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
+            className={`mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
             key={i.orderItemId}
             onClick={() => selectable && toggle(i)}
           >
@@ -341,6 +379,7 @@ export default function OrderSummaryPanel({
               <span
                 className={`truncate font-medium ${selectedForCancellation ? "text-red-700 line-through" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
               >
+                {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
                 {i.itemName}
               </span>
               <span
@@ -405,14 +444,20 @@ export default function OrderSummaryPanel({
       })}
     </section>
   ));
-  const summaryRows = items.map((i) => (
-    <div className="grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm" key={i.rowKey}>
-      <span className="truncate font-medium">{i.name}</span>
+  const renderSummaryRow = (item: SummaryRow, component = false) => (
+    <div className={`grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm ${component ? "pl-3 text-slate-600" : ""}`} key={item.rowKey}>
+      <span className="truncate font-medium">{component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}{item.name}</span>
       <span className="text-right text-slate-500">
-        {new Intl.NumberFormat("ko-KR").format(i.unitPrice)}
+        {new Intl.NumberFormat("ko-KR").format(item.unitPrice)}
       </span>
-      <span className="text-center text-slate-500">× {i.qty}</span>
-      <b className="text-right">{money(i.total)}</b>
+      <span className="text-center text-slate-500">× {item.qty}</span>
+      <b className="text-right">{money(item.total)}</b>
+    </div>
+  );
+  const summaryRows = items.map((item) => (
+    <div className="space-y-1" key={item.rowKey}>
+      {renderSummaryRow(item)}
+      {item.components.map((component) => renderSummaryRow(component, true))}
     </div>
   ));
   const pendingRows = cart.map((i) => (
@@ -430,65 +475,21 @@ export default function OrderSummaryPanel({
       </div>)}
     </div>
   ));
-  const partyItemMap = new Map<
-    string,
-    {
-      menuId: number;
-      itemName: string;
-      unitPrice: number;
-      qty: number;
-      optionKey: string;
-      optionLabel: string;
-    }
-  >();
-  if (party) {
-    orderDetails
-      .filter((order) => party.sessionIds.includes(order.sessionId))
-      .flatMap((order) => order.items)
-      .filter((item) => item.effectiveQty > 0)
-      .forEach((item) => {
-        const options = item.options
-          .slice()
-          .sort(
-            (a, b) =>
-              (a.modifierOptionId ?? 0) - (b.modifierOptionId ?? 0) ||
-              a.optionName.localeCompare(b.optionName, "ko"),
-          );
-        const optionKey = JSON.stringify(
-          options.map((option) => [
-            option.modifierOptionId,
-            option.qty,
-            option.unitPrice,
-          ]),
-        );
-        const optionLabel = options
-          .map((option) => option.optionName)
-          .join(", ");
-        const itemKey = `${item.menuId}:${item.unitPrice}:${optionKey}`;
-        const current = partyItemMap.get(itemKey) ?? {
-          menuId: item.menuId,
-          itemName: item.itemName,
-          unitPrice: Number(item.unitPrice),
-          qty: 0,
-          optionKey,
-          optionLabel,
-        };
-        current.qty += item.effectiveQty;
-        partyItemMap.set(itemKey, current);
-      });
-  }
+  const partyRows = party
+    ? buildPartyOrderRows(
+        orderDetails
+          .filter((order) => party.sessionIds.includes(order.sessionId))
+          .flatMap((order) => order.items.map((item) => ({ ...item, orderId: order.orderId, sessionId: order.sessionId }))),
+        discounts,
+      )
+    : [];
   const orderGrossTotal =
     total +
     discounts
       .filter((discount) => physicalSessionIds.includes(discount.sessionId))
       .reduce((sum, discount) => sum + Number(discount.discountAmount), 0);
-  const partyRows = [...partyItemMap.values()].sort(
-    (a, b) =>
-      a.itemName.localeCompare(b.itemName, "ko") ||
-      a.optionKey.localeCompare(b.optionKey, "ko"),
-  );
   const partyTotal = partyRows.reduce(
-    (sum, item) => sum + item.unitPrice * item.qty,
+    (sum, item) => sum + item.unitPrice * item.qty + item.components.reduce((childSum, child) => childSum + child.unitPrice * child.qty, 0),
     0,
   );
   const partyTableNos = party?.tableNos ?? [];
@@ -562,25 +563,30 @@ export default function OrderSummaryPanel({
             <span className="text-right">금액</span>
           </div>
         )}
-        <div className="py-2">
+        <div className="flex flex-col gap-y-[7px] py-2">
           {partyRows.map((item) => (
-            <div
-              className="grid grid-cols-[minmax(0,1fr)_52px_52px_68px] items-center gap-1 py-1 text-sm"
-              key={`${item.menuId}:${item.unitPrice}:${item.optionLabel}`}
-            >
-              <span className="min-w-0 truncate font-medium">
-                {item.itemName}
-                {item.optionLabel && (
-                  <small className="ml-1 text-[10px] font-normal text-slate-500">
-                    ({item.optionLabel})
-                  </small>
-                )}
-              </span>
-              <span className="text-right text-slate-500">
-                {new Intl.NumberFormat("ko-KR").format(item.unitPrice)}
-              </span>
-              <span className="text-center text-slate-500">× {item.qty}</span>
-              <b className="text-right">{money(item.unitPrice * item.qty)}</b>
+            <div className="space-y-1" key={item.rowKey}>
+              {[item, ...item.components].map((row, index) => (
+                <div
+                  className={`grid grid-cols-[minmax(0,1fr)_52px_52px_68px] items-center gap-1 text-sm ${index > 0 ? "pl-3 text-slate-600" : ""}`}
+                  key={row.rowKey}
+                >
+                  <span className="min-w-0 truncate font-medium">
+                    {index > 0 && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
+                    {row.name}
+                    {row.optionLabel && (
+                      <small className="ml-1 text-[10px] font-normal text-slate-500">
+                        ({row.optionLabel})
+                      </small>
+                    )}
+                  </span>
+                  <span className="text-right text-slate-500">
+                    {new Intl.NumberFormat("ko-KR").format(row.unitPrice)}
+                  </span>
+                  <span className="text-center text-slate-500">× {row.qty}</span>
+                  <b className="text-right">{money(row.unitPrice * row.qty)}</b>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -888,35 +894,38 @@ function Confirm({
         <div className="p-5">
         <section className="mt-5">
           <h3 className="text-sm font-bold">취소 내역</h3>
-          <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="grid grid-cols-[minmax(0,1fr)_72px_48px_80px] gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+          <div className="mt-2 flex max-h-48 flex-col overflow-hidden rounded-xl border border-slate-200">
+            <div className="grid shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500" style={cancelDetailGridStyle}>
               <span>메뉴명</span>
               <span className="text-right">단가</span>
-              <span className="text-center">수량</span>
-              <span className="text-right">금액</span>
+              <span className="col-start-4 text-center">수량</span>
+              <span className="col-start-5 text-right">금액</span>
             </div>
-            {chosen.map((x) => (
-              <div
-                className="grid grid-cols-[minmax(0,1fr)_72px_48px_80px] gap-2 border-b border-slate-100 px-3 py-2 text-sm last:border-0"
-                key={x.i.orderItemId}
-              >
-                <span className="truncate font-medium">{x.i.itemName}</span>
-                <span className="text-right">
-                  {money(Number(x.i.unitPrice))}
-                </span>
-                <span className="text-center">{x.qty}</span>
-                <b className="text-right">
-                  {money(x.qty * Number(x.i.unitPrice))}
-                </b>
-              </div>
-            ))}
+            <div className="min-h-0 flex-1 overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {chosen.map((x) => (
+                <div
+                  className="grid border-b border-slate-100 px-3 py-2 text-sm last:border-0"
+                  key={x.i.orderItemId}
+                  style={cancelDetailGridStyle}
+                >
+                  <span className="truncate font-medium">{x.i.itemName}</span>
+                  <span className="text-right">
+                    {money(Number(x.i.unitPrice))}
+                  </span>
+                  <span className="col-start-4 text-center">{x.qty}</span>
+                  <b className="col-start-5 text-right">
+                    {money(x.qty * Number(x.i.unitPrice))}
+                  </b>
+                </div>
+              ))}
+            </div>
+            <div className="grid min-h-[48px] shrink-0 items-center border-t border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={cancelDetailGridStyle}>
+              <span className="col-span-4 text-xs font-bold text-slate-500">취소금액</span>
+              <b className="col-start-5 text-right font-extrabold text-violet-700">{money(amount)}</b>
+            </div>
           </div>
         </section>
-        <div className="mt-4 flex justify-between border-t pt-3 font-bold">
-          <span>취소금액</span>
-          <b className="text-violet-700">{money(amount)}</b>
-        </div>
-        <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <section className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <h3 className="text-sm font-bold">취소사유</h3>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {reasons.map((r, index) => (
@@ -1003,18 +1012,23 @@ function Reauth({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-3">
       <section aria-label="취소자 재확인" aria-modal="true" className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[390px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl" role="dialog">
         <PosSubHeader backLabel="취소 인증 취소" onBack={close} title="취소자 재확인" />
-        <p className="shrink-0 px-5 pt-3 text-center text-sm text-slate-600">취소 담당 직원을 선택하고 PIN을 입력하세요.</p>
+        <p className="shrink-0 px-5 pt-3 text-center text-sm text-slate-600">직원 선택 후 PIN 확인</p>
         <PinAuthPanel
           label="직원 선택"
           people={employees}
           selectedCode={c.staffCode}
           selectionDisabled={c.busy}
+          showLabels={false}
+          largePeopleButtons
+          spaciousPinGap
+          scrollablePeople
           onSelect={(employee) => set(employee.staffCode, "")}
           emptyMessage="선택할 수 있는 직원이 없습니다."
           pinInput={
             <PinInput
               ariaLabel="취소자 PIN"
               autoFocus={Boolean(c.staffCode)}
+              className="!min-h-[60px]"
               disabled={!c.staffCode || c.busy}
               keypadAligned
               onChange={(pin) => set(c.staffCode, pin)}
@@ -1026,6 +1040,7 @@ function Reauth({
             <PinKeypad
               digitDisabled={!c.staffCode || c.busy || c.pin.length >= PIN_LENGTH}
               actionDisabled={!c.staffCode || c.busy || !c.pin.length}
+              largeKeys
               onDigit={enterDigit}
               onBackspace={() => set(c.staffCode, c.pin.slice(0, -1))}
               onClear={() => set(c.staffCode, "")}

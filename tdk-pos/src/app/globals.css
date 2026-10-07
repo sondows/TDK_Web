@@ -457,6 +457,7 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 /* Table management uses real, scaled layout dimensions; dialogs keep their own sizing. */
 .table-management-screen {
   --table-management-ui-scale: 0.7;
+  --table-management-full-panel-height: calc((100dvh - 7rem) * var(--table-management-ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -465,7 +466,9 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-management-card {
-  width: min(100%, calc(1800px * var(--table-management-ui-scale) * var(--table-management-width-factor)));
+  --table-management-actions-width: calc(220px * var(--table-management-ui-scale));
+  /* Reserve the original 75% scene width plus the fixed actions width. */
+  width: min(100%, calc(75% + var(--table-management-actions-width)), calc(1800px * var(--table-management-ui-scale) * var(--table-management-width-factor) * 0.75 + var(--table-management-actions-width)));
 }
 
 .table-management-card > header {
@@ -505,8 +508,13 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 
 .table-management-panel {
   width: 100%;
-  height: calc((100dvh - 7rem) * var(--table-management-ui-scale));
-  grid-template-columns: minmax(0, 1fr) minmax(calc(230px * var(--table-management-ui-scale)), 25%);
+  min-width: 0;
+  height: var(--table-management-full-panel-height);
+  grid-template-columns: minmax(0, 1fr) var(--table-management-actions-width);
+}
+
+.table-management-height-probe {
+  height: var(--table-management-full-panel-height);
 }
 
 .table-management-canvas {
@@ -519,65 +527,31 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-management-actions > div {
-  gap: calc(12px * var(--table-management-ui-scale));
+  gap: calc(8px * var(--table-management-ui-scale));
 }
 
-.table-management-actions button {
+.table-management-actions button,
+.table-management-footer button {
   padding-inline: calc(20px * var(--table-management-ui-scale));
   border-radius: calc(12px * var(--table-management-ui-scale));
   font-size: calc(22px * var(--table-management-ui-scale));
 }
 
-.table-management-canvas [data-table-management-item] strong {
-  font-size: calc(24px * var(--table-management-ui-scale));
+.table-management-footer {
+  display: grid;
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  justify-items: center;
+  padding: calc(8px * var(--table-management-ui-scale)) 0;
+  border-top: 1px solid #e2e8f0;
 }
 
-.table-management-canvas [data-table-management-item] > span:nth-of-type(5) {
-  border-radius: calc(20px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-content {
-  --pos-table-right-inset: calc(3px * var(--table-management-ui-scale));
-  grid-template-columns: minmax(calc(24px * var(--table-management-ui-scale)), max-content) minmax(0, 1fr);
-  column-gap: calc(4px * var(--table-management-ui-scale));
-  padding-bottom: calc(6px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-info {
-  left: calc(2px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-number-multi {
-  left: calc(2px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-amount {
-  height: calc(16px * var(--table-management-ui-scale));
-  font-size: calc(12px * var(--table-management-ui-scale));
-  line-height: calc(16px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-info > .pos-table-occupied-amount:first-child {
-  line-height: calc(24px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas .pos-table-occupied-info > .pos-table-occupied-amount:nth-child(2) {
-  line-height: calc(19px * var(--table-management-ui-scale));
-  transform: translate(calc(3px * var(--table-management-ui-scale)), calc(0.5px * var(--table-management-ui-scale)));
-}
-
-.table-management-canvas .pos-table-occupied-usage {
-  height: calc(16px * var(--table-management-ui-scale));
-  font-size: calc(10px * var(--table-management-ui-scale));
-  line-height: calc(16px * var(--table-management-ui-scale));
-}
-
-.table-management-canvas [data-table-management-item] [aria-label^="일행 그룹"] {
-  top: calc(-12px * var(--table-management-ui-scale));
-  right: calc(-12px * var(--table-management-ui-scale));
-  width: calc(36px * var(--table-management-ui-scale));
-  height: calc(36px * var(--table-management-ui-scale));
-  font-size: calc(18px * var(--table-management-ui-scale));
+.table-management-footer button {
+  width: 80%;
+  height: 70px;
 }
 
 .table-management-canvas > div:not(:first-child) {
@@ -601,45 +575,6 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   padding-inline: calc(16px * var(--table-management-ui-scale));
   border-radius: calc(8px * var(--table-management-ui-scale));
   font-size: calc(14px * var(--table-management-ui-scale));
-}
-
-/* Table-cancellation staff selection is rendered beside the PIN keypad. */
-.table-cancel-details > section:nth-of-type(2) {
-  display: none;
-}
-
-.table-cancel-details > div:first-child > p:first-child,
-.table-cancel-details > div:first-child > p:nth-child(3) {
-  display: none;
-}
-
-.table-cancel-details {
-  position: relative;
-}
-
-.table-cancel-details > div:first-child {
-  min-height: 86px;
-  padding-right: 10rem;
-}
-
-.table-cancel-details > div:first-child > p:nth-child(2) {
-  margin: 0;
-  font-size: 1.75rem;
-  line-height: 1.2;
-}
-
-.table-cancel-details > div:nth-child(2) {
-  position: absolute;
-  top: 1.75rem;
-  right: 1.5rem;
-  margin: 0;
-  border: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  padding-right: 10px;
 }
 
 .table-cancel-pin > section > h3:first-child {
@@ -684,15 +619,18 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-cancellation-dialog .table-cancel-details {
+  display: flex;
+  flex-direction: column;
   padding: calc(24px * var(--table-cancel-scale));
+  padding-bottom: calc(52px * var(--table-cancel-scale));
 }
 
 .table-cancellation-dialog .table-cancel-amount-card {
   display: flex;
-  min-height: calc(140px * var(--table-cancel-scale));
+  min-height: calc(72px * var(--table-cancel-scale));
   align-items: center;
   justify-content: space-between;
-  padding: calc(16px * var(--table-cancel-scale));
+  padding: calc(12px * var(--table-cancel-scale)) calc(16px * var(--table-cancel-scale));
   border-radius: calc(12px * var(--table-cancel-scale));
 }
 
@@ -712,7 +650,17 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-cancellation-dialog .table-cancel-details > section {
-  margin-top: calc(24px * var(--table-cancel-scale));
+  margin-top: calc(16px * var(--table-cancel-scale));
+}
+
+.table-cancellation-dialog .table-cancel-reasons {
+  min-height: 0;
+  flex: 1;
+  margin-top: calc(16px * var(--table-cancel-scale));
+  border: 1px solid #e2e8f0;
+  border-radius: calc(12px * var(--table-cancel-scale));
+  background-color: #f8fafc;
+  padding: calc(12px * var(--table-cancel-scale));
 }
 
 .table-cancellation-dialog .table-cancel-details > section h3 {
@@ -735,6 +683,16 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   padding-inline: calc(12px * var(--table-cancel-scale));
 }
 
+.table-cancellation-dialog .table-cancel-details > .table-cancel-reasons > div {
+  column-gap: 10px;
+  row-gap: 12px;
+}
+
+.table-cancellation-dialog .table-cancel-reasons > div > button {
+  height: 52px;
+  min-height: 52px;
+}
+
 .table-cancellation-dialog .table-cancel-details > section input {
   margin-top: calc(12px * var(--table-cancel-scale));
   padding-inline: calc(16px * var(--table-cancel-scale));
@@ -753,11 +711,12 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-cancellation-dialog .table-cancel-pin section:first-child {
-  padding-block: calc(8px * var(--table-cancel-scale));
+  padding-top: 0;
+  padding-bottom: 10px;
 }
 
 .table-cancellation-dialog .table-cancel-pin section:nth-child(2) {
-  padding-top: calc(8px * var(--table-cancel-scale));
+  padding-top: 10px;
   padding-bottom: calc(28px * var(--table-cancel-scale));
 }
 
@@ -767,13 +726,14 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-cancellation-dialog .table-cancel-pin section:first-child > div > div {
-  margin-top: calc(4px * var(--table-cancel-scale));
+  margin-top: 0;
   gap: calc(8px * var(--table-cancel-scale));
   padding-right: calc(8px * var(--table-cancel-scale));
 }
 
 .table-cancellation-dialog .table-cancel-pin section:first-child button {
-  height: calc(56px * var(--table-cancel-scale));
+  height: 52px;
+  min-height: 52px;
   width: calc((100% - 8px * var(--table-cancel-scale)) / 2);
   padding-inline: calc(16px * var(--table-cancel-scale));
   border-radius: calc(12px * var(--table-cancel-scale));
@@ -781,7 +741,7 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:first-of-type {
-  margin-top: calc(4px * var(--table-cancel-scale));
+  margin-top: 8px;
 }
 
 .table-cancellation-dialog .table-cancel-pin section:nth-child(2) > div:first-of-type > div {
@@ -1234,6 +1194,18 @@ section.relative.flex.min-h-0.flex-1.flex-col > nav > button.bg-slate-100 {
 
 .pos-order-items-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.pos-rice-stock-history-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  touch-action: pan-y;
+}
+
+.pos-rice-stock-history-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Discount quick presets are full-width touch rows, while the direct controls remain two columns. */

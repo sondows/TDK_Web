@@ -9,7 +9,7 @@ export type TableLayoutValues = {
 // Use the existing 1280x800 POS table area as the fixed pixel reference.
 // Saved position and size percentages are converted through this canvas so
 // resizing the browser cannot scale them, while layout edits still apply.
-const POS_TABLE_REFERENCE_CANVAS = { width: 447, height: 401 };
+export const POS_TABLE_REFERENCE_CANVAS = { width: 447, height: 401 } as const;
 const POS_TABLE_GEOMETRY_SCALE = 1.19;
 const TABLE_BODY_INSET = { horizontal: 0.86, vertical: 0.7 };
 const TABLE_FRAME_SAFE_INSET = 1;

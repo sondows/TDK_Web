@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/format-money";
 import { printReceipt as printLocalReceipt } from "@/lib/receipt-print";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SalesListResponse } from "@/lib/sales-types";
 import PosSubHeader from "../PosSubHeader";
+import { POS_HEADER_ACTION_CLASS_NAME } from "../pos-header-action";
 
 const salesGridColumns = "grid-cols-[minmax(0,10fr)_minmax(0,15fr)_minmax(0,35fr)_minmax(0,12fr)_minmax(0,15fr)_minmax(0,13fr)]";
 import AdminBackLink from "../admin/AdminBackLink";
@@ -258,34 +259,37 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 text-slate-900">
       <section aria-labelledby="sales-history-title" aria-modal="true" className="flex h-[min(88dvh,960px)] max-h-[calc(100dvh-2rem)] w-[clamp(900px,60vw,1280px)] max-w-[calc(100vw-2rem)] min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
         <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={() => closeToPos ? router.push("/pos") : router.back()} title="판매내역" titleId="sales-history-title" titleTrailing={
-          <button className="min-h-11 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50" onClick={() => void openSummary()} type="button">매출현황</button>
-        } trailingClassName="shrink-0 gap-2 whitespace-nowrap" trailing={
+          <button className={`${POS_HEADER_ACTION_CLASS_NAME} shrink-0 rounded-lg px-2 py-1 transition-colors active:scale-[0.98] bg-white/20 text-white`} onClick={() => void openSummary()} type="button">매출현황</button>
+        } trailingClassName="min-w-0 flex-1 gap-1 whitespace-nowrap" trailing={
           <>
-            <div className="flex min-w-0 items-baseline justify-center gap-2 whitespace-nowrap" title={displayDate(period.startDate)}>
+            <div className="flex min-w-0 flex-1 items-baseline justify-center gap-2 whitespace-nowrap" title={displayDate(period.startDate)}>
               <span className="shrink-0 text-base font-bold text-white/80">조회일</span>
               <strong className="min-w-0 truncate text-lg font-extrabold text-white">{displayDate(period.startDate)}</strong>
             </div>
-            {([
+            <div className="flex shrink-0 items-center gap-1">
+              {([
               ["previousMonth", "전월"],
               ["previousWeek", "전주"],
               ["yesterday", "어제"],
               ["today", "오늘"],
               ["custom", "기간지정"],
-            ] as const).map(([key, label]) => (
-              <button
-                className={`min-h-11 rounded-xl px-3 text-sm font-extrabold transition active:scale-[0.98] ${period.key === key ? "bg-blue-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-                key={key}
-                onClick={() => {
-                  if (key === "custom") {
-                    setCalendarMonth((period.key === "custom" ? period.startDate : date).slice(0, 7));
-                    setCustomOpen(true);
-                  } else choosePreset(key);
-                }}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
+              ] as const).map(([key, label]) => (
+                <button
+                  aria-pressed={period.key === key}
+                  className={`${POS_HEADER_ACTION_CLASS_NAME} rounded-lg px-2 py-1 transition-colors active:scale-[0.98] ${period.key === key ? "bg-white/20 text-white" : "hover:bg-white/10"}`}
+                  key={key}
+                  onClick={() => {
+                    if (key === "custom") {
+                      setCalendarMonth((period.key === "custom" ? period.startDate : date).slice(0, 7));
+                      setCustomOpen(true);
+                    } else choosePreset(key);
+                  }}
+                  type="button"
+                >
+                  {key === "custom" ? `${label} ⋮` : label}
+                </button>
+              ))}
+            </div>
           </>
         } />
 

@@ -24,9 +24,9 @@ export default function PersonCountModal({ sessionId, title = "인원 조정", p
 
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onClick={() => !busy && close()}>
     <section aria-labelledby="person-count-title" className="w-full max-w-[34rem] overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
-      <PosSubHeader backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} onBack={close} title={title} titleId="person-count-title" trailing={<button aria-expanded={adjustmentOpen} className="whitespace-nowrap border-0 bg-transparent p-0 text-sm font-semibold text-white/75 shadow-none transition-colors hover:text-white" disabled={busy} onClick={() => setAdjustmentOpen(open => !open)} type="button">직접조정 ⋮</button>} />
-      <div className="px-6 pb-6 pt-5">
-      <div className="mt-5 space-y-4">
+      <PosSubHeader backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} onBack={close} title={title} titleId="person-count-title" trailing={<button aria-expanded={adjustmentOpen} className="mr-1 whitespace-nowrap border-0 bg-transparent p-0 text-xs font-medium text-white/70 shadow-none transition-colors hover:text-white" disabled={busy} onClick={() => setAdjustmentOpen(open => !open)} type="button">직접조정 ⋮</button>} />
+      <div className="px-6 pb-5 pt-4">
+      <div className="mt-4 space-y-3">
         <section><div className="grid grid-cols-4 justify-items-center gap-0">{[1, 2, 3, 4].map(value => <button className={`min-h-[84px] w-[80%] rounded-xl border-2 text-base font-bold ${adult === value ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`} disabled={busy} key={value} onClick={() => setAdult(current => current === value ? 0 : value)} type="button">성인 {value}</button>)}</div></section>
         <section><div className="grid grid-cols-4 justify-items-center gap-0">{[1, 2, 3, 4].map(value => <button className={`min-h-[84px] w-[80%] rounded-xl border-2 text-base font-bold ${child === value ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`} disabled={busy} key={value} onClick={() => setChild(current => current === value ? 0 : value)} type="button">아동 {value}</button>)}</div></section>
       </div>
@@ -37,7 +37,7 @@ export default function PersonCountModal({ sessionId, title = "인원 조정", p
       </div>
       </>}
       {error && <p className="mt-4 text-center text-sm font-semibold text-red-600">{error}</p>}
-      <button className="mx-auto mt-5 flex min-h-[72px] w-[70%] items-center justify-center rounded-xl bg-blue-600 text-[22px] font-bold text-white transition hover:bg-blue-700 disabled:opacity-50" disabled={busy} onClick={() => save(adult, child)} type="button">{busy ? "저장 중..." : "확인"}</button>
+      <button className="mx-auto mt-3 flex min-h-[64px] w-[65%] items-center justify-center rounded-xl bg-blue-600 text-xl font-bold text-white transition hover:bg-blue-700 disabled:opacity-50" disabled={busy} onClick={() => save(adult, child)} type="button">{busy ? "저장 중..." : "확인"}</button>
       {sessionId !== undefined && <span className="sr-only">세션 {sessionId}</span>}
       </div>
     </section>
