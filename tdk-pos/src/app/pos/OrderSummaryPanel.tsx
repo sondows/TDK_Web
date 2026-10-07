@@ -6,6 +6,7 @@ import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
 import { formatSessionElapsed } from "@/lib/session-time";
+import type { SummaryRow } from "@/lib/pos-order-summary-rows";
 import PaymentModal from "./PaymentModal";
 import PosSubHeader from "./PosSubHeader";
 type SessionDiscount = {
@@ -26,7 +27,6 @@ type Table = {
   prepaidAmount: number;
   paymentTotal: number;
 };
-type Item = [string, { qty: number; total: number; unitPrice: number }];
 type DetailItem = {
   orderItemId: number;
   menuId: number;
@@ -168,7 +168,7 @@ export default function OrderSummaryPanel({
   discounts,
 }: {
   selected: Table | null;
-  items: Item[];
+  items: SummaryRow[];
   total: number;
   cart: PendingCartItem[];
   cartTotal: number;
@@ -403,9 +403,9 @@ export default function OrderSummaryPanel({
       })}
     </section>
   ));
-  const summaryRows = items.map(([n, i]) => (
-    <div className="grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm" key={n}>
-      <span className="truncate font-medium">{n}</span>
+  const summaryRows = items.map((i) => (
+    <div className="grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm" key={i.rowKey}>
+      <span className="truncate font-medium">{i.name}</span>
       <span className="text-right text-slate-500">
         {new Intl.NumberFormat("ko-KR").format(i.unitPrice)}
       </span>
