@@ -392,7 +392,7 @@ export default function OrderSummaryPanel({
               <span
                 className={`text-right ${fullyCancelled ? "text-slate-400" : "text-slate-500"}`}
               >
-                {money(Number(i.unitPrice))}
+                {money(i.itemType === "SERVICE" ? 0 : Number(i.unitPrice))}
               </span>
               {selectedForCancellation ? (
                 <span className="grid grid-cols-[1.5rem_1fr_1.5rem] items-center text-center">
@@ -455,7 +455,7 @@ export default function OrderSummaryPanel({
     <div className={`grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm ${component ? "pl-3 text-slate-600" : ""}`} key={item.rowKey}>
       <span className="truncate font-medium">{component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}{item.name}{item.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
       <span className="text-right text-slate-500">
-        {new Intl.NumberFormat("ko-KR").format(item.unitPrice)}
+        {new Intl.NumberFormat("ko-KR").format(item.itemType === "SERVICE" ? 0 : item.unitPrice)}
       </span>
       <span className="text-center text-slate-500">× {item.qty}</span>
       <b className="text-right">{money(item.total)}</b>
@@ -471,7 +471,7 @@ export default function OrderSummaryPanel({
     <div className="space-y-1" key={pendingCartItemKey(i)}>
       <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
         <span className="truncate font-medium">{i.menuName}{i.isComplimentary && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
-        <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.unitPrice)}</span>
+        <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.isComplimentary ? 0 : i.unitPrice)}</span>
         <span className="grid grid-cols-3 text-center"><button disabled={submitting} onClick={() => adjustCartItem(i, -1)} type="button">−</button><b>{i.qty}</b><button disabled={submitting} onClick={() => adjustCartItem(i, 1)} type="button">+</button></span>
         <b className="text-right">{money(i.isComplimentary ? 0 : i.unitPrice * i.qty)}</b>
       </div>
@@ -588,7 +588,7 @@ export default function OrderSummaryPanel({
                     )}
                   </span>
                   <span className="text-right text-slate-500">
-                    {new Intl.NumberFormat("ko-KR").format(row.unitPrice)}
+                    {new Intl.NumberFormat("ko-KR").format(row.itemType === "SERVICE" ? 0 : row.unitPrice)}
                   </span>
                   <span className="text-center text-slate-500">× {row.qty}</span>
                   <b className="text-right">{money(row.total)}</b>

@@ -789,9 +789,8 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  /* Fit nine rows after eight 12px gaps while keeping a usable minimum card size. */
-  grid-auto-rows: max(72px, calc((100% - 96px) / 9));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(104px, auto);
   align-content: start;
   column-gap: var(--menu-card-column-gap);
   row-gap: 12px;
@@ -810,27 +809,27 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 
 .pos-menu-card {
   position: relative;
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
-  min-height: 72px;
-  height: 100%;
-  grid-template-columns: minmax(0, 2.25fr) minmax(3.75rem, 1fr);
+  min-height: 104px;
   overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 0.8rem;
-  background: #ffffff;
+  background: color-mix(in srgb, var(--pos-menu-accent, #64748b) 7%, white);
   color: #0f172a;
-  text-align: left;
+  text-align: center;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
 }
 
 .pos-menu-card:hover {
   border-color: #93c5fd;
-  background: #f8fbff;
+  background: color-mix(in srgb, var(--pos-menu-accent, #64748b) 9%, white);
 }
 
 .pos-menu-card:active {
-  background: #eff6ff;
+  background: color-mix(in srgb, var(--pos-menu-accent, #64748b) 10%, white);
   transform: scale(0.99);
 }
 
@@ -846,33 +845,35 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 .pos-menu-list.is-order-disabled .pos-menu-card:hover,
 .pos-menu-list.is-order-disabled .pos-menu-card:active {
   border-color: #e2e8f0;
-  background: #ffffff;
+  background: color-mix(in srgb, var(--pos-menu-accent, #64748b) 7%, white);
   transform: none;
 }
 
 .pos-menu-copy {
   display: flex;
   min-width: 0;
+  width: 100%;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 0.2rem;
-  padding: 0.4rem 0.55rem;
+  padding: 0.6rem 0.4rem;
   text-align: center;
 }
 
+.pos-menu-card-with-cart .pos-menu-copy {
+  padding-bottom: 2.5rem;
+}
+
 .pos-menu-copy strong {
-  display: -webkit-box;
-  max-height: 2.5em;
+  display: block;
   flex-shrink: 0;
-  overflow: hidden;
-  font-size: 1.0625rem;
+  font-size: clamp(0.875rem, 1.1vw, 1.0625rem);
   font-weight: 800;
   line-height: 1.25;
   text-wrap: balance;
   word-break: keep-all;
-  overflow-wrap: break-word;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .pos-menu-price {

@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { formatMoney as formatPosMoney } from "@/lib/format-money";
 import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
@@ -46,8 +46,8 @@ const viewTabStyles = {
 const categoryVisuals: Record<string, { color: string }> = {
  "김치찌개": { color: "#DC2626" },
  "사이드": { color: "#16A34A" },
- "주류·음료": { color: "#0891B2" },
- "추가": { color: "#EA580C" },
+ "주류·음료": { color: "#EA580C" },
+ "추가": { color: "#0891B2" },
  "포장": { color: "#7C3AED" },
 };
 const categoryVisual = (name: string | null | undefined) => categoryVisuals[name ?? ""] ?? { color: "#64748B" };
@@ -370,10 +370,10 @@ export default function PosShell({ staffName, staffRole, tables, menus, menuComp
   menuPanel.classList.add("pos-right-menu-panel");
   menuPanel.insertBefore(categoryBar, list);
   const seenCategories = new Set<number | null>();
-  const renderCard = (menu: Menu) => { const start = !seenCategories.has(menu.categoryId); seenCategories.add(menu.categoryId); const displayName = escape(menu.name); const imageUrl = menu.imageUrl || "/images/menu/no-image.png"; return `<button class=\"pos-menu-card\" data-menu-id=\"${menu.menuId}\" data-category=\"${menu.categoryId ?? "uncategorized"}\"${start ? " data-category-start=\"true\"" : ""} type=\"button\" aria-label=\"${escape(menu.name)} 상세\"><div class=\"pos-menu-copy\"><strong>${displayName}</strong><span class=\"pos-menu-price\">${formatMoney(menu.price)}</span></div><div class=\"pos-menu-image\"><img src=\"${escape(imageUrl)}\" alt=\"\" onerror=\"this.onerror=null;this.src='/images/menu/no-image.png'\"></div></button>`; };
+  const renderCard = (menu: Menu) => { const start = !seenCategories.has(menu.categoryId); seenCategories.add(menu.categoryId); const displayName = escape(menu.name); return `<button class=\"pos-menu-card\" style=\"--pos-menu-accent:${escape(categoryVisual(menu.categoryName).color)}\" data-menu-id=\"${menu.menuId}\" data-category=\"${menu.categoryId ?? "uncategorized"}\"${start ? " data-category-start=\"true\"" : ""} type=\"button\" aria-label=\"${escape(menu.name)} 상세\"><div class=\"pos-menu-copy\"><strong>${displayName}</strong><span class=\"pos-menu-price\">${formatMoney(menu.price)}</span></div></button>`; };
   list.className = "pos-menu-list";
   list.style.display = "grid";
-  list.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))";
+  list.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
   list.style.gridAutoFlow = "row";
   list.innerHTML = menus.map(renderCard).join("");
   const categoryStarts = () => [...list.querySelectorAll(".pos-menu-card[data-category-start=\"true\"]")] as HTMLElement[];
@@ -464,7 +464,7 @@ function PosMenuPanel({ menus, categories, canOrderMenu, openQuantityModal, quic
   });
   list.querySelectorAll<HTMLButtonElement>(".pos-menu-cart-button").forEach(button => { button.disabled = !canOrderMenu; });
  }, [canOrderMenu, filteredMenus]);
- const renderMenuCard = (menu: Menu) => { const openMenu = () => openQuantityModal(menu); return <div aria-label={`${menu.name} 상세`} className="pos-menu-card" data-category={menu.categoryId ?? "uncategorized"} key={menu.menuId} onClick={openMenu} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(); } }} role="button" tabIndex={0}><div className="pos-menu-copy"><strong>{menu.name}</strong><span className="pos-menu-price">{new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Number(menu.price))}</span></div><div className="pos-menu-image"><img alt="" onError={event => { event.currentTarget.onerror = null; event.currentTarget.src = "/images/menu/no-image.png"; }} src={menu.imageUrl || "/images/menu/no-image.png"} /><button aria-label={`${menu.name} 주문예정에 1개 추가`} className="pos-menu-cart-button" onClick={event => { event.stopPropagation(); quickAddToCart(menu); }} onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} type="button"><img src="/icons/cart_plus_icon.svg" alt="" aria-hidden="true" className="pointer-events-none size-[22px]" /></button></div></div>; };
+ const renderMenuCard = (menu: Menu) => { const openMenu = () => openQuantityModal(menu); return <div aria-label={`${menu.name} 상세`} className="pos-menu-card pos-menu-card-with-cart" style={{ "--pos-menu-accent": categoryVisual(menu.categoryName).color } as CSSProperties} data-category={menu.categoryId ?? "uncategorized"} key={menu.menuId} onClick={openMenu} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(); } }} role="button" tabIndex={0}><div className="pos-menu-copy"><strong>{menu.name}</strong><span className="pos-menu-price">{new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Number(menu.price))}</span></div><button aria-label={`${menu.name} 주문예정에 1개 추가`} className="pos-menu-cart-button" onClick={event => { event.stopPropagation(); quickAddToCart(menu); }} onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} type="button"><img src="/icons/cart_plus_icon.svg" alt="" aria-hidden="true" className="pointer-events-none size-[22px]" /></button></div>; };
  return <section className="pos-right-menu-panel min-h-0 rounded-2xl bg-white p-4 shadow-sm"><div className={`horizontal-select-scroll pos-category-bar${categoryTabs.length === 6 ? " is-six-items" : ""}`} {...categoryScrollHandlers} ref={categoryScrollRef}>{categoryTabs.map(category => { const visual = category.categoryId === null ? { color: viewTabStyles.tables.color } : categoryVisual(category.name); const active = activeCategoryId === category.categoryId; return <button className={`pos-category-button${active ? " is-active" : ""}`} disabled={!canOrderMenu} key={category.categoryId ?? "all"} onClick={() => selectCategory(category.categoryId)} style={active ? { backgroundColor: visual.color } : undefined} type="button"><span aria-hidden="true" className="pos-category-corner-marker" style={{ backgroundColor: visual.color }} />{categoryDisplayName(category.name)}</button>; })}</div><div aria-hidden="true" className="pos-category-underline" style={{ backgroundColor: activeCategoryColor }} /><div className="pos-menu-list" ref={listRef}>{filteredMenus.map(renderMenuCard)}</div></section>;
 }
 function TableVisual({ table, tables, selected, selectedGroupId, choose }: { table: Table; tables: Table[]; selected: boolean; selectedGroupId: number | null; choose: () => void }) {
