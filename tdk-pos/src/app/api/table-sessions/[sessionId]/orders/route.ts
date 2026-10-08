@@ -7,7 +7,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
-type RequestedItem = { menuId: number; qty: number; components: Array<{ menuComponentId: number; qty: number }> };
+type RequestedItem = { menuId: number; qty: number; isComplimentary: boolean; components: Array<{ menuComponentId: number; qty: number }> };
 const CENTS_PER_UNIT = BigInt(100);
 
 function decimalToCents(value: string) {
@@ -26,7 +26,7 @@ function parseRequestedItems(value: unknown): RequestedItem[] | null {
   const requested: RequestedItem[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") return null;
-    const row = item as { menuId?: unknown; qty?: unknown; components?: unknown };
+    const row = item as { menuId?: unknown; qty?: unknown; isComplimentary?: unknown; components?: unknown };
     const menuId = Number(row.menuId);
     const qty = Number(row.qty);
     if (!Number.isSafeInteger(menuId) || menuId <= 0 || !Number.isInteger(qty) || qty <= 0 || qty > 1000) return null;
@@ -35,11 +35,11 @@ function parseRequestedItems(value: unknown): RequestedItem[] | null {
       const component = value as { menuComponentId?: unknown; qty?: unknown };
       return { menuComponentId: Number(component?.menuComponentId), qty: Number(component?.qty) };
     }) : null;
-    if (components === null || components.length > 50 || components.some(component => !Number.isSafeInteger(component.menuComponentId) || component.menuComponentId <= 0 || !Number.isInteger(component.qty) || component.qty < 0 || component.qty > 1_000_000) || new Set(components.map(component => component.menuComponentId)).size !== components.length) return null;
+    if ((row.isComplimentary !== undefined && typeof row.isComplimentary !== "boolean") || components === null || components.length > 50 || components.some(component => !Number.isSafeInteger(component.menuComponentId) || component.menuComponentId <= 0 || !Number.isInteger(component.qty) || component.qty < 0 || component.qty > 1_000_000) || new Set(components.map(component => component.menuComponentId)).size !== components.length) return null;
     const nextQty = (quantities.get(menuId) ?? 0) + qty;
     if (!Number.isSafeInteger(nextQty) || nextQty > 1000) return null;
     quantities.set(menuId, nextQty);
-    requested.push({ menuId, qty, components });
+    requested.push({ menuId, qty, isComplimentary: row.isComplimentary === true, components });
   }
   return requested;
 }
@@ -82,7 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       const snapshots = requestedItems.map(requested => {
         const menu = menuById.get(requested.menuId);
         if (!menu) throw new OrderValidationError("메뉴를 찾을 수 없습니다.");
-        const menuAmountCents = decimalToCents(menu.price) * BigInt(requested.qty);
+        const menuAmountCents = requested.isComplimentary ? BigInt(0) : decimalToCents(menu.price) * BigInt(requested.qty);
         orderTotalCents += menuAmountCents;
         const configured = componentsByMenu.get(menu.menuId) ?? [];
         if (configured.some(component => component.active !== 1)) throw new OrderValidationError("사용할 수 없는 구성 메뉴가 포함되어 있습니다.");
@@ -93,7 +93,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
           if (!Number.isSafeInteger(qty) || qty < 0 || qty > 1_000_000) throw new OrderValidationError("구성 메뉴 수량을 확인해 주세요.");
           return { ...component, qty };
         });
-        return { menu, qty: requested.qty, menuAmount: centsToDecimal(menuAmountCents), components };
+        return { menu, qty: requested.qty, isComplimentary: requested.isComplimentary, menuAmount: centsToDecimal(menuAmountCents), components };
       });
 
       const totalAmount = centsToDecimal(orderTotalCents);
@@ -110,7 +110,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       });
       const orderId = Number(orderInsert.insertId);
       for (const snapshot of snapshots) {
-        const [parent] = await tx.insert(orderItems).values({ orderId, menuId: snapshot.menu.menuId, itemName: snapshot.menu.posName, qty: snapshot.qty, unitPrice: snapshot.menu.price, discountAmount: "0.00", totalAmount: snapshot.menuAmount, prepStationId: snapshot.menu.prepStationId, itemType: "NORMAL", status: "ORDERED", printOnReceipt: 1 });
+        const [parent] = await tx.insert(orderItems).values({ orderId, menuId: snapshot.menu.menuId, itemName: snapshot.menu.posName, qty: snapshot.qty, unitPrice: snapshot.menu.price, discountAmount: "0.00", totalAmount: snapshot.menuAmount, prepStationId: snapshot.menu.prepStationId, itemType: snapshot.isComplimentary ? "SERVICE" : "NORMAL", status: "ORDERED", printOnReceipt: 1 });
         const parentOrderItemId = Number(parent.insertId);
         await syncRiceOrderItemStock(tx, parentOrderItemId, snapshot.menu.menuId, snapshot.qty, currentStaff?.staffId ?? null, true);
         for (const component of snapshot.components) {

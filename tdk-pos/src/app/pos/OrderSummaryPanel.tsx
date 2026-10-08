@@ -93,6 +93,7 @@ export type PendingCartItem = {
   menuName: string;
   unitPrice: number;
   qty: number;
+  isComplimentary?: boolean;
   components?: PendingCartComponent[];
   options?: Array<{
     modifierGroupId: number;
@@ -101,6 +102,10 @@ export type PendingCartItem = {
     priceDelta: number;
     qty: number;
   }>;
+};
+export const pendingCartItemKey = (item: PendingCartItem) => {
+  const componentSignature = (item.components ?? []).map(component => `${component.menuComponentId}:${component.touched ? `manual-${component.qty}` : "default"}`).join(",");
+  return `${item.menuId}:${item.unitPrice}:${item.isComplimentary ? "complimentary" : "paid"}:${JSON.stringify(item.options ?? [])}:${componentSignature}`;
 };
 const styles: Record<Tab, { bg: string; color: string; tint: string }> = {
   pending: { bg: "bg-[#DC2626]", color: "#DC2626", tint: "#FEF2F2" },
@@ -166,6 +171,7 @@ export default function OrderSummaryPanel({
   onBlockingUiChange,
   onCancellationSuccess,
   onPaymentCompleted,
+  onCashPaymentRegistered,
   party,
   physicalSessionIds,
   discounts,
@@ -188,7 +194,8 @@ export default function OrderSummaryPanel({
   selectionVersion: number;
   onBlockingUiChange: (open: boolean) => void;
   onCancellationSuccess: () => void;
-  onPaymentCompleted: (hasCashPayment: boolean) => void;
+  onPaymentCompleted: () => void;
+  onCashPaymentRegistered: () => void;
   party: {
     sessionIds: number[];
     tableNos: string[];
@@ -226,7 +233,7 @@ export default function OrderSummaryPanel({
           value.qty === item.effectiveQty,
       ),
     );
-  const amount = chosen.reduce((s, x) => s + x.qty * Number(x.i.unitPrice), 0);
+  const amount = chosen.reduce((s, x) => s + (x.i.itemType === "SERVICE" ? 0 : x.qty * Number(x.i.unitPrice)), 0);
   void isFullOrderCancellation;
   const [now, setNow] = useState(0);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -368,7 +375,7 @@ export default function OrderSummaryPanel({
           selectable = c.mode && i.effectiveQty > 0,
           selectedForCancellation = selectable && d.checked,
           fullyCancelled = i.effectiveQty === 0,
-          effectiveAmount = Number(i.unitPrice) * i.effectiveQty;
+          effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
         return (
           <div
             className={`mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
@@ -380,7 +387,7 @@ export default function OrderSummaryPanel({
                 className={`truncate font-medium ${selectedForCancellation ? "text-red-700 line-through" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
               >
                 {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
-                {i.itemName}
+                {i.itemName}{i.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
               </span>
               <span
                 className={`text-right ${fullyCancelled ? "text-slate-400" : "text-slate-500"}`}
@@ -446,7 +453,7 @@ export default function OrderSummaryPanel({
   ));
   const renderSummaryRow = (item: SummaryRow, component = false) => (
     <div className={`grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm ${component ? "pl-3 text-slate-600" : ""}`} key={item.rowKey}>
-      <span className="truncate font-medium">{component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}{item.name}</span>
+      <span className="truncate font-medium">{component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}{item.name}{item.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
       <span className="text-right text-slate-500">
         {new Intl.NumberFormat("ko-KR").format(item.unitPrice)}
       </span>
@@ -461,12 +468,12 @@ export default function OrderSummaryPanel({
     </div>
   ));
   const pendingRows = cart.map((i) => (
-    <div className="space-y-1" key={`${i.menuId}:${i.unitPrice}:${JSON.stringify(i.options ?? [])}`}>
+    <div className="space-y-1" key={pendingCartItemKey(i)}>
       <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
-        <span className="truncate font-medium">{i.menuName}</span>
+        <span className="truncate font-medium">{i.menuName}{i.isComplimentary && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
         <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.unitPrice)}</span>
         <span className="grid grid-cols-3 text-center"><button disabled={submitting} onClick={() => adjustCartItem(i, -1)} type="button">−</button><b>{i.qty}</b><button disabled={submitting} onClick={() => adjustCartItem(i, 1)} type="button">+</button></span>
-        <b className="text-right">{money(i.unitPrice * i.qty)}</b>
+        <b className="text-right">{money(i.isComplimentary ? 0 : i.unitPrice * i.qty)}</b>
       </div>
       {(i.components ?? []).map(component => <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 pl-3 text-sm text-slate-600" key={component.menuComponentId}>
         <span className="truncate"><span aria-hidden="true" className="mr-1 text-slate-400">└</span>{component.itemName}</span><span className="text-right">{new Intl.NumberFormat("ko-KR").format(component.unitPrice)}</span>
@@ -489,7 +496,7 @@ export default function OrderSummaryPanel({
       .filter((discount) => physicalSessionIds.includes(discount.sessionId))
       .reduce((sum, discount) => sum + Number(discount.discountAmount), 0);
   const partyTotal = partyRows.reduce(
-    (sum, item) => sum + item.unitPrice * item.qty + item.components.reduce((childSum, child) => childSum + child.unitPrice * child.qty, 0),
+    (sum, item) => sum + item.total + item.components.reduce((childSum, child) => childSum + child.total, 0),
     0,
   );
   const partyTableNos = party?.tableNos ?? [];
@@ -584,7 +591,7 @@ export default function OrderSummaryPanel({
                     {new Intl.NumberFormat("ko-KR").format(row.unitPrice)}
                   </span>
                   <span className="text-center text-slate-500">× {row.qty}</span>
-                  <b className="text-right">{money(row.unitPrice * row.qty)}</b>
+                  <b className="text-right">{money(row.total)}</b>
                 </div>
               ))}
             </div>
@@ -859,10 +866,11 @@ export default function OrderSummaryPanel({
             setPaymentOpen(false);
             onCancellationSuccess();
           }}
-          completed={(hasCashPayment) => {
+          completed={() => {
             setPaymentOpen(false);
-            onPaymentCompleted(hasCashPayment);
+            onPaymentCompleted();
           }}
+          onCashPaymentRegistered={onCashPaymentRegistered}
           tableId={selected.tableId}
           tableNo={selected.tableNo}
         />

@@ -70,7 +70,7 @@ export default async function PosPage() {
   items.forEach((item) => {
     const sessionId = orderSessionById.get(item.orderId);
     const effectiveQty = orderStatusById.get(item.orderId) === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, item.qty - (cancellationsByItem.get(item.orderItemId) ?? []).reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0));
-    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + Number(item.unitPrice) * effectiveQty);
+    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + (item.itemType === "SERVICE" ? 0 : Number(item.unitPrice) * effectiveQty));
   });
   const prepaidBySessionId = new Map<number, number>();
   paymentAllocations.forEach(allocation => prepaidBySessionId.set(allocation.sessionId, (prepaidBySessionId.get(allocation.sessionId) ?? 0) + Number(allocation.amount)));

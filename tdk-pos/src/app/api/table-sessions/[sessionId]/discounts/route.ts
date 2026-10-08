@@ -52,12 +52,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       const physicalSessionIds = [...new Set([sessionId, ...merges.map(merge => merge.sourceSessionId)])];
       const sessionOrders = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, physicalSessionIds));
       const orderIds = sessionOrders.map(order => order.orderId);
-      const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty, unitPrice: orderItems.unitPrice }).from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];
+      const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType }).from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];
       const itemIds = rows.map(item => item.orderItemId);
       const cancellations = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)) : [];
       const cancelledByItem = new Map<number, number>();
       cancellations.forEach(cancellation => cancelledByItem.set(cancellation.orderItemId, (cancelledByItem.get(cancellation.orderItemId) ?? 0) + cancellation.cancelledQty));
-      const subtotal = rows.reduce((sum, item) => sum + Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0)) * Number(item.unitPrice), 0);
+      const subtotal = rows.reduce((sum, item) => sum + (item.itemType === "SERVICE" ? 0 : Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0)) * Number(item.unitPrice)), 0);
       if (subtotal <= 0) throw new DiscountError("할인할 유효 주문금액이 없습니다.", 409);
       const presetIds = [...new Set(requestedDiscounts.flatMap(discount => { const presetId = asWholeWon(discount.presetId); return Number.isInteger(presetId) && presetId > 0 ? [presetId] : []; }))];
       const presets = presetIds.length ? await tx.select({ ruleId: discountRules.discountRuleId, slot: discountRules.posPresetSlot, title: discountRules.discountName, type: discountRules.discountType, value: discountRules.discountValue, isActive: discountRules.isActive }).from(discountRules).where(inArray(discountRules.discountRuleId, presetIds)) : [];

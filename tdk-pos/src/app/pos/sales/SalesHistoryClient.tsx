@@ -468,7 +468,7 @@ function SaleDetailDialog({ sale, close, print, printing, printSuccess }: { sale
           {itemTotalMismatch && <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-5 py-3 font-bold text-red-700">연결된 주문내역 합계 {formatMoney(itemTotal)}원과 저장된 주문금액 {formatMoney(sale.subtotalAmount)}원이 다릅니다. 거래 항목 연결을 확인해 주세요.</p>}
           <div className="mt-6 grid grid-cols-2 gap-6">
             <Section title="주문내역">
-              {sale.items.map((item) => <div className="grid grid-cols-[minmax(0,1fr)_90px_60px_100px] gap-2 border-b border-slate-100 py-3" key={item.orderItemId}><span className="truncate">{item.itemName}</span><span className="text-right">{formatMoney(item.unitPrice)}</span><span className="text-right">×{item.qty}</span><b className="text-right">{formatMoney(item.amount)}</b></div>)}
+              {sale.items.map((item) => <div className="grid grid-cols-[minmax(0,1fr)_90px_60px_100px] gap-2 border-b border-slate-100 py-3" key={item.orderItemId}><span className="truncate">{item.itemName}{item.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span><span className="text-right">{formatMoney(item.itemType === "SERVICE" ? item.originalUnitPrice ?? item.unitPrice : item.unitPrice)}</span><span className="text-right">×{item.qty}</span><b className="text-right">{formatMoney(item.amount)}</b></div>)}
               {!sale.items.length && <Empty />}
             </Section>
             <Section title="결제내역">

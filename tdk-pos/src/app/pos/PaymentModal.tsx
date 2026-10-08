@@ -83,11 +83,13 @@ export default function PaymentModal({
   tableNo,
   close,
   completed,
+  onCashPaymentRegistered,
 }: {
   tableId: number;
   tableNo: string;
   close: () => void;
-  completed: (hasCashPayment: boolean) => void;
+  completed: () => void;
+  onCashPaymentRegistered: () => void;
 }) {
   const [state, setState] = useState<State | null>(null);
   const [input, setInput] = useState("");
@@ -131,7 +133,7 @@ export default function PaymentModal({
         : `${current}${key}`.replace(/^0+(?=\d)/, "").slice(0, 9),
     );
   };
-  const request = async (body: Record<string, unknown>): Promise<{ ok: boolean; message?: string }> => {
+  const request = async (body: Record<string, unknown>, afterRegistered?: () => void): Promise<{ ok: boolean; message?: string }> => {
     if (requestInFlight.current) return { ok: false };
     requestInFlight.current = true;
     setBusy(true);
@@ -161,8 +163,11 @@ export default function PaymentModal({
         return { ok: false, message };
       }
       setInput("");
+      if (afterRegistered || (body.action === "PAY_CUSTOMER" && (result.change ?? 0) > 0)) {
+        onCashPaymentRegistered();
+      }
       if (result.completed) {
-        completed(Boolean(state?.payments.some((payment) => payment.methodCode === "CASH")));
+        completed();
         return { ok: true };
       }
       if (result.state) {
@@ -195,7 +200,7 @@ export default function PaymentModal({
       return;
     }
     const body = { ...overpaymentPrompt.requestBody, prepaidOverpaymentConfirmed: confirmed };
-    await request(body);
+    await request(body, overpaymentPrompt.kind === "CASH" ? onCashPaymentRegistered : undefined);
     setOverpaymentPrompt(null);
   };
   const submitOtherPayment = (paymentMethodId: number, inputValue: number, tendered: number, methodName: string, cashChangeEnabled: boolean, quantityMode: boolean) => {
@@ -208,7 +213,7 @@ export default function PaymentModal({
       setOtherOpen(false);
       return Promise.resolve({ ok: true });
     }
-    return request(requestBody);
+    return request(requestBody, cashChangeEnabled ? onCashPaymentRegistered : undefined);
   };
   const stageCustomerPayment = (customerId: number, name: string, amount: number, coupon?: { quantity: number }): boolean => {
     setStagedCustomerPayment({ customerId, name, amount, requestKey: newCustomerPaymentRequestKey(), couponQuantity: coupon?.quantity ?? null });
@@ -245,7 +250,10 @@ export default function PaymentModal({
       setOverpaymentPrompt({ kind: "CASH", methodLabel: "현금", amount, due: state.remaining, excess: amount - state.remaining, requestBody: { action: "PAY", methodCode, amount, customerId: selectedCustomer.customerId, otherLabel } });
       return;
     }
-    void request({ action: "PAY", methodCode, amount: amount || undefined, customerId: selectedCustomer?.customerId, otherLabel });
+    void request(
+      { action: "PAY", methodCode, amount: amount || undefined, customerId: selectedCustomer?.customerId, otherLabel },
+      methodCode === "CASH" ? onCashPaymentRegistered : undefined,
+    );
   };
   const complete = () => {
     if (displayOverpayment > 0) {

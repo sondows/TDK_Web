@@ -39,14 +39,14 @@ async function resolveScope(tableId: number): Promise<Scope> {
       .from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
     if (scopeOrders.some(order => order.status === "COMPLETED")) throw new Error("결제 완료 주문이 포함되어 테이블 취소를 처리할 수 없습니다.");
     const orderIds = scopeOrders.map(order => order.orderId);
-    const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty, unitPrice: orderItems.unitPrice })
+    const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType })
       .from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];
     const itemIds = scopeItems.map(item => item.orderItemId);
     const cancellationRows = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty })
       .from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)) : [];
     const cancelledByItem = new Map<number, number>();
     cancellationRows.forEach(row => cancelledByItem.set(row.orderItemId, (cancelledByItem.get(row.orderItemId) ?? 0) + row.cancelledQty));
-    const total = scopeItems.reduce((sum, item) => sum + Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0)) * Number(item.unitPrice), 0);
+    const total = scopeItems.reduce((sum, item) => sum + (item.itemType === "SERVICE" ? 0 : Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0)) * Number(item.unitPrice)), 0);
     return { sessionIds, tableNos, total, mergeIds: merges.map(merge => merge.mergeId) };
   };
   return db.transaction(work);
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
         .from(orders).where(inArray(orders.sessionId, sessionIds)).for("update");
       if (scopeOrders.some(order => order.status === "COMPLETED")) throw new Error("결제 완료 주문이 포함되어 테이블 취소를 처리할 수 없습니다.");
       const orderIds = scopeOrders.map(order => order.orderId);
-      const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`, unitPrice: orderItems.unitPrice })
+      const scopeItems = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType })
         .from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
       const itemIds = scopeItems.map(item => item.orderItemId);
       const cancellations = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty })
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
       for (const item of scopeItems) {
         const effectiveQty = Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0));
         if (!effectiveQty) continue;
-        await tx.insert(orderItemCancellations).values({ orderItemId: item.orderItemId, cancelledQty: effectiveQty, cancelledAmount: decimal(cents(item.unitPrice) * effectiveQty), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId: checker.staffId });
+        await tx.insert(orderItemCancellations).values({ orderItemId: item.orderItemId, cancelledQty: effectiveQty, cancelledAmount: decimal(item.itemType === "SERVICE" ? 0 : cents(item.unitPrice) * effectiveQty), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId: checker.staffId });
         await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId: checker.staffId }).where(eq(orderItems.orderItemId, item.orderItemId));
         await syncRiceOrderItemStock(tx, item.orderItemId, item.menuId, 0, checker.staffId);
       }

@@ -1065,46 +1065,7 @@ main.h-dvh > div > section:nth-child(3) {
   border-radius: 9999px;
 }
 
-/* QuantityModal quick quantities: mirrors the selected TableShape emerald outline. */
-section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"] {
-  border: 1px solid #94a3b8;
-  background: #ffffff;
-  color: #334155;
-  box-shadow:
-    0 0 0 2px #34d399,
-    0 0 8px rgba(52, 211, 153, 0.32),
-    inset 0 0 5px rgba(52, 211, 153, 0.09);
-}
-
-section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"]:hover,
-section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"]:active {
-  background: #ffffff;
-  box-shadow:
-    0 0 0 2px #34d399,
-    0 0 8px rgba(52, 211, 153, 0.45),
-    inset 0 0 5px rgba(52, 211, 153, 0.1);
-}
-
-section[aria-labelledby="quantity-modal-title"] button[class*="min-h-[4.75rem]"].bg-blue-600 {
-  border-color: #cbd5e1;
-  background: #ffffff;
-  color: #1e293b;
-  box-shadow:
-    0 0 0 2px #34d399,
-    0 0 8px rgba(52, 211, 153, 0.35),
-    inset 0 0 5px rgba(52, 211, 153, 0.09);
-}
-
-/* Direct-input mode intentionally de-emphasizes the quick quantity shortcuts. */
-section[aria-labelledby="quantity-modal-title"][data-expanded="true"] button[class*="min-h-[4.75rem]"] {
-  border-color: #cbd5e1;
-  outline: 0;
-  background: #ffffff;
-  color: #334155;
-  box-shadow: none;
-}
-
-/* Keep the menu title beside the fixed-size back button; the price stays at the right. */
+/* Keep the menu title and price together after the fixed-size back button. */
 section[aria-labelledby="quantity-modal-title"] > header > div:first-child {
   flex: 1 1 0;
   min-width: 0;
@@ -1117,7 +1078,7 @@ section[aria-labelledby="quantity-modal-title"] > header > div:first-child > but
 }
 
 section[aria-labelledby="quantity-modal-title"] > header > div:first-child > h2 {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 

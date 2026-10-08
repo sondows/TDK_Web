@@ -41,6 +41,7 @@ export async function POST(request: Request) {
         sessionId: orders.sessionId,
         qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`,
         unitPrice: orderItems.unitPrice,
+        itemType: orderItems.itemType,
         orderedAt: orderItems.orderedAt,
         orderStatus: orders.status,
         sessionStatus: tableSessions.status,
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
         sessionId: orders.sessionId,
         qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`,
         unitPrice: orderItems.unitPrice,
+        itemType: orderItems.itemType,
         orderedAt: orderItems.orderedAt,
         orderStatus: orders.status,
         sessionStatus: tableSessions.status,
@@ -105,7 +107,7 @@ export async function POST(request: Request) {
         if (!row) throw new Error("주문 항목을 찾을 수 없습니다.");
         const remaining = row.qty - (cancelledByItem.get(row.orderItemId) ?? 0);
         if (requestItem.qty > remaining) throw new Error("취소 가능 수량을 초과했습니다.");
-        const amount = cents(row.unitPrice) * requestItem.qty;
+        const amount = row.itemType === "SERVICE" ? 0 : cents(row.unitPrice) * requestItem.qty;
         await tx.insert(orderItemCancellations).values({ orderItemId: row.orderItemId, cancelledQty: requestItem.qty, cancelledAmount: decimal(amount), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId });
         if (requestItem.qty === remaining) await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId }).where(eq(orderItems.orderItemId, row.orderItemId));
         await syncRiceOrderItemStock(tx, row.orderItemId, row.menuId, remaining - requestItem.qty, cancelledByStaffId);

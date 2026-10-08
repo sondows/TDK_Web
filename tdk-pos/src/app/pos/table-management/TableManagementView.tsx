@@ -44,7 +44,7 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   const sessionIds = openSessions.map(session => session.sessionId);
   const sessionOrders = sessionIds.length ? await db.select({ orderId: orders.orderId, sessionId: orders.sessionId, status: orders.status }).from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
   const orderIds = sessionOrders.map(order => order.orderId);
-  const items = orderIds.length ? await db.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, unitPrice: orderItems.unitPrice, qty: orderItems.qty, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];
+  const items = orderIds.length ? await db.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, qty: orderItems.qty, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];
   const itemIds = items.map(item => item.orderItemId);
   const cancellations = itemIds.length ? await db.select({ orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)) : [];
   const cancelledByItem = new Map<number, number>();
@@ -55,7 +55,7 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   items.forEach(item => {
     const sessionId = sessionByOrder.get(item.orderId);
     const effectiveQty = item.status === "CANCELLED" || orderStatusById.get(item.orderId) === "CANCELLED" ? 0 : Math.max(0, item.qty - (cancelledByItem.get(item.orderItemId) ?? 0));
-    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + Number(item.unitPrice) * effectiveQty);
+    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + (item.itemType === "SERVICE" ? 0 : Number(item.unitPrice)) * effectiveQty);
   });
   const discounts = sessionIds.length ? await db.select({ sessionId: tableSessionDiscounts.sessionId, amount: tableSessionDiscounts.discountAmount }).from(tableSessionDiscounts).where(inArray(tableSessionDiscounts.sessionId, sessionIds)) : [];
   const discountBySessionId = new Map<number, number>();

@@ -91,17 +91,17 @@ async function currentBill(tx: Parameters<Parameters<typeof db.transaction>[0]>[
   const scope = await billScope(tx, tableId);
   const sessionOrders = await tx.select({ orderId: orders.orderId, sessionId: orders.sessionId, status: orders.status }).from(orders).where(inArray(orders.sessionId, scope.sessionIds)).for("update");
   const orderIds = sessionOrders.filter(order => order.status !== "CANCELLED").map(order => order.orderId);
-  const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
+  const rows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, qty: orderItems.qty, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
   const itemIds = rows.map(row => row.orderItemId);
   const cancelled = itemIds.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)) : [];
   const cancelledByItem = new Map<number, number>(); cancelled.forEach(row => cancelledByItem.set(row.orderItemId, (cancelledByItem.get(row.orderItemId) ?? 0) + row.qty));
   const orderSessionById = new Map(sessionOrders.map(order => [order.orderId, order.sessionId]));
-  const items = rows.map(row => ({ ...row, sessionId: orderSessionById.get(row.orderId)!, effectiveQty: row.status === "CANCELLED" ? 0 : Math.max(0, row.qty - (cancelledByItem.get(row.orderItemId) ?? 0)) })).filter(row => row.effectiveQty > 0);
-  const gross = won(items.reduce((sum, row) => sum + row.effectiveQty * Number(row.unitPrice), 0));
+  const items = rows.map(row => ({ ...row, sessionId: orderSessionById.get(row.orderId)!, checkoutUnitPrice: row.itemType === "SERVICE" ? "0.00" : row.unitPrice, effectiveQty: row.status === "CANCELLED" ? 0 : Math.max(0, row.qty - (cancelledByItem.get(row.orderItemId) ?? 0)) })).filter(row => row.effectiveQty > 0);
+  const gross = won(items.reduce((sum, row) => sum + row.effectiveQty * Number(row.checkoutUnitPrice), 0));
   const discountRows = scope.sessionIds.length ? await tx.select({ sessionId: tableSessionDiscounts.sessionId, label: tableSessionDiscounts.label, amount: tableSessionDiscounts.discountAmount, type: tableSessionDiscounts.discountType }).from(tableSessionDiscounts).where(inArray(tableSessionDiscounts.sessionId, scope.sessionIds)) : [];
   const discounts = discountRows.map(row => ({ ...row, amount: won(Number(row.amount)) }));
   const grossBySessionId = new Map<number, number>();
-  items.forEach(item => grossBySessionId.set(item.sessionId, (grossBySessionId.get(item.sessionId) ?? 0) + item.effectiveQty * Number(item.unitPrice)));
+  items.forEach(item => grossBySessionId.set(item.sessionId, (grossBySessionId.get(item.sessionId) ?? 0) + item.effectiveQty * Number(item.checkoutUnitPrice)));
   const discountBySessionId = new Map<number, number>();
   discounts.forEach(discount => discountBySessionId.set(discount.sessionId, (discountBySessionId.get(discount.sessionId) ?? 0) + discount.amount));
   const financials = summarizeSessionFinancials({ sessionIds: scope.sessionIds, grossBySessionId, discountBySessionId, prepaidBySessionId: new Map() });
@@ -356,13 +356,13 @@ export async function POST(request: Request) {
         if (!checkoutId) {
           const [created] = await tx.insert(checkouts).values({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: "0.00", status: "OPEN", createdByStaffId: processedByStaffId }).$returningId();
           checkoutId = created.checkoutId;
-          if (bill.items.length) await tx.insert(checkoutItems).values(bill.items.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.unitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.unitPrice)) })));
+          if (bill.items.length) await tx.insert(checkoutItems).values(bill.items.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.checkoutUnitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.checkoutUnitPrice)) })));
         } else {
           const linkedItems = await tx.select({ orderItemId: checkoutItems.orderItemId })
             .from(checkoutItems).where(eq(checkoutItems.checkoutId, checkoutId)).for("update");
           const linkedIds = new Set(linkedItems.map(item => item.orderItemId));
           const addedItems = bill.items.filter(item => !linkedIds.has(item.orderItemId));
-          if (addedItems.length) await tx.insert(checkoutItems).values(addedItems.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.unitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.unitPrice)) })));
+          if (addedItems.length) await tx.insert(checkoutItems).values(addedItems.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.checkoutUnitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.checkoutUnitPrice)) })));
         }
         const tableDescription = bill.tableNos.length === 1 ? `${bill.tableNos[0]}번 테이블 식사` : `${bill.tableNos.join(", ")}번 테이블 식사`;
         requestPhase = "insert customer payment and ledger";
@@ -463,7 +463,7 @@ export async function POST(request: Request) {
       if (!checkoutId) {
         const [created] = await tx.insert(checkouts).values({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: "0.00", status: "OPEN", createdByStaffId: processedByStaffId }).$returningId();
         checkoutId = created.checkoutId;
-        if (bill.items.length) await tx.insert(checkoutItems).values(bill.items.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.unitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.unitPrice)) })));
+        if (bill.items.length) await tx.insert(checkoutItems).values(bill.items.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.checkoutUnitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.checkoutUnitPrice)) })));
       } else {
         // A new order can be added after a partial payment. Keep its receipt item
         // linked to the existing checkout when the bill amount is updated below.
@@ -471,7 +471,7 @@ export async function POST(request: Request) {
           .from(checkoutItems).where(eq(checkoutItems.checkoutId, checkoutId)).for("update");
         const linkedIds = new Set(linkedItems.map(item => item.orderItemId));
         const addedItems = bill.items.filter(item => !linkedIds.has(item.orderItemId));
-        if (addedItems.length) await tx.insert(checkoutItems).values(addedItems.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.unitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.unitPrice)) })));
+        if (addedItems.length) await tx.insert(checkoutItems).values(addedItems.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.checkoutUnitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.checkoutUnitPrice)) })));
       }
       const change = !isOther && method.type === "CASH" && prepaidCredit === 0 ? Math.max(0, tendered - applied) : 0;
       const label = body.otherLabel === "식권" ? "식권" : undefined;

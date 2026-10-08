@@ -16,6 +16,7 @@ export type SummaryRow = {
   qty: number;
   total: number;
   unitPrice: number;
+  itemType?: "NORMAL" | "COMPONENT" | "SERVICE";
   components: SummaryRow[];
   optionLabel?: string;
 };
@@ -128,6 +129,7 @@ export function buildPartyOrderRows(
       qty: 0,
       total: 0,
       unitPrice,
+      itemType: parent.itemType,
       components: [],
       optionLabel,
     };
@@ -140,7 +142,7 @@ export function buildPartyOrderRows(
       row.orderSequence = { orderId: parent.orderId, orderItemId: parent.orderItemId };
     }
     row.qty += parent.effectiveQty;
-    row.total += unitPrice * parent.effectiveQty;
+    row.total += (parent.itemType === "SERVICE" ? 0 : unitPrice) * parent.effectiveQty;
     for (const { item, qty } of childGroups.values()) {
       const discountPerUnit = Number(item.discountAmount) / Math.max(1, item.effectiveQty);
       const childKey = `component:${item.menuId}:${Number(item.unitPrice)}:${discountPerUnit}`;
@@ -187,10 +189,10 @@ export function buildOrderSummaryRows(items: SummarySourceItem[]): SummaryRow[] 
       ? `parent:${item.orderItemId}`
       : `${item.itemType.toLowerCase()}:${item.menuId}:${unitPrice}`;
     const sequence = { orderId: item.orderId, orderItemId: item.orderItemId };
-    const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, components: [] };
+    const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, itemType: item.itemType, components: [] };
     if (compareOrderSequence(sequence, row.orderSequence) < 0) row.orderSequence = sequence;
     row.qty += item.effectiveQty;
-    row.total += unitPrice * item.effectiveQty;
+    row.total += (item.itemType === "SERVICE" ? 0 : unitPrice) * item.effectiveQty;
     rows.set(rowKey, row);
     parentRowKeys.set(item.orderItemId, rowKey);
   }

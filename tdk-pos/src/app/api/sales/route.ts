@@ -331,6 +331,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     orderItemId: checkoutItems.orderItemId,
     itemName: orderItems.itemName,
     itemType: orderItems.itemType,
+    originalUnitPrice: orderItems.unitPrice,
     printOnReceipt: orderItems.printOnReceipt,
     unitPrice: checkoutItems.unitPrice,
     qty: checkoutItems.qty,
@@ -421,7 +422,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     discountAmount: won(checkout.discountAmount),
     totalAmount: won(checkout.totalAmount),
     approvedAmount: relevantPayments.filter((payment) => payment.status === "APPROVED").reduce((sum, payment) => sum + won(payment.appliedAmount), 0),
-    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, itemName: item.itemName, unitPrice: won(item.unitPrice), qty: item.qty, amount: won(item.amount), itemType: item.itemType, printOnReceipt: item.printOnReceipt === 1 })),
+    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, itemName: item.itemName, unitPrice: won(item.unitPrice), originalUnitPrice: won(item.originalUnitPrice), qty: item.qty, amount: won(item.amount), itemType: item.itemType, printOnReceipt: item.printOnReceipt === 1 })),
     discounts: discountRows
       .filter(discount => !checkout.completedAt || discount.createdAt <= checkout.completedAt)
       .map(discount => ({ label: discount.label, amount: won(discount.amount) })),

@@ -38,6 +38,7 @@ export type SaleDetail = {
     orderItemId: number;
     itemName: string;
     unitPrice: number;
+    originalUnitPrice?: number;
     qty: number;
     amount: number;
     itemType: "NORMAL" | "COMPONENT" | "SERVICE";

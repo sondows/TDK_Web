@@ -1,6 +1,6 @@
 type Session = { sessionId: number; groupId: number | null };
 type Merge = { sourceSessionId: number; destinationSessionId: number };
-type Item = { orderItemId: number; sessionId: number; qty: number; unitPrice: string; status: string };
+type Item = { orderItemId: number; sessionId: number; qty: number; unitPrice: string; itemType: "NORMAL" | "COMPONENT" | "SERVICE"; status: string };
 type Cancellation = { orderItemId: number; cancelledQty: number };
 type Discount = { sessionId: number; discountAmount: string };
 type CheckoutLink = { checkoutId: number; orderItemId: number; status: string };
@@ -46,7 +46,7 @@ export function calculatePendingSales(input: {
     if (!effectiveQty) continue;
     const key = root(item.sessionId);
     rootByItem.set(item.orderItemId, key);
-    grossByRoot.set(key, (grossByRoot.get(key) ?? 0) + effectiveQty * Number(item.unitPrice));
+    grossByRoot.set(key, (grossByRoot.get(key) ?? 0) + (item.itemType === "SERVICE" ? 0 : effectiveQty * Number(item.unitPrice)));
   }
   const discountsByRoot = new Map<number, number>();
   for (const row of input.discounts) {

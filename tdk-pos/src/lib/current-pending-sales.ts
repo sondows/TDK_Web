@@ -15,7 +15,7 @@ export async function loadCurrentPendingSales() {
       .from(tableSessionMerges)
       .where(and(eq(tableSessionMerges.status, "ACTIVE"), inArray(tableSessionMerges.sourceSessionId, sessionIds)));
     const items = await tx.select({ orderItemId: orderItems.orderItemId, sessionId: orders.sessionId,
-      qty: orderItems.qty, unitPrice: orderItems.unitPrice, status: orderItems.status })
+      qty: orderItems.qty, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, status: orderItems.status })
       .from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId))
       .where(and(inArray(orders.sessionId, sessionIds), ne(orders.status, "CANCELLED")));
     const discounts = await tx.select({ sessionId: tableSessionDiscounts.sessionId, discountAmount: tableSessionDiscounts.discountAmount })

@@ -119,7 +119,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         if (!group) throw new CopyValidationError("일행 정보가 변경되었습니다. 다시 선택해 주세요.");
       }
 
-      const totalCents = effectiveItems.reduce((sum, item) => sum + cents(item.unitPrice) * BigInt(item.effectiveQty), BigInt(0));
+      const totalCents = effectiveItems.reduce((sum, item) => sum + (item.itemType === "SERVICE" ? BigInt(0) : cents(item.unitPrice) * BigInt(item.effectiveQty)), BigInt(0));
       const totalAmount = decimal(totalCents);
       const tableNoById = new Map(destinationRows.map(table => [table.tableId, table.tableNo]));
 
@@ -149,7 +149,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         for (const item of effectiveItems) {
           const copiedParentId = item.parentOrderItemId === null ? null : copiedItemIds.get(item.parentOrderItemId);
           if (item.parentOrderItemId !== null && copiedParentId === undefined) continue;
-          const itemTotal = decimal(cents(item.unitPrice) * BigInt(item.effectiveQty));
+          const itemTotal = decimal(item.itemType === "SERVICE" ? BigInt(0) : cents(item.unitPrice) * BigInt(item.effectiveQty));
           const [itemInsert] = await tx.insert(orderItems).values({
             orderId: destinationOrderId,
             parentOrderItemId: copiedParentId ?? null,
