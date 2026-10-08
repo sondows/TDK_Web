@@ -789,16 +789,24 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: minmax(104px, auto);
   align-content: start;
-  column-gap: var(--menu-card-column-gap);
-  row-gap: 12px;
+  row-gap: 14px;
   overflow-y: auto;
+  scroll-snap-type: y mandatory;
   touch-action: pan-y;
   padding-inline: 4px;
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.pos-menu-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(104px, auto);
+  column-gap: var(--menu-card-column-gap);
+  scroll-snap-align: start;
 }
 
 .pos-menu-list::-webkit-scrollbar {
@@ -987,6 +995,34 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   min-height: 0;
   height: 100%;
   flex-direction: column;
+}
+
+[data-pos-shell] {
+  --pos-top-tab-height: 46px;
+  --pos-footer-row-height: 96px;
+}
+
+[data-pos-top-tabs] button,
+.pos-menu-header .pos-category-button {
+  display: flex;
+  height: var(--pos-top-tab-height);
+  align-items: center;
+  justify-content: center;
+}
+
+.pos-menu-header {
+  /* Match the middle panel's 10% first row; the menu panel also spans the footer row. */
+  display: flex;
+  height: calc((100% + 16px - var(--pos-footer-row-height) - 12px) * 0.1);
+  flex-shrink: 0;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.pos-menu-header .pos-category-underline {
+  height: 3px;
+  margin-top: 6px;
+  margin-bottom: 0;
 }
 
 /* The right menu panel occupies both the content and function-bar grid rows. */
@@ -1222,6 +1258,11 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
 
 /* Keep the 1280px POS unchanged; give wider touch screens a modest type step. */
 @media (min-width: 1600px) and (min-height: 900px) {
+  [data-pos-shell] {
+    --pos-top-tab-height: 53px;
+    --pos-footer-row-height: 104px;
+  }
+
   [data-pos-shell] > .pos-main-grid {
     grid-template-columns: minmax(280px, 2.295fr) minmax(350px, 4.705fr) minmax(280px, 3fr);
   }
