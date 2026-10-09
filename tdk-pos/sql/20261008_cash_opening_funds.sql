@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS cash_opening_funds (
+  cash_opening_fund_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  business_date DATE NOT NULL,
+  other_amount BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  count_50000 INT UNSIGNED NOT NULL DEFAULT 0,
+  count_10000 INT UNSIGNED NOT NULL DEFAULT 0,
+  count_5000 INT UNSIGNED NOT NULL DEFAULT 0,
+  count_1000 INT UNSIGNED NOT NULL DEFAULT 0,
+  count_500 INT UNSIGNED NOT NULL DEFAULT 0,
+  count_100 INT UNSIGNED NOT NULL DEFAULT 0,
+  total_amount BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  created_by_staff_id BIGINT UNSIGNED NOT NULL,
+  updated_by_staff_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cash_opening_fund_id),
+  UNIQUE KEY uq_cash_opening_funds_business_date (business_date),
+  KEY idx_cash_opening_funds_updated_by (updated_by_staff_id),
+  CONSTRAINT fk_cash_opening_funds_created_by FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id),
+  CONSTRAINT fk_cash_opening_funds_updated_by FOREIGN KEY (updated_by_staff_id) REFERENCES staff(staff_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

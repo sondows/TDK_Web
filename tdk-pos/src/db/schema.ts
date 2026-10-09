@@ -627,6 +627,23 @@ export const auditLogs = mysqlTable("audit_logs", {
   createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const cashOpeningFunds = mysqlTable("cash_opening_funds", {
+  cashOpeningFundId: bigint("cash_opening_fund_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  businessDate: date("business_date", { mode: "string" }).notNull(),
+  otherAmount: bigint("other_amount", { mode: "number", unsigned: true }).notNull().default(0),
+  count50000: int("count_50000", { unsigned: true }).notNull().default(0),
+  count10000: int("count_10000", { unsigned: true }).notNull().default(0),
+  count5000: int("count_5000", { unsigned: true }).notNull().default(0),
+  count1000: int("count_1000", { unsigned: true }).notNull().default(0),
+  count500: int("count_500", { unsigned: true }).notNull().default(0),
+  count100: int("count_100", { unsigned: true }).notNull().default(0),
+  totalAmount: bigint("total_amount", { mode: "number", unsigned: true }).notNull().default(0),
+  createdByStaffId: bigint("created_by_staff_id", { mode: "number", unsigned: true }).notNull().references(() => staff.staffId),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).notNull().references(() => staff.staffId),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_cash_opening_funds_business_date").on(table.businessDate)]);
+
 export const orderItemCancellations = mysqlTable("order_item_cancellations", {
   cancellationId: bigint("cancellation_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   orderItemId: bigint("order_item_id", { mode: "number", unsigned: true }).notNull().references(() => orderItems.orderItemId),

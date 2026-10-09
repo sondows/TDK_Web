@@ -69,7 +69,7 @@ export default function RiceStockModal({ close, onAdjusted }: { close: () => voi
 
   return <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/45 p-4">
     <section aria-modal="true" className="flex h-fit max-h-[calc(90dvh-2rem)] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
-      <PosSubHeader backLabel="공기밥 닫기" disabled={busy} onBack={close} title="공기밥" trailing={<div className="flex shrink-0 items-baseline gap-3"><span className={POS_HEADER_ACTION_CLASS_NAME}>현재 수량</span><strong className="text-2xl font-extrabold tabular-nums text-white">{snapshot ? formatQty(snapshot.currentQty) : "-"}</strong></div>} />
+      <PosSubHeader backIconSize={19} backVisualSize={39} backLabel="공기밥 닫기" disabled={busy} onBack={close} title="공기밥" trailing={<div className="flex shrink-0 items-baseline gap-3"><span className={POS_HEADER_ACTION_CLASS_NAME}>현재 수량</span><strong className="text-2xl font-extrabold tabular-nums text-white">{snapshot ? formatQty(snapshot.currentQty) : "-"}</strong></div>} />
       <div className="grid grid-cols-[minmax(0,7fr)_minmax(0,8fr)] items-start">
         <div className="flex min-h-0 min-w-0 flex-col border-r border-slate-200 p-5">
           <div className="grid shrink-0 grid-cols-[60px_repeat(3,minmax(0,1fr))] border-b border-slate-300 pb-3 text-center text-sm font-bold text-slate-600"><span>시간</span><span>조정전</span><span>조정</span><span>현재량</span></div>

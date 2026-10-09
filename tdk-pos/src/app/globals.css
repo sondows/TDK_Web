@@ -418,19 +418,18 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .pos-footer-scroll {
-  width: calc(100% - 3rem);
-  margin-inline: 1.5rem;
-  padding-inline: 0.75rem;
+  display: flex;
+  width: 100%;
 }
 
 .pos-footer-scroll > button {
   display: flex;
-  flex: 0 0 calc((100% - 2.25rem) / 7);
+  flex: 0 0 calc((100% - 2.625rem) / 8);
   min-width: 0;
   align-items: center;
   justify-content: center;
   white-space: nowrap;
-  font-size: 1.125rem;
+  font-size: clamp(0.875rem, 1.3vw, 1.125rem);
   font-weight: 700;
 }
 
@@ -439,7 +438,6 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 [data-pos-shell] .pos-footer-scroll > button.rice-stock-count {
-  padding-inline: 2px;
   font-size: clamp(2.5rem, 3.3vw, 3.75rem);
   font-weight: 800;
   line-height: 1;
@@ -1313,7 +1311,7 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
 
   [data-pos-shell] [data-pos-top-tabs] button { padding-block: 14px; }
   [data-pos-shell] .pos-function-button { height: 98px; font-size: 1rem; }
-  [data-pos-shell] .pos-footer-scroll > button { height: 80px; font-size: 1.25rem; }
+  [data-pos-shell] .pos-footer-scroll > button { height: 80px; font-size: clamp(0.875rem, 1.3vw, 1.25rem); }
   [data-pos-shell] .pos-category-button { padding: 0.5rem 0.625rem; font-size: 0.875rem; }
   [data-pos-shell] .pos-menu-list { --menu-card-column-gap: 20px; padding-inline: 8px; }
   [data-pos-shell] .pos-menu-copy strong { font-size: 1.125rem; }

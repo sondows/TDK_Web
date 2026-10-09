@@ -16,7 +16,7 @@ export default function PosFooterBar({ children }: { children: ReactNode }) {
     >
       {children}
     </div>
-    {hints.left && <span aria-hidden="true" className="pointer-events-none absolute inset-y-3 left-3 flex w-6 items-center justify-center bg-white/90 text-[26px] leading-none text-slate-600">⋮</span>}
-    {hints.right && <span aria-hidden="true" className="pointer-events-none absolute inset-y-3 right-3 flex w-6 items-center justify-center bg-white/90 text-[26px] leading-none text-slate-600">⋮</span>}
+    {hints.left && <span aria-hidden="true" className="pointer-events-none absolute inset-y-3 left-0 flex w-3 items-center justify-center bg-white/90 text-lg leading-none text-slate-600">⋮</span>}
+    {hints.right && <span aria-hidden="true" className="pointer-events-none absolute inset-y-3 right-0 flex w-3 items-center justify-center bg-white/90 text-lg leading-none text-slate-600">⋮</span>}
   </section>;
 }

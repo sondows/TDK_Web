@@ -176,7 +176,8 @@ app.MapPost("/system/shutdown", (ILogger<Program> logger) =>
 
     try
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo("shutdown.exe")
+        var shutdownExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "shutdown.exe");
+        var startInfo = new System.Diagnostics.ProcessStartInfo(shutdownExe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,

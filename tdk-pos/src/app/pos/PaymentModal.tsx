@@ -347,6 +347,7 @@ export default function PaymentModal({
     (sum, discount) => sum + discount.amount,
     0,
   );
+  const showOrderBreakdown = state.gross !== state.total;
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
@@ -360,18 +361,18 @@ export default function PaymentModal({
             <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4">
             <div className="rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-4 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
               <div className="space-y-2.5">
-                <div className={paymentSummaryRowStyle}>
+                {showOrderBreakdown && <div className={paymentSummaryRowStyle}>
                   <span className="text-[20px] font-normal">주문금액</span>
                   <b className="text-[20px] font-bold">{money(state.gross)}</b>
-                </div>
-                {discountAmount > 0 && (
+                </div>}
+                {showOrderBreakdown && discountAmount > 0 && (
                   <div className={`${paymentSummaryRowStyle} text-slate-900`}>
                     <span className="text-[20px] font-normal">할인금액</span>
                     <b className={`text-[20px] font-bold text-red-600`}>-{money(discountAmount)}</b>
                   </div>
                 )}
                 <div className={`${paymentSummaryRowStyle} gap-3 text-[20px] font-extrabold text-blue-700`}>
-                  <span className={`text-[20px] font-normal text-slate-900`}>결제금액</span>
+                  <span className="text-[20px] font-bold text-slate-900">결제금액</span>
                   <b className={`text-[20px] font-bold text-blue-700`}>{money(state.total)}</b>
                 </div>
               </div>
@@ -418,7 +419,7 @@ export default function PaymentModal({
               <div className="relative mt-7">
                 <div className="overflow-hidden rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
                   <div className={`${paymentInfoRowStyle} text-[20px] leading-7 font-extrabold ${displayOverpayment > 0 || displayRemaining > 0 ? "text-red-600" : "text-slate-900"}`}>
-                    <span className={`${paymentInfoSmallLabelStyle} text-slate-900`}>{displayOverpayment > 0 ? "초과결제" : "받을금액"}</span>
+                    <span className={`text-[20px] text-slate-900 ${displayOverpayment > 0 ? "font-normal" : "font-bold"}`}>{displayOverpayment > 0 ? "초과결제" : "받을금액"}</span>
                     <b className={paymentInfoSmallAmountStyle}>{money(displayOverpayment > 0 ? displayOverpayment : displayRemaining)}</b>
                   </div>
                 </div>
@@ -440,7 +441,7 @@ export default function PaymentModal({
             >결제 초기화</button>
           </section>
           <section className="flex min-h-0 flex-col px-4 pt-6 pb-4">
-            <NumericInputKeypad className="h-[395.25px]" disabled={busy} inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
+            <NumericInputKeypad className="h-[395.25px]" disabled={busy} inputEdgeToEdge inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
             {error && <p className="mt-2 text-center text-base font-bold text-red-600">{error}</p>}
             <div className="relative z-10 mt-4 w-[286.45px] max-w-full self-center bg-white">
               <div
