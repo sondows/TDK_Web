@@ -1,6 +1,8 @@
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\tdk-device-agent.exe
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\appsettings.Development.json
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\appsettings.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\deploy\appsettings.DEV.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\deploy\appsettings.POS.json
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.deps.json
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\tests\ReceiptRenderChecks\bin\Debug\net10.0\ReceiptRenderChecks.runtimeconfig.json
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\publish\tests\ReceiptRenderChecks\obj\Debug\net10.0\ReceiptRenderChecks.sourcelink.json

@@ -19,7 +19,7 @@ export default function PinKeypad({ digitDisabled, actionDisabled, largeKeys = f
         {digit}
       </button>
     ))}
-    <button className={`${keyClassName} text-slate-700`} disabled={actionDisabled} onClick={onBackspace} type="button">BS</button>
+    <button aria-label="마지막 숫자 삭제" className={`${keyClassName} text-slate-700`} disabled={actionDisabled} onClick={onBackspace} type="button">⌫</button>
     <button className={keyClassName} disabled={digitDisabled} onClick={() => onDigit("0")} type="button">0</button>
     <button className={`${keyClassName} text-slate-700`} disabled={actionDisabled} onClick={onClear} type="button">C</button>
   </div>;

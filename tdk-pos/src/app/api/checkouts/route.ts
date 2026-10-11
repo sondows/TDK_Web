@@ -163,7 +163,8 @@ async function activeCheckoutIds(tx: Parameters<Parameters<typeof db.transaction
     .where(inArray(checkoutItems.orderItemId, itemIds))
     .for("update");
   return [...new Set(rows
-    .filter((row) => row.status === "OPEN" || row.status === "PARTIALLY_PAID")
+    // A paid checkout remains editable until COMPLETE closes its table sessions.
+    .filter((row) => row.status === "OPEN" || row.status === "PARTIALLY_PAID" || row.status === "PAID")
     .map((row) => row.checkoutId))];
 }
 
@@ -208,10 +209,13 @@ async function snapshot(tableId: number) {
     const bill = await currentBill(tx, tableId);
     const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
     const paid = await paidForBillSessions(tx, bill);
+    const checkoutRows = checkoutIds.length
+      ? await tx.select({ status: checkouts.status }).from(checkouts).where(inArray(checkouts.checkoutId, checkoutIds))
+      : [];
     const prepaidRows = checkoutIds.length
       ? await tx.select({ total: sql<string>`COALESCE(SUM(${customerPrepaidLedger.amount}), 0)` }).from(customerPrepaidLedger).innerJoin(payments, eq(payments.paymentId, customerPrepaidLedger.paymentId)).where(inArray(payments.checkoutId, checkoutIds))
       : [];
-    return { bill, checkoutIds, checkoutId: checkoutIds[0] ?? null, paid, prepaidCredit: won(Number(prepaidRows[0]?.total ?? 0)), remaining: Math.max(0, bill.total - paid) };
+    return { bill, checkoutIds, checkoutId: checkoutIds[0] ?? null, paid, prepaidCredit: won(Number(prepaidRows[0]?.total ?? 0)), remaining: Math.max(0, bill.total - paid), settled: checkoutRows.length > 0 && checkoutRows.every(row => row.status === "PAID") && paid >= bill.total };
   });
 }
 
@@ -223,7 +227,7 @@ export async function GET(request: Request) {
     const state = await snapshot(tableId);
     const methods = await db.select({ code: paymentMethods.methodCode, name: paymentMethods.methodName, type: paymentMethods.methodType }).from(paymentMethods).where(eq(paymentMethods.isActive, 1));
     const history = state.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
-    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos });
+    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, checkoutIds: state.checkoutIds, settled: state.settled, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds });
   } catch (error) { const e = error instanceof CheckoutError ? error : new CheckoutError("결제 정보를 불러올 수 없습니다.", 500); return Response.json({ success: false, message: e.message }, { status: e.status }); }
 }
 
@@ -261,7 +265,7 @@ export async function POST(request: Request) {
         const orderIds = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, bill.sessionIds));
         if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
         await closeSessionsAndMerges(tx, bill.sessionIds, processedByStaffId);
-        return { completed: true, change: 0, tendered: 0, applied: 0, tableId };
+        return { completed: true, change: 0, tendered: 0, applied: 0, tableId, completedCheckoutIds: checkoutIds, completedPayments: await paymentStateForCheckouts(tx, checkoutIds) };
       }
       if (action === "CANCEL_PAYMENT") {
         const paymentId = Number(body.paymentId);
@@ -390,11 +394,9 @@ export async function POST(request: Request) {
         await tx.update(checkouts).set({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: decimal(nextPaid), status: completed ? "PAID" : "PARTIALLY_PAID", completedAt: completed ? sql`CURRENT_TIMESTAMP` : null }).where(eq(checkouts.checkoutId, checkoutId));
         if (completed) {
           if (checkoutIds.length > 1) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
-          const orderIds = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, bill.sessionIds));
-          if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
-          await closeSessionsAndMerges(tx, bill.sessionIds, processedByStaffId);
         }
-        return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId };
+        const completedCheckoutIds = completed ? [...new Set([...checkoutIds, checkoutId])] : [];
+        return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [] };
       }
       const isOther = action === "PAY_OTHER";
       requestPhase = isOther ? "load configured other payment method" : "load payment method";
@@ -404,7 +406,7 @@ export async function POST(request: Request) {
       const otherMethodId = Number(body.paymentMethodId);
       const inputValue = Number(body.inputValue);
       if (isOther && (!Number.isSafeInteger(otherMethodId) || otherMethodId <= 0 || !Number.isSafeInteger(inputValue) || inputValue <= 0)) throw new CheckoutError("기타결제 입력값을 확인해 주세요.", 400);
-      const [configured] = isOther ? await tx.select({ id: paymentMethods.paymentMethodId, type: paymentMethods.methodType, name: paymentMethods.methodName, inputType: paymentMethodSettings.inputType, unitAmount: paymentMethodSettings.unitAmount, balancePolicy: paymentMethodSettings.balancePolicy, cashChangeEnabled: paymentMethodSettings.cashChangeEnabled, cashChangeMinPercent: paymentMethodSettings.cashChangeMinPercent })
+      const [configured] = isOther ? await tx.select({ id: paymentMethods.paymentMethodId, type: paymentMethods.methodType, name: paymentMethods.methodName, inputType: paymentMethodSettings.inputType, unitAmount: paymentMethodSettings.unitAmount, balancePolicy: paymentMethodSettings.balancePolicy, cashChangeEnabled: paymentMethodSettings.cashChangeEnabled, cashChangeMinPercent: paymentMethodSettings.cashChangeMinPercent, accountInfoEnabled: paymentMethodSettings.accountInfoEnabled, accountInfoPrintEnabled: paymentMethodSettings.accountInfoPrintEnabled })
         .from(paymentMethods).innerJoin(paymentMethodSettings, eq(paymentMethods.paymentMethodId, paymentMethodSettings.paymentMethodId))
         .where(and(eq(paymentMethods.paymentMethodId, otherMethodId), eq(paymentMethods.isActive, 1),
           sql`${paymentMethods.methodCode} NOT IN ('CARD','CASH')`,
@@ -414,6 +416,7 @@ export async function POST(request: Request) {
       const method = isOther ? configured : legacy;
       if (!method) throw new CheckoutError("사용할 수 없는 결제수단입니다.", 409);
       const checkout = await activeCheckout(tx, bill.items.map(item => item.orderItemId));
+      const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
       const paid = await paidForBillSessions(tx, bill);
       const checkoutPaid = checkout ? won((await paymentState(tx, checkout.checkoutId)).reduce((sum, row) => sum + row.appliedAmount, 0)) : 0;
       const total = bill.total; const remaining = Math.max(0, total - paid);
@@ -502,15 +505,25 @@ export async function POST(request: Request) {
         });
       }
       const nextPaid = checkoutPaid + applied;
+      const completed = paid + applied >= total;
       requestPhase = "update checkout applied total";
-      await tx.update(checkouts).set({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: decimal(nextPaid), status: "PARTIALLY_PAID", completedAt: null }).where(eq(checkouts.checkoutId, checkoutId));
-      return { completed: false, change, tendered, applied, prepaidCredit, tableId };
+      await tx.update(checkouts).set({ subtotalAmount: decimal(bill.gross), discountAmount: decimal(bill.discount), totalAmount: decimal(total), paidAmount: decimal(nextPaid), status: completed ? "PAID" : "PARTIALLY_PAID", completedAt: completed ? sql`CURRENT_TIMESTAMP` : null }).where(eq(checkouts.checkoutId, checkoutId));
+      if (completed) {
+        const allCheckoutIds = [...new Set([...checkoutIds, checkoutId])];
+        if (allCheckoutIds.length > 1) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, allCheckoutIds));
+      }
+      const completedCheckoutIds = completed ? [...new Set([...checkoutIds, checkoutId])] : [];
+      return { completed, change, tendered, applied, prepaidCredit, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [], accountTransferPaymentId: isOther && configured?.accountInfoEnabled === 1 && configured?.accountInfoPrintEnabled === 1 ? createdPayment.paymentId : null };
     });
     requestPhase = "refresh checkout snapshot after payment";
     const state = result.completed ? null : await snapshot(tableId);
     requestPhase = "load payment history after payment";
-    const history = state?.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
-    return Response.json({ success: true, ...result, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos } });
+    const completedCheckoutIds = "completedCheckoutIds" in result && Array.isArray(result.completedCheckoutIds) ? result.completedCheckoutIds : [];
+    const historyIds = state?.checkoutIds ?? completedCheckoutIds;
+    const history = result.completed && "completedPayments" in result
+      ? result.completedPayments
+      : historyIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, historyIds)) : [];
+    return Response.json({ success: true, ...result, completedCheckoutIds, completedPayments: result.completed ? history : undefined, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds } });
   } catch (error) {
     console.error(`[POST /api/checkouts] failed during ${requestPhase}`, error);
     const knownError = error instanceof CheckoutError;

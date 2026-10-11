@@ -12,4 +12,9 @@ export type OtherPaymentMethod = {
   validityEnabled: number | null;
   validFrom: string | null;
   validUntil: string | null;
+  accountInfoEnabled: number | null;
+  accountInfoPrintEnabled: number | null;
+  bankName: string | null;
+  accountNumber: string | null;
+  accountHolder: string | null;
 };

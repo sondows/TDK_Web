@@ -1,8 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
+import Image from "next/image";
 import adminStyles from "@/app/admin/admin.module.css";
+import StaffToggle from "@/app/admin/staff/StaffToggle";
 import type { OtherPaymentMethod } from "@/lib/other-payment-types";
+import { prepareAccountTransferNotice, printAccountTransferNotice, type AccountTransferNotice } from "@/lib/account-transfer-notice";
+
+function NoticePaper({ notice, logoDataUrl }: { notice: AccountTransferNotice; logoDataUrl: string | null }) {
+  return <div className="w-[80mm] max-w-full bg-white px-[4mm] py-3 text-[13px] leading-[1.4] text-black" style={{ fontFamily: '"Malgun Gothic", sans-serif' }}>
+    {logoDataUrl
+      ? <div className="relative mx-auto h-[70px] w-full"><Image alt="영수증 로고" className="object-contain" fill sizes="72mm" src={logoDataUrl} unoptimized /></div>
+      : <div className="break-words text-center text-[22px] font-bold">{notice.storeName}</div>}
+    <div className="h-4" />
+    <h3 className="text-center text-[17px] font-bold">계좌이체 안내</h3>
+    <div className="h-4" />
+    <div className="border-t border-dashed border-black" />
+    <div className="flex items-center justify-between gap-2 py-2 text-[18px] font-bold"><span className="shrink-0">총 결제금액</span><span className="text-right">{notice.totalAmount.toLocaleString("ko-KR")}원</span></div>
+    <div className="border-t border-dashed border-black" />
+    <div className="pt-2">입금계좌</div>
+    <div className="break-all">{notice.bankName}({notice.accountHolder})</div>
+    <div className="break-all">{notice.accountNumber}</div>
+    <div className="mt-1 border-t border-dashed border-black" />
+    <div className="h-4" />
+  </div>;
+}
 
 type Form = {
   id: number | null; name: string; isActive: boolean;
@@ -10,8 +32,9 @@ type Form = {
   balancePolicy: "CASH_CHANGE" | "FORFEIT"; validityEnabled: boolean;
   cashChangeEnabled: boolean | null; cashChangeMinPercent: string;
   validFrom: string; validUntil: string;
+  accountInfoEnabled: boolean; accountInfoPrintEnabled: boolean; bankName: string; accountNumber: string; accountHolder: string;
 };
-const blank = (): Form => ({ id: null, name: "", isActive: true, inputType: "AMOUNT", unitAmount: "", balancePolicy: "FORFEIT", cashChangeEnabled: false, cashChangeMinPercent: "", validityEnabled: false, validFrom: "", validUntil: "" });
+const blank = (): Form => ({ id: null, name: "", isActive: true, inputType: "AMOUNT", unitAmount: "", balancePolicy: "FORFEIT", cashChangeEnabled: false, cashChangeMinPercent: "", validityEnabled: false, validFrom: "", validUntil: "", accountInfoEnabled: false, accountInfoPrintEnabled: false, bankName: "", accountNumber: "", accountHolder: "" });
 
 function seoulToday() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -31,7 +54,7 @@ function methodStatus(method: OtherPaymentMethod, today: string) {
   return { label: "사용", className: "text-blue-700" };
 }
 
-export default function OtherPaymentSettingsClient() {
+export default function OtherPaymentSettingsClient({ storeName, logoDataUrl }: { storeName: string; logoDataUrl: string | null }) {
   const [methods, setMethods] = useState<OtherPaymentMethod[]>([]);
   const methodsRef = useRef<OtherPaymentMethod[]>([]);
   const dragRef = useRef<{ id: number; pointerId: number; originalIds: number[] } | null>(null);
@@ -40,6 +63,8 @@ export default function OtherPaymentSettingsClient() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [previewNotice, setPreviewNotice] = useState<AccountTransferNotice | null>(null);
   const today = seoulToday();
   const setList = (rows: OtherPaymentMethod[]) => { methodsRef.current = rows; setMethods(rows); };
   const load = useCallback(async () => {
@@ -53,7 +78,7 @@ export default function OtherPaymentSettingsClient() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   const edit = (method: OtherPaymentMethod) => {
-    setForm({ id: method.id, name: method.name, isActive: Boolean(method.isActive), inputType: method.inputType, unitAmount: method.unitAmount ? String(Number(method.unitAmount)) : "", balancePolicy: method.balancePolicy ?? "FORFEIT", cashChangeEnabled: method.cashChangeEnabled === null ? null : Boolean(method.cashChangeEnabled), cashChangeMinPercent: method.cashChangeMinPercent === null ? "" : String(method.cashChangeMinPercent), validityEnabled: Boolean(method.validityEnabled), validFrom: method.validFrom ?? "", validUntil: method.validUntil ?? "" });
+    setForm({ id: method.id, name: method.name, isActive: Boolean(method.isActive), inputType: method.inputType, unitAmount: method.unitAmount ? String(Number(method.unitAmount)) : "", balancePolicy: method.balancePolicy ?? "FORFEIT", cashChangeEnabled: method.cashChangeEnabled === null ? null : Boolean(method.cashChangeEnabled), cashChangeMinPercent: method.cashChangeMinPercent === null ? "" : String(method.cashChangeMinPercent), validityEnabled: Boolean(method.validityEnabled), validFrom: method.validFrom ?? "", validUntil: method.validUntil ?? "", accountInfoEnabled: Boolean(method.accountInfoEnabled), accountInfoPrintEnabled: Boolean(method.accountInfoPrintEnabled), bankName: method.bankName ?? "", accountNumber: method.accountNumber ?? "", accountHolder: method.accountHolder ?? "" });
     setMessage("");
   };
   const startDrag = (event: PointerEvent<HTMLButtonElement>, id: number) => {
@@ -114,6 +139,35 @@ export default function OtherPaymentSettingsClient() {
       await load(); setForm(blank()); setError(false); setMessage("기타결제 설정을 저장했습니다.");
     } catch (reason) { setError(true); setMessage(reason instanceof Error ? reason.message : "저장하지 못했습니다."); }
     finally { setBusy(false); }
+  };
+  const testNoticeInput = (notice?: AccountTransferNotice) => ({
+    mode: "TEST" as const,
+    bankName: notice?.bankName ?? form.bankName,
+    accountNumber: notice?.accountNumber ?? form.accountNumber,
+    accountHolder: notice?.accountHolder ?? form.accountHolder,
+  });
+  const openNoticePreview = () => {
+    setPreviewNotice({
+      storeName,
+      receiptLogo: null,
+      totalAmount: 9_999_999,
+      bankName: form.bankName,
+      accountNumber: form.accountNumber,
+      accountHolder: form.accountHolder,
+    });
+    setError(false);
+    setMessage("");
+  };
+  const testPrintNotice = async (notice?: AccountTransferNotice) => {
+    if (noticeBusy) return;
+    setNoticeBusy(true); setMessage("");
+    try {
+      await printAccountTransferNotice(await prepareAccountTransferNotice(testNoticeInput(notice)));
+      setError(false); setMessage("테스트 인쇄가 완료되었습니다.");
+    } catch (reason) {
+      console.error("Account transfer notice test print failed", reason);
+      setError(true); setMessage(reason instanceof Error ? reason.message : "테스트 인쇄에 실패했습니다. 프린터와 Device Agent를 확인해 주세요.");
+    } finally { setNoticeBusy(false); }
   };
   const field = "min-h-14 w-full rounded-xl border border-slate-300 bg-white px-4 text-lg";
   const settingRow = "grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-3";
@@ -185,8 +239,46 @@ export default function OtherPaymentSettingsClient() {
           </div>}
         </div>
         {validityNotice && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" role="status">⚠ {validityNotice}</p>}
+        <div className="space-y-3 border-t border-slate-200 pt-4">
+          <div className={settingRow}>
+            <span className="text-lg font-bold">계좌정보</span>
+            <label className="flex min-h-14 items-center gap-2 text-lg font-bold"><input checked={form.accountInfoEnabled} className="size-6" onChange={event => setForm({ ...form, accountInfoEnabled: event.target.checked })} type="checkbox" /> 사용</label>
+            {form.accountInfoEnabled && <StaffToggle checked={form.accountInfoPrintEnabled} label="계좌번호 출력" onChange={checked => setForm({ ...form, accountInfoPrintEnabled: checked })} />}
+          </div>
+          {form.accountInfoEnabled && <>
+            <div className={settingRow}>
+              <label className="text-lg font-bold" htmlFor="other-payment-bank-name">은행명</label>
+              <input className={field} id="other-payment-bank-name" maxLength={100} onChange={event => setForm({ ...form, bankName: event.target.value })} required value={form.bankName} />
+              <span aria-hidden="true" />
+            </div>
+            <div className={settingRow}>
+              <label className="text-lg font-bold" htmlFor="other-payment-account-number">계좌번호</label>
+              <input className={field} id="other-payment-account-number" maxLength={100} onChange={event => setForm({ ...form, accountNumber: event.target.value })} required value={form.accountNumber} />
+              <span aria-hidden="true" />
+            </div>
+            <div className={settingRow}>
+              <label className="text-lg font-bold" htmlFor="other-payment-account-holder">예금주</label>
+              <input className={field} id="other-payment-account-holder" maxLength={100} onChange={event => setForm({ ...form, accountHolder: event.target.value })} required value={form.accountHolder} />
+              <span aria-hidden="true" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button className="min-h-14 rounded-xl border border-slate-300 bg-white text-lg font-bold hover:bg-slate-50 disabled:opacity-50" disabled={noticeBusy || busy} onClick={() => void openNoticePreview()} type="button">인쇄 미리보기</button>
+              <button className="min-h-14 rounded-xl border border-slate-300 bg-white text-lg font-bold hover:bg-slate-50 disabled:opacity-50" disabled={noticeBusy || busy} onClick={() => void testPrintNotice()} type="button">테스트 인쇄</button>
+            </div>
+          </>}
+        </div>
         <button className="min-h-14 w-full rounded-xl bg-blue-600 px-6 text-xl font-bold text-white disabled:opacity-50" disabled={busy} type="submit">저장</button><p aria-live="polite" className={`min-h-6 font-bold ${error ? "text-red-600" : "text-blue-700"}`}>{message}</p>
       </form>
     </div>
+    {previewNotice && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4">
+      <section aria-modal="true" className="flex max-h-[calc(100dvh-2rem)] max-w-full flex-col rounded-2xl bg-slate-100 p-5 shadow-2xl" role="dialog">
+        <h2 className="mb-4 text-center text-xl font-bold">계좌이체 안내 인쇄 미리보기</h2>
+        <div className="min-h-0 overflow-auto bg-white shadow-sm"><NoticePaper logoDataUrl={logoDataUrl} notice={previewNotice} /></div>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <button className="min-h-14 rounded-xl border border-slate-300 bg-white font-bold" onClick={() => setPreviewNotice(null)} type="button">닫기</button>
+          <button className="min-h-14 rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={noticeBusy} onClick={() => void testPrintNotice(previewNotice)} type="button">테스트 인쇄</button>
+        </div>
+      </section>
+    </div>}
   </div>;
 }

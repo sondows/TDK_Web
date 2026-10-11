@@ -363,3 +363,5 @@ D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\msquic.dll
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\aspnetcorev2_inprocess.dll
 D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\obj\Release\net10.0\win-x64\tdk-devi.98656C7E.Up2Date
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\deploy\appsettings.DEV.json
+D:\10_프로그래밍_소스\01_TDK_Web\tdk-device-agent\bin\Release\net10.0\win-x64\deploy\appsettings.POS.json

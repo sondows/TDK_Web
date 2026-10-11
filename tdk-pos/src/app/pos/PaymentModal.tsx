@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { formatMoney } from "@/lib/format-money";
+import { prepareAccountTransferNotice, printAccountTransferNotice } from "@/lib/account-transfer-notice";
+import { buildPartyOrderRows, type PartySummarySourceItem } from "@/lib/pos-order-summary-rows";
 import OtherPaymentDialog from "./OtherPaymentDialog";
 import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
+import { ORDER_INFO_STYLES } from "./order-info-styles";
+import OrderSummaryRows from "./OrderSummaryRows";
 
-type Discount = { label: string; amount: number; type: string };
+type Discount = { sessionId: number; label: string; amount: number; type: string };
 type Payment = {
   paymentId: number;
   amount: number;
@@ -37,7 +41,9 @@ type State = {
   payments: Payment[];
   isPartyBill: boolean;
   tableNos: string[];
+  sessionIds: number[];
 };
+type SaleOrder = { orderId: number; sessionId: number; status: string; items: Omit<PartySummarySourceItem, "orderId" | "sessionId">[] };
 type OverpaymentPrompt = {
   kind: "CARD" | "CASH" | "OTHER";
   methodLabel: string;
@@ -72,56 +78,97 @@ const paymentInfoLabelStyle = "text-[20px] font-normal";
 const paymentInfoAmountStyle = "text-[20px] font-bold";
 const paymentInfoSmallLabelStyle = "text-[20px] font-normal";
 const paymentInfoSmallAmountStyle = "text-[20px] font-bold";
-const paymentInfoSmallAlignedAmountStyle = "text-[20px] font-bold pr-[13px]";
-const paymentInfoAlignedAmountStyle = `${paymentInfoAmountStyle} pr-[13px]`;
 const paymentInfoRowStyle = "flex justify-between leading-7";
-const paymentSummaryRowStyle = "grid min-h-11 grid-cols-[1fr_auto] items-center leading-7";
-const paymentInfoRowGapStyle = "space-y-[7px]";
-const paymentHistoryRowGapStyle = "space-y-[14px]";
+const paymentFooterButtonStyle = "min-h-[72px] w-full rounded-lg border border-slate-300 bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 disabled:opacity-40";
 export default function PaymentModal({
   tableId,
   tableNo,
+  orderDetails,
+  renderOrderDetails,
+  selectedCustomer,
+  onSelectCustomer,
   close,
   completed,
   onCashPaymentRegistered,
+  onPrintReceipt,
+  receiptPrinting,
 }: {
   tableId: number;
   tableNo: string;
+  orderDetails: SaleOrder[];
+  renderOrderDetails: (sessionIds: number[]) => ReactNode;
+  selectedCustomer: SelectedCustomer | null;
+  onSelectCustomer: (customer: SelectedCustomer | null) => void;
   close: () => void;
   completed: () => void;
   onCashPaymentRegistered: () => void;
+  onPrintReceipt: (checkoutId?: number, isReprint?: boolean) => Promise<void>;
+  receiptPrinting: boolean;
 }) {
   const [state, setState] = useState<State | null>(null);
+  const [orderTab, setOrderTab] = useState<"summary" | "detail">("summary");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
+  const autoPrintAttempted = useRef(new Set<string>());
+  const autoCustomerPaymentRequested = useRef<string | null>(null);
+  const [transactionCompleted, setTransactionCompleted] = useState(false);
+  const [hasPaymentAction, setHasPaymentAction] = useState(false);
+  const [autoCompleteSeconds, setAutoCompleteSeconds] = useState<number | null>(null);
+  const [completedAtMs, setCompletedAtMs] = useState<number | null>(null);
+  const [secondsUntilClose, setSecondsUntilClose] = useState<number | null>(null);
+  const closingRef = useRef(false);
+  const completionPausedRef = useRef(false);
+  const completeRef = useRef<() => void>(() => {});
+  const [completedCheckoutIds, setCompletedCheckoutIds] = useState<number[]>([]);
+  const [autoPrintPending, setAutoPrintPending] = useState(false);
   const [error, setError] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
   const [stagedCustomerPayment, setStagedCustomerPayment] = useState<StagedCustomerPayment | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState<SelectedCustomer | null>(null);
   const [customerSelectOpen, setCustomerSelectOpen] = useState(false);
   const [deletionTarget, setDeletionTarget] = useState<PaymentDeletionTarget | null>(null);
   const [cancelError, setCancelError] = useState("");
   const [resetPaymentsConfirm, setResetPaymentsConfirm] = useState(false);
   const [overpaymentPrompt, setOverpaymentPrompt] = useState<OverpaymentPrompt | null>(null);
-  const [overpaymentBlockDialog, setOverpaymentBlockDialog] = useState(false);
-  const [cardErrorDialog, setCardErrorDialog] = useState("");
+  const [cardErrorDialog, setCardErrorDialog] = useState<{ message: string; resetInputOnClose?: boolean } | null>(null);
   const [initialPaymentIds, setInitialPaymentIds] = useState<number[]>([]);
   const { ref: paymentMethodsRef, hints: scrollHints, handlers: paymentScrollHandlers } = useHorizontalScroll(state !== null);
   useEffect(() => {
     let active = true;
     fetch(`/api/checkouts?tableId=${tableId}`)
-      .then(async (response) => ({ response, result: (await response.json()) as { success?: boolean; message?: string } & State }))
+      .then(async (response) => ({ response, result: (await response.json()) as { success?: boolean; message?: string; settled?: boolean; checkoutIds?: number[] } & State }))
       .then(({ response, result }) => {
         if (!active) return;
         if (!response.ok || !result.success) {
         }
         setInitialPaymentIds(result.payments.map((payment) => payment.paymentId));
-        setState({ gross: result.gross, discounts: result.discounts, total: result.total, paid: result.paid, remaining: result.remaining, prepaidCredit: result.prepaidCredit ?? 0, checkoutId: result.checkoutId, payments: result.payments, isPartyBill: result.isPartyBill, tableNos: result.tableNos });
+        setState({ gross: result.gross, discounts: result.discounts, total: result.total, paid: result.paid, remaining: result.remaining, prepaidCredit: result.prepaidCredit ?? 0, checkoutId: result.checkoutId, payments: result.payments, isPartyBill: result.isPartyBill, tableNos: result.tableNos, sessionIds: result.sessionIds });
+        if (result.settled) {
+          const checkoutIds = result.checkoutIds ?? [];
+          setCompletedCheckoutIds(checkoutIds);
+          setTransactionCompleted(true);
+          autoPrintAttempted.current.add(checkoutIds.join(","));
+        }
       })
       .catch(() => { if (active) setError("결제 정보를 불러올 수 없습니다."); });
     return () => { active = false; };
   }, [tableId]);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/pos-settings/payment-auto-complete", { cache: "no-store" })
+      .then(async response => {
+        const result = await response.json() as { success?: boolean; seconds?: number };
+        if (!response.ok || !result.success || !Number.isSafeInteger(result.seconds) || (result.seconds ?? -1) < 0) {
+          throw new Error("결제창 자동 완료 설정을 불러오지 못했습니다.");
+        }
+        if (active) setAutoCompleteSeconds(result.seconds!);
+      })
+      .catch(error => {
+        console.error("Payment auto-complete setting load failed", error);
+        if (active) setAutoCompleteSeconds(0);
+      });
+    return () => { active = false; };
+  }, []);
   const entered = Number(input || 0);
   const displayRemaining = Math.max(0, (state?.remaining ?? 0) - (stagedCustomerPayment?.amount ?? 0));
   const displayOverpayment = Math.max(0, (state?.paid ?? 0) - (state?.total ?? 0));
@@ -133,8 +180,15 @@ export default function PaymentModal({
         : `${current}${key}`.replace(/^0+(?=\d)/, "").slice(0, 9),
     );
   };
-  const request = async (body: Record<string, unknown>, afterRegistered?: () => void): Promise<{ ok: boolean; message?: string }> => {
-    if (requestInFlight.current) return { ok: false };
+  const printCompletedReceipts = useCallback(async (checkoutIds: number[], isReprint: boolean) => {
+    if (!checkoutIds.length) {
+      await onPrintReceipt();
+      return;
+    }
+    for (const checkoutId of checkoutIds) await onPrintReceipt(checkoutId, isReprint);
+  }, [onPrintReceipt]);
+  const request = useCallback(async (body: Record<string, unknown>, afterRegistered?: () => void): Promise<{ ok: boolean; message?: string }> => {
+    if (requestInFlight.current || transactionCompleted) return { ok: false };
     requestInFlight.current = true;
     setBusy(true);
     setError("");
@@ -151,6 +205,9 @@ export default function PaymentModal({
         change?: number;
         tendered?: number;
         state?: State;
+        completedCheckoutIds?: number[];
+        completedPayments?: State["payments"];
+        accountTransferPaymentId?: number | null;
         debugPhase?: string;
         debugMessage?: string;
       };
@@ -166,8 +223,50 @@ export default function PaymentModal({
       if (afterRegistered || (body.action === "PAY_CUSTOMER" && (result.change ?? 0) > 0)) {
         onCashPaymentRegistered();
       }
+      if (body.action === "PAY" || body.action === "PAY_OTHER" || body.action === "PAY_CUSTOMER") {
+        setHasPaymentAction(true);
+      }
+      if (Number.isSafeInteger(result.accountTransferPaymentId) && Number(result.accountTransferPaymentId) > 0) {
+        void (async () => {
+          try {
+            const notice = await prepareAccountTransferNotice({ mode: "LIVE", paymentId: result.accountTransferPaymentId! });
+            await printAccountTransferNotice(notice);
+          } catch (printError) {
+            console.error("Account transfer notice print failed", printError);
+            setError(printError instanceof Error ? printError.message : "계좌이체 안내서 출력에 실패했습니다.");
+          }
+        })();
+      }
       if (result.completed) {
-        completed();
+        const checkoutIds = result.completedCheckoutIds ?? [];
+        setCompletedCheckoutIds(checkoutIds);
+        setCompletedAtMs(Date.now());
+        setTransactionCompleted(true);
+        setStagedCustomerPayment(null);
+        setState(current => current ? {
+          ...current,
+          paid: current.total,
+          remaining: 0,
+          checkoutId: checkoutIds[0] ?? current.checkoutId,
+          payments: result.completedPayments ?? current.payments,
+        } : current);
+        const key = checkoutIds.join(",");
+        if (key && !autoPrintAttempted.current.has(key)) {
+          autoPrintAttempted.current.add(key);
+          setAutoPrintPending(true);
+          void (async () => {
+            try {
+              const settingResponse = await fetch("/api/pos-settings/receipt-auto-print", { cache: "no-store" });
+              const setting = await settingResponse.json() as { success?: boolean; enabled?: boolean };
+              if (!settingResponse.ok || !setting.success) throw new Error("자동 영수증 인쇄 설정을 확인하지 못했습니다.");
+              if (setting.enabled) await printCompletedReceipts(checkoutIds, false);
+            } catch (printError) {
+              setError(printError instanceof Error ? printError.message : "자동 영수증 출력에 실패했습니다.");
+            } finally {
+              setAutoPrintPending(false);
+            }
+          })();
+        }
         return { ok: true };
       }
       if (result.state) {
@@ -182,7 +281,19 @@ export default function PaymentModal({
       requestInFlight.current = false;
       setBusy(false);
     }
-  };
+  }, [tableId, transactionCompleted, onCashPaymentRegistered, printCompletedReceipts]);
+  useEffect(() => {
+    if (!stagedCustomerPayment || !state || transactionCompleted || busy || requestInFlight.current) return;
+    if (stagedCustomerPayment.amount < state.remaining || autoCustomerPaymentRequested.current === stagedCustomerPayment.requestKey) return;
+    autoCustomerPaymentRequested.current = stagedCustomerPayment.requestKey;
+    void request({
+      action: "PAY_CUSTOMER",
+      customerId: stagedCustomerPayment.customerId,
+      amount: stagedCustomerPayment.amount,
+      requestKey: stagedCustomerPayment.requestKey,
+      couponQuantity: stagedCustomerPayment.couponQuantity,
+    });
+  }, [stagedCustomerPayment, state, transactionCompleted, busy, request]);
   const submitCard = (amount: number, confirmed = false) => {
     return request({
       action: "PAY",
@@ -196,7 +307,7 @@ export default function PaymentModal({
     if (!overpaymentPrompt || busy) return;
     if (overpaymentPrompt.kind === "CARD" && !confirmed) {
       setOverpaymentPrompt(null);
-      setCardErrorDialog("카드 결제금액이 받을금액보다 많습니다.");
+      setCardErrorDialog({ message: "카드 결제금액이 받을금액보다 많습니다." });
       return;
     }
     const body = { ...overpaymentPrompt.requestBody, prepaidOverpaymentConfirmed: confirmed };
@@ -225,7 +336,7 @@ export default function PaymentModal({
   const pay = (methodCode: string, otherLabel?: string) => {
     if (displayRemaining <= 0) {
       setError("");
-      setCardErrorDialog("받을 금액이 없습니다.");
+      setCardErrorDialog({ message: "받을 금액이 없습니다." });
       return;
     }
     if (stagedCustomerPayment && entered > displayRemaining) {
@@ -236,7 +347,7 @@ export default function PaymentModal({
       const amount = entered || displayRemaining;
       if (state && amount > state.remaining) {
         if (!selectedCustomer) {
-          setCardErrorDialog("카드 결제금액이 받을금액보다 많습니다.");
+          setCardErrorDialog({ message: `받을금액 ${money(state.remaining)}원보다\n카드 결제금액이 많습니다.`, resetInputOnClose: true });
           return;
         }
         setOverpaymentPrompt({ kind: "CARD", methodLabel: "카드", amount, due: state.remaining, excess: amount - state.remaining, requestBody: { action: "PAY", methodCode, amount, customerId: selectedCustomer.customerId } });
@@ -255,22 +366,68 @@ export default function PaymentModal({
       methodCode === "CASH" ? onCashPaymentRegistered : undefined,
     );
   };
-  const complete = () => {
-    if (displayOverpayment > 0) {
-      setOverpaymentBlockDialog(true);
+  const complete = async () => {
+    if (!transactionCompleted || state?.remaining !== 0 || closingRef.current || completionPausedRef.current || busy) return;
+    closingRef.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/checkouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableId, action: "COMPLETE" }),
+      });
+      const result = await response.json() as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "결제를 완료하지 못했습니다.");
+      completed();
+    } catch (completeError) {
+      setError(completeError instanceof Error ? completeError.message : "결제를 완료하지 못했습니다.");
+      closingRef.current = false;
+      if (hasPaymentAction) setCompletedAtMs(Date.now());
+      setBusy(false);
+    }
+  };
+  const clearCompletionCountdown = () => {
+    if (completedCheckoutIds.length) autoPrintAttempted.current.delete(completedCheckoutIds.join(","));
+    setTransactionCompleted(false);
+    setHasPaymentAction(false);
+    setCompletedAtMs(null);
+    setSecondsUntilClose(null);
+    setCompletedCheckoutIds([]);
+    closingRef.current = false;
+    completionPausedRef.current = false;
+  };
+  useEffect(() => { completeRef.current = complete; });
+  useEffect(() => {
+    if (!hasPaymentAction || !transactionCompleted || state?.remaining !== 0 || completedAtMs === null || autoCompleteSeconds === null || autoCompleteSeconds === 0) {
       return;
     }
-    void request(stagedCustomerPayment
-      ? { action: "PAY_CUSTOMER", customerId: stagedCustomerPayment.customerId, amount: stagedCustomerPayment.amount, requestKey: stagedCustomerPayment.requestKey, couponQuantity: stagedCustomerPayment.couponQuantity }
-      : { action: "COMPLETE" });
-  };
+    const deadline = completedAtMs + autoCompleteSeconds * 1000;
+    const tick = () => {
+      if (completionPausedRef.current || busy) return;
+      const secondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (secondsLeft === 0) {
+        window.clearInterval(interval);
+        completeRef.current();
+        return;
+      }
+      setSecondsUntilClose(secondsLeft);
+    };
+    const interval = window.setInterval(tick, 250);
+    tick();
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [hasPaymentAction, transactionCompleted, state?.remaining, completedAtMs, autoCompleteSeconds, busy]);
   const cancelPayment = async () => {
     if (!deletionTarget || busy) return;
     if (deletionTarget.kind === "STAGED_CUSTOMER") {
       setStagedCustomerPayment(null);
       setDeletionTarget(null);
+      completionPausedRef.current = false;
       return;
     }
+    completionPausedRef.current = true;
     setBusy(true);
     setCancelError("");
     try {
@@ -285,6 +442,11 @@ export default function PaymentModal({
         return;
       }
       setState(result.state);
+      if (result.state.remaining > 0) clearCompletionCountdown();
+      else {
+        completionPausedRef.current = false;
+        if (hasPaymentAction) setCompletedAtMs(Date.now());
+      }
       setDeletionTarget(null);
     } catch {
       setCancelError("네트워크 오류가 발생했습니다. 다시 시도해 주세요.");
@@ -292,9 +454,11 @@ export default function PaymentModal({
       setBusy(false);
     }
   };
-  const resetPayments = async () => {
+  const resetPayments = async (showDialogOnError = false) => {
     if (!state || busy) return;
     const paymentIds = state.payments.map(payment => payment.paymentId);
+    completionPausedRef.current = true;
+    setSecondsUntilClose(null);
     setBusy(true);
     requestInFlight.current = true;
     setCancelError("");
@@ -312,14 +476,20 @@ export default function PaymentModal({
         setState(refreshedState);
       }
       setStagedCustomerPayment(null);
+      if (refreshedState.remaining > 0) clearCompletionCountdown();
+      else completionPausedRef.current = false;
       setInput("");
       setResetPaymentsConfirm(false);
     } catch (resetError) {
       setCancelError(resetError instanceof Error ? resetError.message : "결제 초기화 중 오류가 발생했습니다.");
+      if (showDialogOnError) setResetPaymentsConfirm(true);
       try {
         const response = await fetch(`/api/checkouts?tableId=${tableId}`);
         const refreshed = await response.json() as { success?: boolean } & State;
-        if (response.ok && refreshed.success) setState(refreshed);
+        if (response.ok && refreshed.success) {
+          setState(refreshed);
+          if (refreshed.remaining > 0) clearCompletionCountdown();
+        }
       } catch {
         // Keep the last successfully refreshed payment state visible.
       }
@@ -328,10 +498,20 @@ export default function PaymentModal({
       setBusy(false);
     }
   };
-  // Approved payments are already persisted by the payment API.  Closing this
-  // modal intentionally leaves a partial checkout and its OPEN table session
-  // untouched so that it can be resumed as a prepaid payment later.
-  const requestClose = () => close();
+  const openPaymentResetConfirm = () => {
+    setCancelError("");
+    completionPausedRef.current = true;
+    setSecondsUntilClose(null);
+    setResetPaymentsConfirm(true);
+  };
+  // Payment registration is already persisted. Leaving the modal keeps the
+  // open table session and approved payments so checkout can resume later.
+  const requestClose = () => {
+    completionPausedRef.current = true;
+    setCompletedAtMs(null);
+    setSecondsUntilClose(null);
+    close();
+  };
   if (!state)
     return (
       <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55">
@@ -343,105 +523,172 @@ export default function PaymentModal({
   const displayedTableNos = state.isPartyBill && state.tableNos.length > 1
     ? state.tableNos
     : [tableNo];
-  const discountAmount = state.discounts.reduce(
-    (sum, discount) => sum + discount.amount,
-    0,
+  const orderedPayments = state.payments.slice().sort(
+    (left, right) => Date.parse(left.paidAt) - Date.parse(right.paidAt) || left.paymentId - right.paymentId,
   );
-  const showOrderBreakdown = state.gross !== state.total;
+  const billSessionIds = new Set(state.sessionIds);
+  const billRows = buildPartyOrderRows(orderDetails
+    .filter(order => billSessionIds.has(order.sessionId) && order.status !== "CANCELLED")
+    .flatMap(order => order.items.map(item => ({ ...item, orderId: order.orderId, sessionId: order.sessionId }))),
+    state.discounts.map(discount => ({
+      sessionId: discount.sessionId,
+      discountType: discount.type,
+      label: discount.label,
+      discountAmount: String(discount.amount),
+      discountRate: null,
+    })));
+  const discountGroups = new Map<string, { label: string; unitAmount: number; count: number; total: number }>();
+  for (const discount of state.discounts) {
+    if (discount.amount <= 0) continue;
+    const key = JSON.stringify([discount.type, discount.label, discount.amount]);
+    const group = discountGroups.get(key) ?? { label: discount.label, unitAmount: discount.amount, count: 0, total: 0 };
+    group.count += 1;
+    group.total += discount.amount;
+    discountGroups.set(key, group);
+  }
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
         aria-modal="true"
-        className="flex max-h-[calc(100dvh-32px)] w-full max-w-[638px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="flex max-h-[calc(100dvh-32px)] w-[988px] shrink-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         role="dialog"
       >
-        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" titleTrailing={<span className="-ml-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-2xl font-bold"><span aria-hidden="true">..</span><span className="inline-flex items-baseline gap-1 whitespace-nowrap"><span className="text-[35px] leading-none">{displayedTableNos.join(" · ")}</span><span className="text-[33px]">T</span></span></span>} trailing={<button className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy} onClick={() => setCustomerSelectOpen(true)} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ? `${selectedCustomer.name} ⋮` : "고객 ⋮"}</button>} />
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_320px]">
-          <section className="flex min-h-0 flex-col border-r border-slate-200 px-[18px] py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
-            <div className="-mr-4 min-h-0 flex-1 overflow-y-auto pr-4">
-            <div className="rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-4 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
-              <div className="space-y-2.5">
-                {showOrderBreakdown && <div className={paymentSummaryRowStyle}>
-                  <span className="text-[20px] font-normal">주문금액</span>
-                  <b className="text-[20px] font-bold">{money(state.gross)}</b>
-                </div>}
-                {showOrderBreakdown && discountAmount > 0 && (
-                  <div className={`${paymentSummaryRowStyle} text-slate-900`}>
-                    <span className="text-[20px] font-normal">할인금액</span>
-                    <b className={`text-[20px] font-bold text-red-600`}>-{money(discountAmount)}</b>
-                  </div>
-                )}
-                <div className={`${paymentSummaryRowStyle} gap-3 text-[20px] font-extrabold text-blue-700`}>
-                  <span className="text-[20px] font-bold text-slate-900">결제금액</span>
-                  <b className={`text-[20px] font-bold text-blue-700`}>{money(state.total)}</b>
-                </div>
-              </div>
-            </div>
-            {(state.payments.length > 0 || stagedCustomerPayment) && <div className="mt-7">
-              <div className={`${paymentHistoryRowGapStyle} rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]`}>
-                {state.payments.map((payment) => {
-                  const prepaid = initialPaymentIds.includes(payment.paymentId);
-                  return (
-                  <div key={payment.paymentId}>
+        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" trailing={<button className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy || transactionCompleted} onClick={() => setCustomerSelectOpen(true)} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ? `${selectedCustomer.name} ⋮` : "고객 ⋮"}</button>} />
+        <div className="grid min-h-0 grid-cols-[350px_minmax(0,1fr)_320px]">
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-slate-200 bg-white [contain:size]">
+            <div className="shrink-0 px-2.5 pt-4">
+              <nav aria-label="결제 주문 정보" className="grid grid-cols-2 gap-0 rounded-xl bg-slate-100 p-0">
+                {([["summary", "주문집계"], ["detail", "주문상세"]] as const).map(([key, label]) => (
                   <button
-                    aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제내역 삭제`}
-                    className={`${paymentInfoRowStyle} w-full rounded-lg py-0 text-left font-normal text-slate-900 transition hover:bg-slate-50 active:bg-slate-100`}
-                    disabled={busy}
-                    onClick={() => {
-                      setCancelError("");
-                      setDeletionTarget({ kind: "SAVED", payment });
-                    }}
+                    className={`relative overflow-hidden rounded-lg py-2 text-[10px] font-bold ${orderTab === key ? `${ORDER_INFO_STYLES[key].bg} text-white` : "border border-slate-200 bg-white text-slate-500"}`}
+                    key={key}
+                    onClick={() => setOrderTab(key)}
                     type="button"
                   >
-                    <span className={`${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle} pl-3`}>
-                      {prepaid ? "선불" : ""}
-                      {paymentMethodLabel(payment)}
-                    </span>
-                    <b className={prepaid ? paymentInfoSmallAlignedAmountStyle : paymentInfoAlignedAmountStyle}>{money(payment.receivedAmount)}</b>
+                    <i className="absolute left-0 top-0 size-3 brightness-75 [clip-path:polygon(0_0,100%_0,0_100%)]" style={{ backgroundColor: ORDER_INFO_STYLES[key].color }} />
+                    {label}
                   </button>
-                  {payment.changeAmount > 0 && (
-                    <div className={`${paymentInfoRowStyle} mt-[7px] text-slate-900`}>
-                      <span className={`${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle} pl-3`}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
-                      <b className={`${paymentInfoAlignedAmountStyle} ${payment.methodCode === "CASH" || payment.methodNameSnapshot ? "text-blue-600" : ""}`}>-{money(payment.changeAmount)}</b>
+                ))}
+              </nav>
+              <div className={`mt-1.5 h-[3px] ${ORDER_INFO_STYLES[orderTab].bg}`} />
+            </div>
+            <div className="mx-2.5 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-b-xl border border-t-0 border-slate-200 px-2.5 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]" style={{ backgroundColor: ORDER_INFO_STYLES[orderTab].tint }}>
+              <div className="shrink-0 border-b border-slate-200 py-1 text-[27px] font-bold text-slate-900">{displayedTableNos.join(". ")}T</div>
+              <div className="mt-3 grid grid-cols-[1fr_52px_76px_58px] border-b border-slate-200 pb-2 text-[11px] font-bold text-slate-500">
+                <span>메뉴명</span>
+                <span className="text-right">단가</span>
+                <span className="text-center">수량</span>
+                <span className="text-right">금액</span>
+              </div>
+              <div>
+                {orderTab === "summary" ? (
+                  <div className="py-3">
+                    {billRows.length ? <OrderSummaryRows items={billRows} /> : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>}
+                    <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-700">
+                      <span>주문합계</span><b>{money(state.gross)}</b>
                     </div>
-                  )}
+                    {[...discountGroups.entries()].map(([key, discount]) => (
+                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_52px_76px_58px] gap-1 text-sm" key={key}>
+                        <span className="min-w-0 truncate" title={discount.label}>{discount.label}</span>
+                        <span className="text-right text-slate-500">{money(discount.unitAmount)}</span>
+                        <span className="text-center text-slate-500">× {discount.count}</span>
+                        <b className="text-right text-red-600">-{money(discount.total)}</b>
+                      </div>
+                    ))}
+                    <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-900">
+                      <span>받을금액</span><b className="text-lg font-extrabold text-blue-700">{money(displayRemaining)}</b>
+                    </div>
                   </div>
+                ) : (
+                  <div className="py-2">
+                    {renderOrderDetails(state.sessionIds)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+          <section className="flex min-h-0 flex-col border-r border-slate-200 px-[18px] py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 pt-2 text-center">
+                <div className="text-base font-medium text-slate-700">총 결제금액</div>
+                <div className="mt-1 text-[30px] font-bold leading-tight text-blue-700">{money(state.total)}원</div>
+              </div>
+              {(state.payments.length > 0 || stagedCustomerPayment) && (
+                <div className="mt-8 flex min-h-0 flex-1 flex-col px-3">
+                  <div className="min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]">
+                {orderedPayments.map(payment => {
+                  const prepaid = initialPaymentIds.includes(payment.paymentId);
+                  return (
+                    <Fragment key={payment.paymentId}>
+                      <button
+                        aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제내역 삭제`}
+                        className={`${paymentInfoRowStyle} w-full items-center py-3 text-left text-slate-900`}
+                        disabled={busy}
+                        onClick={() => {
+                          completionPausedRef.current = true;
+                          setSecondsUntilClose(null);
+                          setCancelError("");
+                          setDeletionTarget({ kind: "SAVED", payment });
+                        }}
+                        type="button"
+                      >
+                        <span className={`min-w-0 truncate ${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle}`}>
+                          {prepaid ? "선불" : ""}{paymentMethodLabel(payment)}
+                        </span>
+                        <b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(payment.receivedAmount)}</b>
+                      </button>
+                      {payment.changeAmount > 0 && (
+                        <div className={`${paymentInfoRowStyle} items-center py-3 text-slate-900`}>
+                          <span className={prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span>
+                          <b className={`${paymentInfoAmountStyle} ${payment.methodCode === "CASH" || payment.methodNameSnapshot ? "text-blue-600" : ""}`}>-{money(payment.changeAmount)}</b>
+                        </div>
+                      )}
+                      {payment.prepaidCreditAmount > 0 && (
+                        <div className={`${paymentInfoRowStyle} items-center py-3 text-slate-900`}>
+                          <span className={paymentInfoSmallLabelStyle}>선불 적립</span>
+                          <b className={paymentInfoSmallAmountStyle}>{money(payment.prepaidCreditAmount)}</b>
+                        </div>
+                      )}
+                    </Fragment>
                   );
                 })}
-                {stagedCustomerPayment && <button
-                  aria-label={`${stagedCustomerPayment.name} 고객결제 예정 내역 삭제`}
-                  className={`${paymentInfoRowStyle} w-full rounded-lg py-0 text-left font-normal text-slate-900 transition hover:bg-slate-50 active:bg-slate-100`}
-                  disabled={busy}
-                  onClick={() => { setCancelError(""); setDeletionTarget({ kind: "STAGED_CUSTOMER" }); }}
-                  type="button"
-                ><span className={`min-w-0 truncate pl-3 ${paymentInfoLabelStyle}`}>{stagedCustomerPayment.name}{stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span><b className={`shrink-0 ${paymentInfoAlignedAmountStyle}`}>{money(stagedCustomerPayment.amount)}</b></button>}
-              </div>
-              <div className="relative mt-7">
-                <div className="overflow-hidden rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)]">
-                  <div className={`${paymentInfoRowStyle} text-[20px] leading-7 font-extrabold ${displayOverpayment > 0 || displayRemaining > 0 ? "text-red-600" : "text-slate-900"}`}>
-                    <span className={`text-[20px] text-slate-900 ${displayOverpayment > 0 ? "font-normal" : "font-bold"}`}>{displayOverpayment > 0 ? "초과결제" : "받을금액"}</span>
-                    <b className={paymentInfoSmallAmountStyle}>{money(displayOverpayment > 0 ? displayOverpayment : displayRemaining)}</b>
+                {stagedCustomerPayment && (
+                  <button
+                    aria-label={`${stagedCustomerPayment.name} 고객결제 예정 내역 삭제`}
+                    className={`${paymentInfoRowStyle} w-full items-center py-3 text-left text-slate-900`}
+                    disabled={busy || transactionCompleted}
+                    onClick={() => { setCancelError(""); setDeletionTarget({ kind: "STAGED_CUSTOMER" }); }}
+                    type="button"
+                  >
+                    <span className={`min-w-0 truncate ${paymentInfoLabelStyle}`}>{stagedCustomerPayment.name}{stagedCustomerPayment.couponQuantity ? ` · 쿠폰 ${stagedCustomerPayment.couponQuantity}매` : ""}</span>
+                    <b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(stagedCustomerPayment.amount)}</b>
+                  </button>
+                )}
+                  </div>
+                  <div className={`${paymentInfoRowStyle} shrink-0 items-center border-t border-slate-200 py-3 text-[20px] leading-7`}>
+                  <span className="font-semibold text-slate-900">{displayOverpayment > 0 ? "초과결제" : "남은금액"}</span>
+                  <b className={`${paymentInfoSmallAmountStyle} ${displayOverpayment > 0 ? "text-red-600" : "text-blue-700"}`}>{money(displayOverpayment > 0 ? displayOverpayment : displayRemaining)}</b>
                   </div>
                 </div>
-              </div>
-              {state.payments.filter(payment => payment.amount > payment.appliedAmount || payment.prepaidCreditAmount > 0).map(payment => (
-                <div className={`mt-7 rounded-[9px] border border-slate-100 bg-slate-50 px-3 py-3 shadow-[3px_4px_10px_rgba(15,23,42,0.10)] ${paymentInfoRowGapStyle} text-slate-900`} key={`prepaid-${payment.paymentId}`}>
-                  <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>매출 적용</span><b className={paymentInfoSmallAmountStyle}>{money(payment.appliedAmount)}</b></div>
-                  {payment.prepaidCreditAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>선불 적립</span><b className={paymentInfoSmallAmountStyle}>{money(payment.prepaidCreditAmount)}</b></div>}
-                   {payment.changeAmount > 0 && <div className={paymentInfoRowStyle}><span className={paymentInfoSmallLabelStyle}>{payment.methodCode === "CASH" || payment.methodNameSnapshot ? "현금 거스름" : "거스름돈"}</span><b className={paymentInfoSmallAmountStyle}>{money(payment.changeAmount)}</b></div>}
-                </div>
-              ))}
-            </div>}
+              )}
             </div>
-            <button
-              className="mt-3 min-h-[72px] w-full shrink-0 rounded-lg border border-slate-300 bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 disabled:opacity-40"
-              disabled={busy || (!state.payments.length && !stagedCustomerPayment)}
-              onClick={() => { setCancelError(""); setResetPaymentsConfirm(true); }}
-              type="button"
-            >결제 초기화</button>
+            <div className="mt-3 grid w-full shrink-0 grid-cols-2 gap-2">
+              <button
+                className={paymentFooterButtonStyle}
+                disabled={busy || (!state.payments.length && !stagedCustomerPayment)}
+                onClick={openPaymentResetConfirm}
+                type="button"
+              >결제 초기화</button>
+              <button
+                className={paymentFooterButtonStyle}
+                disabled={receiptPrinting || autoPrintPending}
+                onClick={() => void printCompletedReceipts(completedCheckoutIds, true)}
+                type="button"
+              >영수증</button>
+            </div>
           </section>
           <section className="flex min-h-0 flex-col px-4 pt-6 pb-4">
-            <NumericInputKeypad className="h-[395.25px]" disabled={busy} inputEdgeToEdge inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
+            <NumericInputKeypad className="h-[395.25px]" disabled={busy || transactionCompleted} inputEdgeToEdge inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
             {error && <p className="mt-2 text-center text-base font-bold text-red-600">{error}</p>}
             <div className="relative z-10 mt-4 w-[286.45px] max-w-full self-center bg-white">
               <div
@@ -452,16 +699,16 @@ export default function PaymentModal({
                 role="group"
               >
               <button
-                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy}
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                disabled={busy || transactionCompleted}
                 onClick={() => pay("CARD")}
                 type="button"
               >
                 카드
               </button>
               <button
-                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy}
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                disabled={busy || transactionCompleted}
                 onClick={() => pay("CASH")}
                 type="button"
               >
@@ -469,9 +716,9 @@ export default function PaymentModal({
               </button>
               <button
                 aria-label="기타"
-                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-xl font-extrabold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
-                disabled={busy}
-                onClick={() => { if (displayRemaining <= 0) { setError(""); setCardErrorDialog("받을 금액이 없습니다."); return; } setError(""); setOtherOpen(true); }}
+                className="min-h-[76px] min-w-0 w-auto flex-1 shrink-0 rounded-xl border border-[#D5DCE5] bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#D5DCE5]"
+                disabled={busy || transactionCompleted}
+                onClick={() => { if (displayRemaining <= 0) { setError(""); setCardErrorDialog({ message: "받을 금액이 없습니다." }); return; } setError(""); setOtherOpen(true); }}
                 type="button"
               >
                 기타
@@ -486,31 +733,42 @@ export default function PaymentModal({
             </div>
             <button
               className="mt-3 min-h-[72px] w-[286.45px] max-w-full self-center rounded-xl bg-blue-600 text-xl font-extrabold text-white disabled:bg-slate-200 disabled:text-slate-400"
-              disabled={busy || displayRemaining > 0}
-              onClick={complete}
+              disabled={busy || !transactionCompleted || state.remaining !== 0}
+              onClick={() => void complete()}
               type="button"
-            >결제완료</button>
+            >{transactionCompleted && state.remaining === 0 && autoCompleteSeconds !== null && autoCompleteSeconds > 0 && secondsUntilClose !== null ? `${secondsUntilClose}초후 결제완료` : "결제완료"}</button>
           </section>
         </div>
       </section>
       {otherOpen && (
-        <OtherPaymentDialog allowOverpayment={Boolean(selectedCustomer) && !stagedCustomerPayment} busy={busy} close={() => setOtherOpen(false)} remaining={displayRemaining} customerRemaining={state.remaining} submit={submitOtherPayment} submitCustomer={stageCustomerPayment} />
+        <OtherPaymentDialog allowOverpayment={Boolean(selectedCustomer) && !stagedCustomerPayment} busy={busy} close={() => setOtherOpen(false)} remaining={displayRemaining} customerRemaining={state.remaining} selectedCustomer={selectedCustomer} submit={submitOtherPayment} submitCustomer={stageCustomerPayment} />
       )}
       {overpaymentPrompt && <ConfirmOverpaymentDialog
+        compact={overpaymentPrompt.kind === "CARD" || overpaymentPrompt.kind === "CASH"}
         methodLabel={overpaymentPrompt.methodLabel}
         amount={overpaymentPrompt.amount}
         due={overpaymentPrompt.due}
         excess={overpaymentPrompt.excess}
         busy={busy}
-        cancel={() => void resolveOverpayment(false)}
+        secondaryLabel={overpaymentPrompt.kind === "CARD" ? "결제 초기화" : "취소"}
+        secondaryAction={() => {
+          if (overpaymentPrompt.kind === "CARD") {
+            setOverpaymentPrompt(null);
+            void resetPayments(true);
+          } else {
+            void resolveOverpayment(false);
+          }
+        }}
         confirm={() => void resolveOverpayment(true)}
       />}
-      {cardErrorDialog && <CardErrorDialog message={cardErrorDialog} close={() => setCardErrorDialog("")} />}
-      {overpaymentBlockDialog && <OverpaymentBlockDialog amount={displayOverpayment} close={() => setOverpaymentBlockDialog(false)} />}
+      {cardErrorDialog && <CardErrorDialog message={cardErrorDialog.message} close={() => {
+        if (cardErrorDialog.resetInputOnClose) setInput("");
+        setCardErrorDialog(null);
+      }} />}
       {customerSelectOpen && <CustomerSelectDialog
         selected={selectedCustomer}
         onClose={() => setCustomerSelectOpen(false)}
-        onSelect={customer => { setSelectedCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
+        onSelect={customer => { onSelectCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
       />}
       {deletionTarget && (
         <PaymentDeletionDialog
@@ -522,6 +780,8 @@ export default function PaymentModal({
             if (busy) return;
             setCancelError("");
             setDeletionTarget(null);
+            completionPausedRef.current = false;
+            if (transactionCompleted && hasPaymentAction) setCompletedAtMs(Date.now());
           }}
           submit={() => void cancelPayment()}
         />
@@ -530,7 +790,7 @@ export default function PaymentModal({
         <PaymentResetDialog
           busy={busy}
           error={cancelError}
-          close={() => { if (!busy) { setResetPaymentsConfirm(false); setCancelError(""); } }}
+          close={() => { if (!busy) { setResetPaymentsConfirm(false); setCancelError(""); completionPausedRef.current = false; if (transactionCompleted && hasPaymentAction) setCompletedAtMs(Date.now()); } }}
           submit={() => void resetPayments()}
           paymentCount={state.payments.length}
         />
@@ -587,33 +847,30 @@ function PaymentResetDialog({ paymentCount, error, busy, close, submit }: { paym
   </div>;
 }
 
-function ConfirmOverpaymentDialog({ methodLabel, amount, due, excess, busy, cancel, confirm }: { methodLabel: string; amount: number; due: number; excess: number; busy: boolean; cancel: () => void; confirm: () => void }) {
+function ConfirmOverpaymentDialog({ compact, methodLabel, amount, due, excess, busy, secondaryLabel, secondaryAction, confirm }: { compact: boolean; methodLabel: string; amount: number; due: number; excess: number; busy: boolean; secondaryLabel: string; secondaryAction: () => void; confirm: () => void }) {
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4">
-    <section aria-modal="true" className="w-full max-w-[480px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
+    <section aria-modal="true" className={`w-full ${compact ? "max-w-[440px]" : "max-w-[480px]"} overflow-hidden rounded-2xl bg-white shadow-2xl`} role="dialog">
       <PosSubHeader title={`${methodLabel} 초과결제 확인`} />
-      <div className="px-7 py-6 text-lg">
-        <p>{methodLabel} 금액이 받을금액보다 많습니다.</p>
-        <p className="mt-2">초과금액 {money(excess)}원을 선불금으로<br />적립하시겠습니까?</p>
-        <div className="mt-4 space-y-1 rounded-lg bg-slate-50 px-4 py-3 text-base text-slate-700">
-          <div className="flex justify-between"><span>받을금액</span><b>{money(due)}</b></div>
-          <div className="flex justify-between"><span>{methodLabel} 결제금액</span><b>{money(amount)}</b></div>
-        </div>
+      <div className={`px-7 ${compact ? "py-5" : "py-6"} text-lg`}>
+        {compact ? (
+          <>
+            <p>받을금액보다 {money(excess)}원 많습니다.</p>
+            <p className="mt-3">{money(excess)}원을 선불금으로 적립하시겠습니까?</p>
+          </>
+        ) : (
+          <>
+            <p>{methodLabel} 금액이 받을금액보다 많습니다.</p>
+            <p className="mt-2">초과금액 {money(excess)}원을 선불금으로<br />적립하시겠습니까?</p>
+            <div className="mt-4 space-y-1 rounded-lg bg-slate-50 px-4 py-3 text-base text-slate-700">
+              <div className="flex justify-between"><span>받을금액</span><b>{money(due)}</b></div>
+              <div className="flex justify-between"><span>{methodLabel} 결제금액</span><b>{money(amount)}</b></div>
+            </div>
+          </>
+        )}
         <div className="mt-6 flex justify-end gap-3">
-          <button className="min-h-12 rounded-lg border border-slate-300 px-6 font-bold" disabled={busy} onClick={cancel} type="button">취소</button>
+          <button className="min-h-12 rounded-lg border border-slate-300 px-6 font-bold" disabled={busy} onClick={secondaryAction} type="button">{secondaryLabel}</button>
           <button className="min-h-12 rounded-lg bg-blue-600 px-6 font-bold text-white disabled:opacity-50" disabled={busy} onClick={confirm} type="button">{busy ? "처리 중..." : "확인"}</button>
         </div>
-      </div>
-    </section>
-  </div>;
-}
-
-function OverpaymentBlockDialog({ amount, close }: { amount: number; close: () => void }) {
-  return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
-    <section aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
-      <PosSubHeader title="초과결제" />
-      <div className="px-7 py-7 text-center text-xl font-bold text-slate-800">
-        <p>결제금액보다 {money(amount)}원이 초과되었습니다.<br />기존 결제를 취소한 후 다시 결제해주세요.</p>
-        <button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-extrabold text-white" onClick={close} type="button">확인</button>
       </div>
     </section>
   </div>;
@@ -624,7 +881,7 @@ function CardErrorDialog({ message, close }: { message: string; close: () => voi
     <section aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
       <PosSubHeader title="결제 확인" />
       <div className="px-7 py-7 text-center text-xl font-bold text-slate-800">
-        <p>{message}</p>
+        <p className="whitespace-pre-line">{message}</p>
         <button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-extrabold text-white" onClick={close} type="button">확인</button>
       </div>
     </section>

@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
-internal static class PrinterTest
+internal static partial class PrinterTest
 {
     // SRP-350III: 80 mm paper, 72 mm printable area at 180 dpi (7 dots/mm).
     private const int Width = 504;

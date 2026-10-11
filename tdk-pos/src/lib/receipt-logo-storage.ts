@@ -54,15 +54,17 @@ export async function removeReceiptLogo(fileName: string): Promise<void> {
   await rm(logoPath(fileName), { force: true });
 }
 
-export async function getReceiptLogoRaster(): Promise<{ width: number; height: number; pixelsBase64: string } | null> {
+export async function getReceiptLogoRaster(options: { throwOnLoadError?: boolean } = {}): Promise<{ width: number; height: number; pixelsBase64: string } | null> {
   try {
     const fileName = await getReceiptLogoFileName();
     if (!fileName) return null;
     const { data, info } = await sharp(await readReceiptLogo(fileName)).greyscale().raw().toBuffer({ resolveWithObject: true });
-    if (info.width > receiptLogoMaxWidth || info.height > receiptLogoMaxHeight || info.channels !== 1) return null;
+    if (info.width > receiptLogoMaxWidth || info.height > receiptLogoMaxHeight || info.channels !== 1)
+      throw new Error(`Invalid receipt logo raster: ${fileName}`);
     return { width: info.width, height: info.height, pixelsBase64: data.toString("base64") };
   } catch (error) {
-    console.error("receipt logo load failed; using store name", error);
+    console.error("receipt logo load failed", error);
+    if (options.throwOnLoadError) throw error;
     return null;
   }
 }

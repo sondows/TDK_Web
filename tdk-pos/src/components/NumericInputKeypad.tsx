@@ -1,6 +1,6 @@
 "use client";
 
-const defaultKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "000", "0", "C"];
+const defaultKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0", "C"];
 
 type NumericInputKeypadProps = {
   value: string;
@@ -37,14 +37,15 @@ export default function NumericInputKeypad({ value, onKey, disabled = false, dis
     <div className={`grid min-h-0 flex-1 grid-cols-3 grid-rows-4 ${scaled ? "" : "mt-1 translate-y-[2px] gap-x-1 gap-y-0.5"}`} style={{ ...(scaled ? { marginTop: 4 * scale, transform: `translateY(${2 * scale}px)`, columnGap: 4 * scale, rowGap: 2 * scale } : {}), ...(inputEdgeToEdge ? { paddingLeft: containerPadding, paddingRight: containerPadding, paddingBottom: containerPadding } : {}) }}>
       {keys.map((key) => (
         <button
-          className={`font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${scaled ? "" : key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "000" ? "text-2xl" : "text-3xl"}`}
+          aria-label={key === "BS" ? "마지막 숫자 삭제" : undefined}
+          className={`font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${scaled ? "" : key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "00" ? "text-2xl" : "text-3xl"}`}
           disabled={disabled || disabledKeys.includes(key)}
           key={key}
           onClick={() => onKey(key)}
-          style={scaled ? { borderRadius: 8 * scale, fontSize: (key === "000" ? 24 : 30) * scale } : undefined}
+          style={scaled ? { borderRadius: 8 * scale, fontSize: (key === "00" ? 24 : 30) * scale } : undefined}
           type="button"
         >
-          {key}
+          {key === "BS" ? "⌫" : key}
         </button>
       ))}
     </div>

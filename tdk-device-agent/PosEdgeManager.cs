@@ -53,77 +53,115 @@ internal sealed class PosEdgeManager
 
         lock (gate)
         {
-            // The handle returned by Process.Start belongs to this agent's Edge
-            // launch. Use it directly while it is alive; no other Edge can match it.
-            if (launchedProcess is { } launched)
+            var stoppedAny = false;
+            for (var attempt = 0; attempt < 3; attempt++)
             {
-                try
+                var processIds = FindManagedProcessIds();
+                var launchedId = launchedProcess is { HasExited: false } launched ? launched.Id : (int?)null;
+                var storedPidMatched = managedProcessId is int storedId && processIds.Contains(storedId);
+                logger.LogInformation(
+                    "TDK-POS Edge exit attempt {Attempt}: stored PID {StoredPid}, stored PID matched profile {StoredPidMatched}, launched PID {LaunchedPid}, profile root PIDs {ProcessIds}",
+                    attempt + 1, managedProcessId, storedPidMatched, launchedId, string.Join(",", processIds));
+
+                if (managedProcessId is int trackedId && processIds.Remove(trackedId))
+                    processIds.Insert(0, trackedId);
+                if (launchedId is int ownId && !processIds.Contains(ownId))
+                    processIds.Add(ownId);
+
+                if (processIds.Count == 0)
                 {
-                    if (!launched.HasExited)
-                    {
-                        launched.Kill(entireProcessTree: true);
-                        if (!launched.WaitForExit(3000))
-                            throw new TimeoutException($"TDK-POS Edge PID {launched.Id} did not exit.");
-                        logger.LogInformation("TDK-POS Edge stopped with PID {ProcessId}", launched.Id);
-                        managedProcessId = null;
-                        return true;
-                    }
+                    if (!stoppedAny)
+                        logger.LogWarning("No live TDK-POS Edge PID was found for stored PID {StoredPid}", managedProcessId);
+                    break;
                 }
-                catch (InvalidOperationException)
+
+                foreach (var processId in processIds)
                 {
-                    // Edge handed the app window to another process in its profile.
-                }
-                finally
-                {
-                    launched.Dispose();
-                    launchedProcess = null;
+                    // A stored PID is only used if it still belongs to the dedicated
+                    // POS profile. The launch handle is safe because this agent owns it.
+                    if (processId != launchedId && !FindManagedProcessIds().Contains(processId))
+                        continue;
+                    stoppedAny |= StopProcessTree(processId);
                 }
             }
 
-            // After an agent restart, rediscover only the Edge root launched with
-            // the POS app URL and this agent's dedicated profile.
-            var processIds = FindManagedProcessIds();
-            if (processIds.Count == 0) return false;
-
-            if (managedProcessId is int trackedId && processIds.Remove(trackedId))
-                processIds.Insert(0, trackedId);
-
-            foreach (var processId in processIds)
-            {
-                try
-                {
-                    using var process = Process.GetProcessById(processId);
-                    process.Kill(entireProcessTree: true);
-                    if (!process.WaitForExit(3000))
-                        throw new TimeoutException($"TDK-POS Edge PID {processId} did not exit.");
-                    logger.LogInformation("TDK-POS Edge stopped with PID {ProcessId}", processId);
-                }
-                catch (ArgumentException)
-                {
-                    // The POS window closed after the process list was read.
-                }
-                catch (InvalidOperationException)
-                {
-                    // The POS window closed after the process list was read.
-                }
-            }
-
+            var remainingIds = FindManagedProcessIds();
+            if (remainingIds.Count > 0)
+                throw new InvalidOperationException($"TDK-POS Edge profile is still running with PID(s): {string.Join(",", remainingIds)}");
+            launchedProcess?.Dispose();
+            launchedProcess = null;
             managedProcessId = null;
-            return true;
+            return stoppedAny;
         }
+    }
+
+    private bool StopProcessTree(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (process.HasExited) return false;
+        }
+        catch (ArgumentException)
+        {
+            logger.LogInformation("TDK-POS Edge PID {ProcessId} no longer exists", processId);
+            return false;
+        }
+
+        var taskkill = Path.Combine(Environment.SystemDirectory, "taskkill.exe");
+        var startInfo = new ProcessStartInfo(taskkill)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("/PID");
+        startInfo.ArgumentList.Add(processId.ToString());
+        startInfo.ArgumentList.Add("/T");
+        startInfo.ArgumentList.Add("/F");
+        logger.LogInformation("TDK-POS Edge PID {ProcessId} exists; running {Command}",
+            processId, $"{taskkill} /PID {processId} /T /F");
+        using var killer = Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"taskkill could not start for TDK-POS Edge PID {processId}");
+        var outputTask = killer.StandardOutput.ReadToEndAsync();
+        var errorTask = killer.StandardError.ReadToEndAsync();
+        if (!killer.WaitForExit(10000))
+        {
+            killer.Kill();
+            throw new TimeoutException($"taskkill timed out for TDK-POS Edge PID {processId}");
+        }
+        var output = outputTask.GetAwaiter().GetResult();
+        var error = errorTask.GetAwaiter().GetResult();
+        logger.LogInformation("TDK-POS Edge taskkill PID {ProcessId}: exit code {ExitCode}, output {Output}, error {Error}",
+            processId, killer.ExitCode, output.Trim(), error.Trim());
+        if (killer.ExitCode != 0 && ProcessExists(processId))
+            throw new InvalidOperationException($"taskkill failed for TDK-POS Edge PID {processId}: {error.Trim()}");
+        return true;
+    }
+
+    private static bool ProcessExists(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException) { return false; }
     }
 
     private List<int> FindManagedProcessIds()
     {
-        // A dedicated profile gives the POS its own Edge browser process. Match both
-        // that profile and the app URL before terminating any process.
+        // Edge can hand an app window to another browser root in its dedicated
+        // profile. The root may no longer carry --app, so match the profile and
+        // exclude child processes instead of requiring the original app URL.
         var escapedProfile = profilePath.Replace("'", "''");
-        var script = $"$profile = '{escapedProfile}'; $url = '{PosUrl}'; " +
+        var script = $"$profile = '{escapedProfile}'; " +
             "$session = (Get-Process -Id $PID).SessionId; " +
             "Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | " +
             "Where-Object { $_.SessionId -eq $session -and $_.CommandLine -and " +
             "$_.CommandLine.Contains('--user-data-dir=') -and $_.CommandLine.Contains($profile) -and " +
-            "$_.CommandLine.Contains('--app=') -and $_.CommandLine.Contains($url) } | " +
+            "$_.CommandLine -notmatch '(^|\\s)--type=' } | " +
             "ForEach-Object { $_.ProcessId }";
 
         var powerShell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");

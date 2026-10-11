@@ -82,6 +82,27 @@ if (!textRaster.AsSpan(0, 48 * (width / 8)).SequenceEqual(invalidRaster.AsSpan(0
     throw new InvalidOperationException("Invalid logo did not fall back to the store name");
 Console.WriteLine("logo fallback and cut-final command order OK");
 
+var notice = new AccountTransferNotice
+{
+    StoreName = "탑동김치찌개",
+    ReceiptLogo = logo,
+    TotalAmount = 9_999_999,
+    BankName = "신한은행",
+    AccountHolder = "손창호",
+    AccountNumber = "010-6690-5475",
+};
+if (notice.Validate() is { } noticeError) throw new InvalidOperationException(noticeError);
+var noticeRender = typeof(PrinterTest).GetMethod("RenderAccountTransfer", BindingFlags.NonPublic | BindingFlags.Static)
+    ?? throw new InvalidOperationException("RenderAccountTransfer not found");
+var noticeRaster = (byte[])noticeRender.Invoke(null, [notice])!;
+WriteBitmap(Path.Combine(outputDirectory, "account-transfer-notice.bmp"), noticeRaster, width);
+notice.ReceiptLogo = null;
+var textNoticeRaster = (byte[])noticeRender.Invoke(null, [notice])!;
+if (textNoticeRaster.Length == 0 || textNoticeRaster.Length % (width / 8) != 0)
+    throw new InvalidOperationException("Account transfer text fallback raster is invalid");
+WriteBitmap(Path.Combine(outputDirectory, "account-transfer-no-logo.bmp"), textNoticeRaster, width);
+Console.WriteLine($"account transfer notice: OK ({noticeRaster.Length / (width / 8)} px)");
+
 static void WriteBitmap(string path, byte[] raster, int width)
 {
     var height = raster.Length / (width / 8);

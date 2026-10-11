@@ -8,5 +8,7 @@
   <ItemGroup>
     <Compile Include="../../PrinterTest.cs" Link="PrinterTest.cs" />
     <Compile Include="../../SaleReceipt.cs" Link="SaleReceipt.cs" />
+    <Compile Include="../../AccountTransferNotice.cs" Link="AccountTransferNotice.cs" />
+    <Compile Include="../../AccountTransferPrinter.cs" Link="AccountTransferPrinter.cs" />
   </ItemGroup>
 </Project>

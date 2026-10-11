@@ -5,11 +5,14 @@ import PinKeypad from "@/components/PinKeypad";
 import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
 import { PIN_LENGTH } from "@/lib/pin";
-import { formatSessionElapsed } from "@/lib/session-time";
 import type { TableFinancials } from "@/lib/table-session-financials";
 import { buildPartyOrderRows, type SummaryRow } from "@/lib/pos-order-summary-rows";
 import PaymentModal from "./PaymentModal";
+import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
+import OrderTableInfoHeader from "./OrderTableInfoHeader";
+import OrderSummaryRows from "./OrderSummaryRows";
+import { ORDER_INFO_STYLES } from "./order-info-styles";
 type SessionDiscount = {
   sessionId: number;
   discountType: "SNS_REVIEW" | "AMOUNT" | "PERCENT";
@@ -20,6 +23,7 @@ type SessionDiscount = {
 type Table = {
   tableId: number;
   sessionId: number | null;
+  groupId: number | null;
   tableNo: string;
   tableName: string | null;
   personCount: number | null;
@@ -58,6 +62,7 @@ type OrderDetail = {
   orderId: number;
   sessionId: number;
   orderedAt: string;
+  status: string;
   items: DetailItem[];
 };
 type Tab = "summary" | "pending" | "detail" | "table" | "kitchen";
@@ -109,8 +114,8 @@ export const pendingCartItemKey = (item: PendingCartItem) => {
 };
 const styles: Record<Tab, { bg: string; color: string; tint: string }> = {
   pending: { bg: "bg-[#DC2626]", color: "#DC2626", tint: "#FEF2F2" },
-  summary: { bg: "bg-[#2563EB]", color: "#2563EB", tint: "#EFF6FF" },
-  detail: { bg: "bg-[#7C3AED]", color: "#7C3AED", tint: "#F5F3FF" },
+  summary: ORDER_INFO_STYLES.summary,
+  detail: ORDER_INFO_STYLES.detail,
   table: { bg: "bg-[#EA580C]", color: "#EA580C", tint: "#FFF7ED" },
   kitchen: { bg: "bg-[#2563EB]", color: "#2563EB", tint: "#EFF6FF" },
 };
@@ -153,6 +158,8 @@ const empty = (key: string): CancelState => ({
 });
 export default function OrderSummaryPanel({
   selected,
+  customerSelectOpen,
+  setCustomerSelectOpen,
   items,
   total,
   cart,
@@ -172,11 +179,16 @@ export default function OrderSummaryPanel({
   onCancellationSuccess,
   onPaymentCompleted,
   onCashPaymentRegistered,
+  onPrintReceipt,
+  receiptPrinting,
   party,
   physicalSessionIds,
+  sessionTableNos,
   discounts,
 }: {
   selected: Table | null;
+  customerSelectOpen: boolean;
+  setCustomerSelectOpen: (open: boolean) => void;
   items: SummaryRow[];
   total: number;
   cart: PendingCartItem[];
@@ -196,6 +208,8 @@ export default function OrderSummaryPanel({
   onCancellationSuccess: () => void;
   onPaymentCompleted: () => void;
   onCashPaymentRegistered: () => void;
+  onPrintReceipt: (checkoutId?: number, isReprint?: boolean) => Promise<void>;
+  receiptPrinting: boolean;
   party: {
     sessionIds: number[];
     tableNos: string[];
@@ -203,6 +217,7 @@ export default function OrderSummaryPanel({
     financials: TableFinancials;
   } | null;
   physicalSessionIds: number[];
+  sessionTableNos: Record<number, string>;
   discounts: SessionDiscount[];
 }) {
   const sessionId = selected?.sessionId ?? null,
@@ -237,7 +252,13 @@ export default function OrderSummaryPanel({
   void isFullOrderCancellation;
   const [now, setNow] = useState(0);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const blockingUiOpen = paymentOpen || c.confirm || c.reauth;
+  const [customersByScope, setCustomersByScope] = useState<Record<string, SelectedCustomer | null>>({});
+  const customerScopeKey = selected?.sessionId ? selected.groupId !== null ? `group:${selected.groupId}` : `session:${selected.sessionId}` : null;
+  const selectedCustomer = customerScopeKey === null ? null : customersByScope[customerScopeKey] ?? null;
+  const selectCustomer = (customer: SelectedCustomer | null) => {
+    if (customerScopeKey !== null) setCustomersByScope(current => ({ ...current, [customerScopeKey]: customer }));
+  };
+  const blockingUiOpen = paymentOpen || customerSelectOpen || c.confirm || c.reauth;
   useEffect(() => {
     onBlockingUiChange(blockingUiOpen);
   }, [blockingUiOpen, onBlockingUiChange]);
@@ -361,18 +382,19 @@ export default function OrderSummaryPanel({
       ),
     ];
   };
-  const rows = details.map((o, n) => (
+  const renderDetailRows = (readOnly: boolean, scopedDetails = details, showTable = false) => scopedDetails.map((o, n) => (
     <section
       className="border-b border-violet-200 py-2 last:border-0"
       key={o.orderId}
     >
       <header className="flex items-baseline gap-1.5 border-b border-violet-100 pb-1 text-sm font-bold text-violet-800">
+        {showTable && <span>{sessionTableNos[o.sessionId] ? `${sessionTableNos[o.sessionId]}T` : `세션 ${o.sessionId}`} ·</span>}
         <span>{n + 1}차 주문</span>
         <time className="font-medium text-violet-700">({time(o.orderedAt)})</time>
       </header>
       {orderedItems(o.items).map((i) => {
         const d = draft(i),
-          selectable = c.mode && i.effectiveQty > 0,
+          selectable = !readOnly && c.mode && i.effectiveQty > 0,
           selectedForCancellation = selectable && d.checked,
           fullyCancelled = i.effectiveQty === 0,
           effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
@@ -451,22 +473,7 @@ export default function OrderSummaryPanel({
       })}
     </section>
   ));
-  const renderSummaryRow = (item: SummaryRow, component = false) => (
-    <div className={`grid grid-cols-[1fr_52px_76px_58px] gap-1 text-sm ${component ? "pl-3 text-slate-600" : ""}`} key={item.rowKey}>
-      <span className="truncate font-medium">{component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}{item.name}{item.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
-      <span className="text-right text-slate-500">
-        {new Intl.NumberFormat("ko-KR").format(item.itemType === "SERVICE" ? 0 : item.unitPrice)}
-      </span>
-      <span className="text-center text-slate-500">× {item.qty}</span>
-      <b className="text-right">{money(item.total)}</b>
-    </div>
-  );
-  const summaryRows = items.map((item) => (
-    <div className="space-y-1" key={item.rowKey}>
-      {renderSummaryRow(item)}
-      {item.components.map((component) => renderSummaryRow(component, true))}
-    </div>
-  ));
+  const rows = renderDetailRows(false);
   const pendingRows = cart.map((i) => (
     <div className="space-y-1" key={pendingCartItemKey(i)}>
       <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
@@ -556,13 +563,13 @@ export default function OrderSummaryPanel({
       <b className="text-blue-600">- {money(prepaidAmount)}</b>
     </div>
   ) : null;
-  const partyOrdersSection =
+  const partyOrdersSection = (viewTab: "summary" | "detail") =>
     partySessionIds.length > 0 ? (
       <section className="mt-5 border-t-2 border-violet-200 pt-3">
         <h3 className="mb-2 text-sm font-extrabold text-violet-800">
           일행 주문
         </h3>
-        {tab !== "summary" && (
+        {viewTab !== "summary" && (
           <div className="grid grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1 border-b border-violet-100 pb-1 text-[11px] font-bold text-slate-500">
             <span>메뉴명</span>
             <span className="text-right">단가</span>
@@ -610,6 +617,30 @@ export default function OrderSummaryPanel({
         </div>
       </section>
     ) : null;
+  const renderOrderContent = (viewTab: "summary" | "detail", readOnly = false) => (
+    <div className={readOnly ? (viewTab === "summary" ? "py-3" : "py-2") : viewTab === "summary" ? "pos-order-content" : "pos-order-items-scroll min-h-0 flex-1 overflow-y-auto py-2"}>
+      <div className={!readOnly && viewTab === "summary" ? "pos-order-items-scroll py-3" : ""}>
+        {viewTab === "summary"
+          ? items.length
+            ? <OrderSummaryRows items={items} />
+            : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>
+          : details.length
+            ? readOnly ? renderDetailRows(true) : rows
+            : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>}
+        {hasBillingDiscount && <div className={`mt-3 flex justify-between ${viewTab === "summary" ? "border-t border-blue-200" : ""} pt-3 text-base font-bold text-slate-700`}>
+          <span>주문합계</span>
+          <b>{money(billingGrossTotal)}</b>
+        </div>}
+        {discountRows(billingDiscounts)}
+        {prepaidRow}
+        <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : "border-violet-200"} pt-3 text-base font-bold text-slate-900`}>
+          <span>받을금액</span>
+          <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
+        </div>
+        {partyOrdersSection(viewTab)}
+      </div>
+    </div>
+  );
   return (
     <section className="relative flex min-h-0 flex-1 flex-col rounded-2xl bg-white p-4 shadow-sm">
       <nav className="grid grid-cols-5 gap-1 rounded-xl bg-slate-100 p-1">
@@ -633,50 +664,7 @@ export default function OrderSummaryPanel({
         className="flex min-h-0 flex-1 flex-col rounded-xl px-2.5"
         style={{ backgroundColor: styles[tab].tint }}
       >
-        {selected && (
-          <div className="mt-3 flex items-start gap-3 border-b border-slate-200 pb-2">
-            <b className="shrink-0 text-[40px] leading-none">
-              {selected.tableNo}
-            </b>
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-3">
-                <b className="shrink-0 text-sm text-slate-500">테이블</b>
-                {selected.sessionId && (
-                  <p className="min-w-0 truncate text-[11px] text-slate-500">
-                    이용 :{" "}
-                    {selected.openedAt
-                      ? `${formatSessionElapsed(selected.openedAt, now)}(${time(selected.openedAt)})`
-                      : "-"}
-                  </p>
-                )}
-                {selected.sessionId && (
-                  <p className="ml-auto shrink-0 text-xs text-slate-500">
-                    성인 {selected.personCount ?? 0}명
-                    {partyTotals ? ` (=${partyTotals.adult}명)` : ""}
-                  </p>
-                )}
-              </div>
-              {selected.sessionId &&
-                (partyTableNos.length > 0 ||
-                selected.babyCount ||
-                partyTotals?.baby ? (
-                  <div className="mt-1 flex min-w-0 items-center gap-3">
-                    {partyTableNos.length > 0 && (
-                      <p className="min-w-0 truncate text-xs text-slate-500">
-                        일행 {partyTableNos.map((no) => `+${no}T`).join(" ")}
-                      </p>
-                    )}
-                    {selected.babyCount || partyTotals?.baby ? (
-                      <p className="ml-auto shrink-0 text-xs text-slate-500">
-                        아동 {selected.babyCount ?? 0}명
-                        {partyTotals ? ` (=${partyTotals.baby}명)` : ""}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null)}
-            </div>
-          </div>
-        )}
+        <OrderTableInfoHeader selected={selected} selectedCustomer={selectedCustomer} partyTableNos={partyTableNos} partyTotals={partyTotals} now={now} onSelectCustomer={() => setCustomerSelectOpen(true)} />
         <div className="mt-3 grid grid-cols-[1fr_52px_76px_58px] border-b border-slate-200 pb-2 text-[11px] font-bold text-slate-500">
           <span>메뉴명</span>
           <span className="text-right">단가</span>
@@ -685,28 +673,7 @@ export default function OrderSummaryPanel({
         </div>
         <div className="min-h-0 flex flex-1 flex-col">
           {tab === "summary" ? (
-            <div className="pos-order-content">
-              <div className="pos-order-items-scroll py-3">
-                {summaryRows.length ? (
-                  <div className="flex flex-col gap-y-[7px]">{summaryRows}</div>
-                ) : (
-                  <p className="py-6 text-center text-sm text-slate-400">
-                    현재 주문 내역이 없습니다.
-                  </p>
-                )}
-                {hasBillingDiscount && <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-700">
-                  <span>주문합계</span>
-                  <b>{money(billingGrossTotal)}</b>
-                </div>}
-                {discountRows(billingDiscounts)}
-                {prepaidRow}
-                <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-900">
-                  <span>받을금액</span>
-                  <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
-                </div>
-                {partyOrdersSection}
-              </div>
-            </div>
+            renderOrderContent("summary")
           ) : tab === "pending" ? (
             <div className="pos-order-content">
               <div className="pos-order-items-scroll py-3">
@@ -727,28 +694,7 @@ export default function OrderSummaryPanel({
               )}
             </div>
           ) : tab === "detail" ? (
-            <div className="pos-order-items-scroll min-h-0 flex-1 overflow-y-auto py-2">
-              {rows.length ? (
-                rows
-              ) : (
-                <p className="py-6 text-center text-sm text-slate-400">
-                  현재 주문 내역이 없습니다.
-                </p>
-              )}
-              {sessionId && hasBillingDiscount && (
-                <div className="mt-3 flex justify-between pt-3 text-base font-bold text-slate-700">
-                  <span>주문합계</span>
-                  <b>{money(billingGrossTotal)}</b>
-                </div>
-              )}
-              {discountRows(billingDiscounts)}
-              {prepaidRow}
-              <div className="mt-3 flex justify-between border-t border-violet-200 pt-3 text-base font-bold text-slate-900">
-                <span>받을금액</span>
-                <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
-              </div>
-              {partyOrdersSection}
-            </div>
+            renderOrderContent("detail")
           ) : (
             <p className="py-6 text-center text-sm text-slate-400">
               해당 기능은 준비 중입니다.
@@ -860,8 +806,17 @@ export default function OrderSummaryPanel({
           submit={(staffCode, pin) => void execute({ staffCode, pin })}
         />
       )}
-      {paymentOpen && selected?.sessionId && (
+      {paymentOpen && selected && (
         <PaymentModal
+          orderDetails={orderDetails}
+          renderOrderDetails={sessionIds => {
+            const scopedDetails = orderDetails.filter(order => sessionIds.includes(order.sessionId) && order.status !== "CANCELLED").slice().sort((a, b) => a.orderId - b.orderId);
+            return scopedDetails.length
+              ? renderDetailRows(true, scopedDetails, true)
+              : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>;
+          }}
+          selectedCustomer={selectedCustomer}
+          onSelectCustomer={selectCustomer}
           close={() => {
             setPaymentOpen(false);
             onCancellationSuccess();
@@ -871,8 +826,17 @@ export default function OrderSummaryPanel({
             onPaymentCompleted();
           }}
           onCashPaymentRegistered={onCashPaymentRegistered}
+          onPrintReceipt={onPrintReceipt}
+          receiptPrinting={receiptPrinting}
           tableId={selected.tableId}
           tableNo={selected.tableNo}
+        />
+      )}
+      {customerSelectOpen && selected?.sessionId && (
+        <CustomerSelectDialog
+          selected={selectedCustomer}
+          onClose={() => setCustomerSelectOpen(false)}
+          onSelect={customer => { selectCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
         />
       )}
     </section>

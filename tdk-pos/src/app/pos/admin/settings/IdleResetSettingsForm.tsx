@@ -9,14 +9,19 @@ type LoginMode = "PERSONAL" | "SHARED";
 export default function IdleResetSettingsForm({
   initialSeconds,
   initialLoginMode,
+  initialPaymentAutoCompleteSeconds,
 }: {
   initialSeconds: number;
   initialLoginMode: LoginMode;
+  initialPaymentAutoCompleteSeconds: number;
 }) {
   const router = useRouter();
   const [seconds, setSeconds] = useState(String(initialSeconds));
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [paymentAutoCompleteSeconds, setPaymentAutoCompleteSeconds] = useState(String(initialPaymentAutoCompleteSeconds));
+  const [paymentAutoCompleteMessage, setPaymentAutoCompleteMessage] = useState("");
+  const [savingPaymentAutoComplete, setSavingPaymentAutoComplete] = useState(false);
   const [loginMode, setLoginMode] = useState<LoginMode>(initialLoginMode);
   const [savedLoginMode, setSavedLoginMode] = useState<LoginMode>(initialLoginMode);
   const [loginModeMessage, setLoginModeMessage] = useState("");
@@ -58,7 +63,7 @@ export default function IdleResetSettingsForm({
       if (!result.success) {
         if (response.status === 401 || response.status === 403) {
           setLoginModeMessage("관리자 인증이 필요합니다. 관리 화면에서 다시 인증해주세요.");
-          router.push("/admin/settings/store");
+          router.push("/admin/settings/pos");
         } else {
           setLoginModeMessage(result.message ?? "로그인 방식 저장에 실패했습니다.");
         }
@@ -70,6 +75,29 @@ export default function IdleResetSettingsForm({
       setLoginModeMessage("네트워크 오류가 발생했습니다.");
     } finally {
       setSavingLoginMode(false);
+    }
+  };
+
+  const savePaymentAutoComplete = async () => {
+    const value = Number(paymentAutoCompleteSeconds);
+    if (!Number.isSafeInteger(value) || value < 0) {
+      setPaymentAutoCompleteMessage("0 이상의 정수 초를 입력하세요.");
+      return;
+    }
+    setSavingPaymentAutoComplete(true);
+    setPaymentAutoCompleteMessage("");
+    try {
+      const response = await fetch("/api/pos-settings/payment-auto-complete", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: value }),
+      });
+      const result = await response.json() as { success?: boolean; message?: string };
+      setPaymentAutoCompleteMessage(response.ok && result.success ? "저장했습니다." : result.message ?? "설정 저장에 실패했습니다.");
+    } catch {
+      setPaymentAutoCompleteMessage("네트워크 오류가 발생했습니다.");
+    } finally {
+      setSavingPaymentAutoComplete(false);
     }
   };
 
@@ -101,6 +129,19 @@ export default function IdleResetSettingsForm({
         </div>
         {loginModeMessage && <p className="mt-4 text-sm font-medium text-blue-700">{loginModeMessage}</p>}
         <button className="mt-6 min-h-[64px] w-full rounded-xl bg-blue-600 px-5 py-3 text-lg font-bold text-white disabled:bg-slate-300" disabled={savingLoginMode || loginMode === savedLoginMode} onClick={() => void saveLoginMode()} type="button">{savingLoginMode ? "저장 중" : "로그인 방식 저장"}</button>
+      </section>
+
+      <section className="rounded-2xl bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-bold">결제창 자동 완료</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">결제 완료 후 지정된 시간이 지나면 결제창을 자동으로 닫습니다.</p>
+        <label className="mt-6 block text-sm font-bold">자동 완료 시간
+          <span className="mt-2 flex items-center gap-2"><input className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-right font-bold" min="0" onChange={event => setPaymentAutoCompleteSeconds(event.target.value)} step="1" type="number" value={paymentAutoCompleteSeconds} /><span>초</span></span>
+        </label>
+        <p className="mt-2 text-xs text-slate-400">0초는 자동 완료를 사용하지 않습니다.</p>
+        {paymentAutoCompleteMessage && <p className="mt-4 text-sm font-medium text-blue-700">{paymentAutoCompleteMessage}</p>}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:bg-slate-300" disabled={savingPaymentAutoComplete} onClick={() => void savePaymentAutoComplete()} type="button">{savingPaymentAutoComplete ? "저장 중" : "저장"}</button>
+        </div>
       </section>
     </div>
   );

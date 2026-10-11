@@ -77,7 +77,7 @@ export default function StoreInfoForm({ initialStoreInfo, initialLogoFileName }:
       if (!response.ok || !result.success) {
         setIsError(true);
         setMessage(result.message ?? "매장정보 저장에 실패했습니다. 다시 시도해 주세요.");
-        if (response.status === 401 || response.status === 403) router.push("/admin/settings/store");
+        if (response.status === 401 || response.status === 403) router.push("/admin/settings/printing/nameplate");
         return;
       }
       if (result.storeInfo) setStoreInfo(result.storeInfo);
@@ -97,7 +97,7 @@ export default function StoreInfoForm({ initialStoreInfo, initialLogoFileName }:
   }
 
   return <section className="mx-auto mt-6 max-w-3xl rounded-2xl bg-white p-7 shadow-sm">
-    <h2 className="text-2xl font-bold">매장 기본정보</h2>
+    <h2 className="text-2xl font-bold">매장 명판 설정</h2>
     <form className="mt-6 space-y-5" onSubmit={(event) => void save(event)}>
       {fields.map((field) => <label className="block text-lg font-bold text-slate-800" key={field.key}>
         {field.label}
