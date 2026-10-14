@@ -1,4 +1,4 @@
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
@@ -8,6 +8,7 @@ import { summarizeSessionFinancials } from "@/lib/table-session-financials";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
+import { createLookupCode } from "@/lib/lookup-code";
 
 type PaymentCode = "CARD" | "CASH" | "TRANSFER" | "MEAL_TICKET" | "GIFT" | "OTHER";
 const paymentCodes = new Set<PaymentCode>(["CARD", "CASH", "TRANSFER", "MEAL_TICKET", "GIFT", "OTHER"]);
@@ -16,6 +17,28 @@ const decimal = (value: number) => won(value).toFixed(2);
 const signedDecimal = (value: number) => Math.trunc(value).toFixed(2);
 
 class CheckoutError extends Error { constructor(message: string, readonly status = 409) { super(message); } }
+
+async function ensureSaleLookupCodes(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], checkoutIds: number[]) {
+  if (!checkoutIds.length) return;
+  const rows = await tx.select({ checkoutId: checkouts.checkoutId, status: checkouts.status, code: checkouts.receiptLookupCode })
+    .from(checkouts).where(inArray(checkouts.checkoutId, checkoutIds)).for("update");
+  for (const row of rows) {
+    if (row.status !== "PAID" || row.code) continue;
+    let assigned = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        await tx.update(checkouts).set({ receiptLookupCode: createLookupCode("SALE") })
+          .where(eq(checkouts.checkoutId, row.checkoutId));
+        assigned = true;
+        break;
+      } catch (error) {
+        const databaseError = error as { code?: string; cause?: { code?: string } };
+        if (databaseError.code !== "ER_DUP_ENTRY" && databaseError.cause?.code !== "ER_DUP_ENTRY") throw error;
+      }
+    }
+    if (!assigned) throw new CheckoutError("판매 조회 코드가 중복되어 결제를 완료하지 못했습니다.", 500);
+  }
+}
 
 async function closeSessionsAndMerges(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -170,11 +193,14 @@ async function activeCheckoutIds(tx: Parameters<Parameters<typeof db.transaction
 
 async function paymentStateForCheckouts(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], checkoutIds: number[]) {
   if (!checkoutIds.length) return [];
-  const rows = await tx.select({ paymentId: payments.paymentId, amount: payments.amount, appliedAmount: payments.appliedAmount, methodCode: paymentMethods.methodCode, methodName: paymentMethods.methodName, methodNameSnapshot: paymentOtherDetails.methodNameSnapshot, quantity: paymentOtherDetails.quantity, customerCouponQuantity: payments.customerCouponQuantity, customerCouponUnitAmountSnapshot: payments.customerCouponUnitAmountSnapshot, otherSubmittedAmount: paymentOtherDetails.submittedAmount, otherChangeAmount: paymentOtherDetails.cashChangeAmount, paidAt: payments.paidAt, approvalNo: payments.approvalNo, note: payments.note })
+  const rows = await tx.select({ paymentId: payments.paymentId, amount: payments.amount, appliedAmount: payments.appliedAmount, customerId: payments.customerId, customerName: customers.name, customerAutoCompletePayment: customers.autoCompletePayment, customerCouponCustomerNameSnapshot: payments.customerCouponCustomerNameSnapshot, methodCode: paymentMethods.methodCode, methodName: paymentMethods.methodName, methodNameSnapshot: paymentOtherDetails.methodNameSnapshot, quantity: paymentOtherDetails.quantity, customerCouponQuantity: payments.customerCouponQuantity, customerCouponUnitAmountSnapshot: payments.customerCouponUnitAmountSnapshot, otherSubmittedAmount: paymentOtherDetails.submittedAmount, otherChangeAmount: paymentOtherDetails.cashChangeAmount, accountInfoEnabled: paymentMethodSettings.accountInfoEnabled, autoCompleteEnabled: paymentMethodSettings.autoCompleteEnabled, paidAt: payments.paidAt, approvalNo: payments.approvalNo, note: payments.note })
     .from(payments)
     .innerJoin(paymentMethods, eq(payments.paymentMethodId, paymentMethods.paymentMethodId))
+    .leftJoin(customers, eq(payments.customerId, customers.customerId))
     .leftJoin(paymentOtherDetails, eq(payments.paymentId, paymentOtherDetails.paymentId))
-    .where(and(inArray(payments.checkoutId, checkoutIds), eq(payments.status, "APPROVED")));
+    .leftJoin(paymentMethodSettings, eq(paymentMethodSettings.paymentMethodId, paymentMethods.paymentMethodId))
+    .where(and(inArray(payments.checkoutId, checkoutIds), eq(payments.status, "APPROVED")))
+    .orderBy(asc(payments.paymentId));
   const ledgerRows = rows.length
     ? await tx.select({ paymentId: customerPrepaidLedger.paymentId, amount: customerPrepaidLedger.amount }).from(customerPrepaidLedger).where(inArray(customerPrepaidLedger.paymentId, rows.map(row => row.paymentId)))
     : [];
@@ -182,6 +208,20 @@ async function paymentStateForCheckouts(tx: Parameters<Parameters<typeof db.tran
   ledgerRows.forEach(row => {
     if (row.paymentId !== null) prepaidByPayment.set(row.paymentId, (prepaidByPayment.get(row.paymentId) ?? 0) + Number(row.amount));
   });
+  const customerIds = [...new Set(rows.flatMap(row => row.customerId === null ? [] : [row.customerId]))];
+  const customerLedgerRows = customerIds.length
+    ? await tx.select({ ledgerId: customerPrepaidLedger.ledgerId, customerId: customerPrepaidLedger.customerId, paymentId: customerPrepaidLedger.paymentId, amount: customerPrepaidLedger.amount })
+      .from(customerPrepaidLedger)
+      .where(inArray(customerPrepaidLedger.customerId, customerIds))
+      .orderBy(asc(customerPrepaidLedger.ledgerId))
+    : [];
+  const customerBalance = new Map<number, number>();
+  const balanceAfterPayment = new Map<number, number>();
+  for (const ledgerRow of customerLedgerRows) {
+    const nextBalance = (customerBalance.get(ledgerRow.customerId) ?? 0) + Number(ledgerRow.amount);
+    customerBalance.set(ledgerRow.customerId, nextBalance);
+    if (ledgerRow.paymentId !== null) balanceAfterPayment.set(ledgerRow.paymentId, nextBalance);
+  }
   return rows.map(row => {
     const amount = won(Number(row.amount));
     const cashReceipt = row.methodCode === "CASH"
@@ -189,7 +229,12 @@ async function paymentStateForCheckouts(tx: Parameters<Parameters<typeof db.tran
       : null;
     return {
       ...row,
+      customerName: row.customerName ?? row.customerCouponCustomerNameSnapshot,
+      customerBalanceAfterPayment: balanceAfterPayment.get(row.paymentId) ?? null,
       methodName: row.methodNameSnapshot ?? row.methodName,
+      autoCompleteEnabled: row.methodCode === "CUSTOMER_PAYMENT"
+        ? row.customerAutoCompletePayment === 1
+        : row.autoCompleteEnabled === null || row.autoCompleteEnabled === 1,
       amount,
       appliedAmount: won(Number(row.appliedAmount)),
       prepaidCreditAmount: won(prepaidByPayment.get(row.paymentId) ?? 0),
@@ -261,7 +306,11 @@ export async function POST(request: Request) {
         const overpaid = won(paid - total);
         if (overpaid > 0) throw new CheckoutError(`결제금액보다 ${overpaid.toLocaleString("ko-KR")}원이 초과되었습니다. 기존 결제를 취소한 후 다시 결제해주세요.`, 409);
         if (paid < total) throw new CheckoutError("받을금액이 남아 있어 결제를 완료할 수 없습니다.");
-        if (checkoutIds.length) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
+        if (checkoutIds.length) {
+          await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
+          requestPhase = "assign receipt lookup codes on completion";
+          await ensureSaleLookupCodes(tx, checkoutIds);
+        }
         const orderIds = await tx.select({ orderId: orders.orderId }).from(orders).where(inArray(orders.sessionId, bill.sessionIds));
         if (orderIds.length) await tx.update(orders).set({ status: "COMPLETED" }).where(inArray(orders.orderId, orderIds.map(order => order.orderId)));
         await closeSessionsAndMerges(tx, bill.sessionIds, processedByStaffId);
@@ -318,7 +367,7 @@ export async function POST(request: Request) {
           typeof requestKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestKey)) {
           throw new CheckoutError("고객결제 요청을 확인해 주세요.", 400);
         }
-        const [customer] = await tx.select({ customerId: customers.customerId, name: customers.name, usesFixedCoupon: customers.usesFixedCoupon, fixedCouponAmount: customers.fixedCouponAmount, fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy, fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled, fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent })
+        const [customer] = await tx.select({ customerId: customers.customerId, name: customers.name, autoCompletePayment: customers.autoCompletePayment, autoPrintSignReceipt: customers.autoPrintSignReceipt, usesFixedCoupon: customers.usesFixedCoupon, fixedCouponAmount: customers.fixedCouponAmount, fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy, fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled, fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent })
           .from(customers)
           .where(and(eq(customers.customerId, customerId), eq(customers.isActive, 1), eq(customers.isPaymentManaged, 1)))
           .for("update").limit(1);
@@ -396,7 +445,11 @@ export async function POST(request: Request) {
           if (checkoutIds.length > 1) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, checkoutIds));
         }
         const completedCheckoutIds = completed ? [...new Set([...checkoutIds, checkoutId])] : [];
-        return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [] };
+        if (completed) {
+          requestPhase = "assign customer sale lookup codes";
+          await ensureSaleLookupCodes(tx, completedCheckoutIds);
+        }
+        return { completed, change: couponOverage.cashChange, forfeited: couponOverage.forfeited, tendered: couponTendered, applied: couponApplied, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [], autoCompleteEnabled: customer.autoCompletePayment === 1, customerPaymentId: couponQuantity === null ? createdPayment.paymentId : null, autoPrintSignReceipt: customer.autoPrintSignReceipt === 1 };
       }
       const isOther = action === "PAY_OTHER";
       requestPhase = isOther ? "load configured other payment method" : "load payment method";
@@ -406,7 +459,7 @@ export async function POST(request: Request) {
       const otherMethodId = Number(body.paymentMethodId);
       const inputValue = Number(body.inputValue);
       if (isOther && (!Number.isSafeInteger(otherMethodId) || otherMethodId <= 0 || !Number.isSafeInteger(inputValue) || inputValue <= 0)) throw new CheckoutError("기타결제 입력값을 확인해 주세요.", 400);
-      const [configured] = isOther ? await tx.select({ id: paymentMethods.paymentMethodId, type: paymentMethods.methodType, name: paymentMethods.methodName, inputType: paymentMethodSettings.inputType, unitAmount: paymentMethodSettings.unitAmount, balancePolicy: paymentMethodSettings.balancePolicy, cashChangeEnabled: paymentMethodSettings.cashChangeEnabled, cashChangeMinPercent: paymentMethodSettings.cashChangeMinPercent, accountInfoEnabled: paymentMethodSettings.accountInfoEnabled, accountInfoPrintEnabled: paymentMethodSettings.accountInfoPrintEnabled })
+      const [configured] = isOther ? await tx.select({ id: paymentMethods.paymentMethodId, type: paymentMethods.methodType, name: paymentMethods.methodName, inputType: paymentMethodSettings.inputType, unitAmount: paymentMethodSettings.unitAmount, balancePolicy: paymentMethodSettings.balancePolicy, cashChangeEnabled: paymentMethodSettings.cashChangeEnabled, cashChangeMinPercent: paymentMethodSettings.cashChangeMinPercent, accountInfoEnabled: paymentMethodSettings.accountInfoEnabled, accountInfoPrintEnabled: paymentMethodSettings.accountInfoPrintEnabled, autoCompleteEnabled: paymentMethodSettings.autoCompleteEnabled })
         .from(paymentMethods).innerJoin(paymentMethodSettings, eq(paymentMethods.paymentMethodId, paymentMethodSettings.paymentMethodId))
         .where(and(eq(paymentMethods.paymentMethodId, otherMethodId), eq(paymentMethods.isActive, 1),
           sql`${paymentMethods.methodCode} NOT IN ('CARD','CASH')`,
@@ -513,7 +566,11 @@ export async function POST(request: Request) {
         if (allCheckoutIds.length > 1) await tx.update(checkouts).set({ status: "PAID", completedAt: sql`CURRENT_TIMESTAMP` }).where(inArray(checkouts.checkoutId, allCheckoutIds));
       }
       const completedCheckoutIds = completed ? [...new Set([...checkoutIds, checkoutId])] : [];
-      return { completed, change, tendered, applied, prepaidCredit, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [], accountTransferPaymentId: isOther && configured?.accountInfoEnabled === 1 && configured?.accountInfoPrintEnabled === 1 ? createdPayment.paymentId : null };
+      if (completed) {
+        requestPhase = "assign sale lookup codes";
+        await ensureSaleLookupCodes(tx, completedCheckoutIds);
+      }
+      return { completed, change, tendered, applied, prepaidCredit, tableId, completedCheckoutIds, completedPayments: completed ? await paymentStateForCheckouts(tx, completedCheckoutIds) : [], autoCompleteEnabled: !isOther || configured?.autoCompleteEnabled !== 0, accountTransferPaymentId: isOther && configured?.accountInfoEnabled === 1 && configured?.accountInfoPrintEnabled === 1 ? createdPayment.paymentId : null };
     });
     requestPhase = "refresh checkout snapshot after payment";
     const state = result.completed ? null : await snapshot(tableId);

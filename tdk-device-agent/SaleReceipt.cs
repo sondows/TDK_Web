@@ -16,6 +16,7 @@ internal sealed class SaleReceipt
     public int TotalAmount { get; set; }
     public int RemainingAmount { get; set; }
     public List<SaleReceiptPayment> Payments { get; set; } = [];
+    public CustomerPaymentConfirmation? CustomerConfirmation { get; set; }
 
     public string? Validate()
     {
@@ -42,8 +43,22 @@ internal sealed class SaleReceipt
         if (SubtotalAmount < 0 || DiscountAmount < 0 || CancelledAmount < 0 || TotalAmount < 0 || RemainingAmount < 0 ||
             Payments.Sum(payment => (long)payment.Amount) + RemainingAmount != TotalAmount)
             return "영수증 금액 정보가 올바르지 않습니다.";
+        if (CustomerConfirmation is { } confirmation &&
+            (confirmation.PaymentId <= 0 || string.IsNullOrWhiteSpace(confirmation.CustomerName) || confirmation.CustomerName.Length > 100 ||
+             confirmation.Amount <= 0 || !System.Text.RegularExpressions.Regex.IsMatch(confirmation.BarcodeValue ?? "", @"^P[0-9A-Z]{1,11}$") ||
+             Payments.Count(payment => payment.PaymentId == confirmation.PaymentId && payment.Amount == confirmation.Amount) != 1))
+            return "고객 선불금 결제 영수증 정보가 올바르지 않습니다.";
         return null;
     }
+}
+
+internal sealed class CustomerPaymentConfirmation
+{
+    public long PaymentId { get; set; }
+    public string CustomerName { get; set; } = "";
+    public long Amount { get; set; }
+    public long BalanceAfterPayment { get; set; }
+    public string BarcodeValue { get; set; } = "";
 }
 
 internal sealed class ReceiptLogo
@@ -78,6 +93,7 @@ internal sealed class SaleReceiptItem
 
 internal sealed class SaleReceiptPayment
 {
+    public long? PaymentId { get; set; }
     public string Method { get; set; } = "";
     public int Amount { get; set; }
     public string? ApprovalNo { get; set; }

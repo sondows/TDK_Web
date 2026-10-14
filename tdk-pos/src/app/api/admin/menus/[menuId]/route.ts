@@ -1,14 +1,15 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { menuCategories, menuComponents, menuImages, menus } from "@/db/schema";
 import { canManageMenu } from "@/lib/permissions";
 import { getMenuManager } from "@/lib/management-auth";
 import { generateMenuImages, removeStoredMenuImages } from "@/lib/menu-image-storage";
 import { parseMenuComponentInputs, type MenuComponentInput } from "@/lib/menu-components";
+import { parseMenuNumber } from "@/lib/menu-number";
 
 export const runtime = "nodejs";
 
-type UpdateValues = { name: string; price: number; categoryId: number; countsAsPerson: boolean; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[] };
+type UpdateValues = { name: string; price: number; categoryId: number; menuNumber: number | null; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[] };
 
 async function requireOwner() {
   const actor = await getMenuManager();
@@ -29,7 +30,6 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
   if (request.headers.get("content-type")?.includes("multipart/form-data")) {
     const form = await request.formData();
     const rawImage = form.get("image");
-    const countsAsPerson = parseBoolean(form.get("countsAsPerson"));
     const isActive = parseBoolean(form.get("isActive"));
     const removeImage = parseBoolean(form.get("removeImage"));
     let components: MenuComponentInput[] | null = null;
@@ -38,18 +38,19 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
     const name = typeof nameValue === "string" ? nameValue.trim() : "";
     const price = Number(form.get("price"));
     const categoryId = Number(form.get("categoryId"));
-    if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || countsAsPerson === null || isActive === null || removeImage === null || !components || (rawImage !== null && !(rawImage instanceof File))) return null;
-    return { name, price, categoryId, countsAsPerson, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components };
+    const menuNumber = parseMenuNumber(form.get("menuNumber"));
+    if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || removeImage === null || !components || (rawImage !== null && !(rawImage instanceof File))) return null;
+    return { name, price, categoryId, menuNumber, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components };
   }
-  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; countsAsPerson?: unknown; isActive?: unknown; components?: unknown };
-  const countsAsPerson = parseBoolean(body.countsAsPerson);
+  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown };
   const isActive = parseBoolean(body.isActive);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const price = Number(body.price);
   const categoryId = Number(body.categoryId);
+  const menuNumber = parseMenuNumber(body.menuNumber);
   const components = parseMenuComponentInputs(body.components);
-  if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || countsAsPerson === null || isActive === null || !components) return null;
-  return { name, price, categoryId, countsAsPerson, isActive, image: null, removeImage: false, components };
+  if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || !components) return null;
+  return { name, price, categoryId, menuNumber, isActive, image: null, removeImage: false, components };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ menuId: string }> }) {
@@ -80,20 +81,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
     const result = await db.transaction(async tx => {
       const [existing] = await tx.select({ menuId: menus.menuId, menuCode: menus.menuCode, categoryId: menus.categoryId, sortOrder: menus.sortOrder }).from(menus).where(eq(menus.menuId, menuId)).limit(1);
       if (!existing) return { status: "missing" as const };
-      const [menuCategory] = await tx.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder, isActive: menuCategories.isActive }).from(menuCategories).where(eq(menuCategories.categoryId, values.categoryId)).limit(1);
+      const [menuCategory] = await tx.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder, isActive: menuCategories.isActive }).from(menuCategories).where(eq(menuCategories.categoryId, values.categoryId)).for("update");
       if (!menuCategory || !menuCategory.isActive) return { status: "invalidCategory" as const };
+      if (values.menuNumber !== null) {
+        const [duplicate] = await tx.select({ menuId: menus.menuId }).from(menus).where(and(eq(menus.categoryId, values.categoryId), eq(menus.menuNumber, values.menuNumber), ne(menus.menuId, menuId))).limit(1);
+        if (duplicate) return { status: "duplicateNumber" as const, categoryName: menuCategory.name };
+      }
       let sortOrder = existing.sortOrder;
       if (existing.categoryId !== values.categoryId) {
         const [lastMenu] = await tx.select({ sortOrder: menus.sortOrder }).from(menus).where(eq(menus.categoryId, values.categoryId)).orderBy(desc(menus.sortOrder), desc(menus.menuId)).limit(1);
         sortOrder = (lastMenu?.sortOrder ?? 0) + 10;
       }
-      const countsAsPerson = values.countsAsPerson ? 1 : 0;
       const isActive = values.isActive ? 1 : 0;
       if (values.components.some(component => component.componentMenuId === menuId)) return { status: "invalidItem" as const };
       const componentIds = [...new Set(values.components.map(component => component.componentMenuId))];
       const validComponents = componentIds.length ? await tx.select({ menuId: menus.menuId }).from(menus).where(and(inArray(menus.menuId, componentIds), eq(menus.isActive, 1))) : [];
       if (validComponents.length !== componentIds.length) return { status: "invalidItem" as const };
-      await tx.update(menus).set({ posName: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, countsAsPerson, isActive, sortOrder, updatedAt: new Date() }).where(eq(menus.menuId, menuId));
+      await tx.update(menus).set({ posName: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, isActive, sortOrder, updatedAt: new Date() }).where(eq(menus.menuId, menuId));
       const existingComponents = await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menuComponents.componentMenuId })
         .from(menuComponents).where(eq(menuComponents.parentMenuId, menuId)).for("update");
       const requestedComponentIds = new Set(values.components.map(component => component.componentMenuId));
@@ -117,12 +121,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
       if (generatedImages) await tx.insert(menuImages).values(generatedImages.map(image => ({ menuId, imageType: image.imageType, imageUrl: image.imageUrl, sortOrder: 0, isActive: 1 })));
       const posImageUrl = generatedImages?.find(image => image.imageType === "POS")?.imageUrl ?? (values.removeImage ? null : (await tx.select({ imageUrl: menuImages.imageUrl }).from(menuImages).where(and(eq(menuImages.menuId, menuId), eq(menuImages.imageType, "POS"), eq(menuImages.isActive, 1))).limit(1))[0]?.imageUrl ?? null);
       const linkedComponents = values.components.length ? await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menus.menuId, itemName: menus.posName, price: menus.price, qtyPerUnit: menuComponents.qtyPerUnit, printOnKitchen: menuComponents.printOnKitchen, printOnReceipt: menuComponents.printOnReceipt, sortOrder: menuComponents.sortOrder }).from(menuComponents).innerJoin(menus, eq(menus.menuId, menuComponents.componentMenuId)).where(eq(menuComponents.parentMenuId, menuId)) : [];
-      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, countsAsPerson, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents } };
+      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents } };
     });
 
     if (result.status === "missing") return Response.json({ success: false, message: "메뉴를 찾을 수 없습니다." }, { status: 404 });
     if (result.status === "invalidCategory") return Response.json({ success: false, message: "사용 가능한 카테고리를 선택하세요." }, { status: 400 });
     if (result.status === "invalidItem") return Response.json({ success: false, message: "사용 가능한 품목을 선택하세요." }, { status: 400 });
+    if (result.status === "duplicateNumber") return Response.json({ success: false, message: `${result.categoryName} 분류에서 이미 사용 중인 메뉴번호입니다.` }, { status: 409 });
     const persistedComponents = result.menu.components.map(component => ({ menuComponentId: component.menuComponentId, componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen, printOnReceipt: component.printOnReceipt, sortOrder: component.sortOrder }));
     const committedComponents = await db.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menuComponents.componentMenuId, qtyPerUnit: menuComponents.qtyPerUnit, printOnKitchen: menuComponents.printOnKitchen, printOnReceipt: menuComponents.printOnReceipt, sortOrder: menuComponents.sortOrder })
       .from(menuComponents).where(eq(menuComponents.parentMenuId, menuId));

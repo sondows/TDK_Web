@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { formatMoney } from "@/lib/format-money";
+import { printReceipt } from "@/lib/receipt-print";
 import { prepareAccountTransferNotice, printAccountTransferNotice } from "@/lib/account-transfer-notice";
 import { buildPartyOrderRows, type PartySummarySourceItem } from "@/lib/pos-order-summary-rows";
 import OtherPaymentDialog from "./OtherPaymentDialog";
@@ -19,7 +20,11 @@ type Payment = {
   amount: number;
   appliedAmount: number;
   prepaidCreditAmount: number;
+  customerId: number | null;
+  customerName: string | null;
+  customerBalanceAfterPayment: number | null;
   methodCode: string;
+  accountInfoEnabled: number | null;
   methodName: string;
   paidAt: string;
   approvalNo: string | null;
@@ -29,6 +34,7 @@ type Payment = {
   customerCouponQuantity: number | null;
   receivedAmount: number;
   changeAmount: number;
+  autoCompleteEnabled: boolean;
 };
 type State = {
   gross: number;
@@ -54,6 +60,7 @@ type OverpaymentPrompt = {
 };
 type StagedCustomerPayment = { customerId: number; name: string; amount: number; requestKey: string; couponQuantity: number | null };
 type PaymentDeletionTarget = { kind: "SAVED"; payment: Payment } | { kind: "STAGED_CUSTOMER" };
+type AvailableReceiptType = "GENERAL" | "SIGN" | "BANK_TRANSFER_GUIDE";
 const money = (amount: number) => formatMoney(amount);
 const newCustomerPaymentRequestKey = () => {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -114,6 +121,7 @@ export default function PaymentModal({
   const autoCustomerPaymentRequested = useRef<string | null>(null);
   const [transactionCompleted, setTransactionCompleted] = useState(false);
   const [hasPaymentAction, setHasPaymentAction] = useState(false);
+  const [lastPaymentAutoCompleteEnabled, setLastPaymentAutoCompleteEnabled] = useState(true);
   const [autoCompleteSeconds, setAutoCompleteSeconds] = useState<number | null>(null);
   const [completedAtMs, setCompletedAtMs] = useState<number | null>(null);
   const [secondsUntilClose, setSecondsUntilClose] = useState<number | null>(null);
@@ -122,6 +130,9 @@ export default function PaymentModal({
   const completeRef = useRef<() => void>(() => {});
   const [completedCheckoutIds, setCompletedCheckoutIds] = useState<number[]>([]);
   const [autoPrintPending, setAutoPrintPending] = useState(false);
+  const [receiptChooserOpen, setReceiptChooserOpen] = useState(false);
+  const [signReceiptPrinting, setSignReceiptPrinting] = useState(false);
+  const [transferNoticePrinting, setTransferNoticePrinting] = useState(false);
   const [error, setError] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
   const [stagedCustomerPayment, setStagedCustomerPayment] = useState<StagedCustomerPayment | null>(null);
@@ -208,6 +219,9 @@ export default function PaymentModal({
         completedCheckoutIds?: number[];
         completedPayments?: State["payments"];
         accountTransferPaymentId?: number | null;
+        customerPaymentId?: number | null;
+        autoPrintSignReceipt?: boolean;
+        autoCompleteEnabled?: boolean;
         debugPhase?: string;
         debugMessage?: string;
       };
@@ -225,6 +239,7 @@ export default function PaymentModal({
       }
       if (body.action === "PAY" || body.action === "PAY_OTHER" || body.action === "PAY_CUSTOMER") {
         setHasPaymentAction(true);
+        setLastPaymentAutoCompleteEnabled(result.autoCompleteEnabled !== false);
       }
       if (Number.isSafeInteger(result.accountTransferPaymentId) && Number(result.accountTransferPaymentId) > 0) {
         void (async () => {
@@ -237,6 +252,12 @@ export default function PaymentModal({
           }
         })();
       }
+      const customerReceiptPrint = body.action === "PAY_CUSTOMER" && result.autoPrintSignReceipt === true && Number.isSafeInteger(result.customerPaymentId) && Number(result.customerPaymentId) > 0
+        ? printReceipt({ customerPaymentId: result.customerPaymentId! }).catch(printError => {
+          console.error("Customer payment confirmation receipt print failed", printError);
+          setError(printError instanceof Error ? printError.message : "고객 선불금 결제 영수증을 출력하지 못했습니다.");
+        })
+        : Promise.resolve();
       if (result.completed) {
         const checkoutIds = result.completedCheckoutIds ?? [];
         setCompletedCheckoutIds(checkoutIds);
@@ -259,7 +280,10 @@ export default function PaymentModal({
               const settingResponse = await fetch("/api/pos-settings/receipt-auto-print", { cache: "no-store" });
               const setting = await settingResponse.json() as { success?: boolean; enabled?: boolean };
               if (!settingResponse.ok || !setting.success) throw new Error("자동 영수증 인쇄 설정을 확인하지 못했습니다.");
-              if (setting.enabled) await printCompletedReceipts(checkoutIds, false);
+              if (setting.enabled) {
+                await customerReceiptPrint;
+                await printCompletedReceipts(checkoutIds, false);
+              }
             } catch (printError) {
               setError(printError instanceof Error ? printError.message : "자동 영수증 출력에 실패했습니다.");
             } finally {
@@ -391,6 +415,7 @@ export default function PaymentModal({
     if (completedCheckoutIds.length) autoPrintAttempted.current.delete(completedCheckoutIds.join(","));
     setTransactionCompleted(false);
     setHasPaymentAction(false);
+    setLastPaymentAutoCompleteEnabled(true);
     setCompletedAtMs(null);
     setSecondsUntilClose(null);
     setCompletedCheckoutIds([]);
@@ -399,7 +424,7 @@ export default function PaymentModal({
   };
   useEffect(() => { completeRef.current = complete; });
   useEffect(() => {
-    if (!hasPaymentAction || !transactionCompleted || state?.remaining !== 0 || completedAtMs === null || autoCompleteSeconds === null || autoCompleteSeconds === 0) {
+    if (!hasPaymentAction || !lastPaymentAutoCompleteEnabled || !transactionCompleted || state?.remaining !== 0 || completedAtMs === null || autoCompleteSeconds === null || autoCompleteSeconds === 0) {
       return;
     }
     const deadline = completedAtMs + autoCompleteSeconds * 1000;
@@ -418,7 +443,7 @@ export default function PaymentModal({
     return () => {
       window.clearInterval(interval);
     };
-  }, [hasPaymentAction, transactionCompleted, state?.remaining, completedAtMs, autoCompleteSeconds, busy]);
+  }, [hasPaymentAction, lastPaymentAutoCompleteEnabled, transactionCompleted, state?.remaining, completedAtMs, autoCompleteSeconds, busy]);
   const cancelPayment = async () => {
     if (!deletionTarget || busy) return;
     if (deletionTarget.kind === "STAGED_CUSTOMER") {
@@ -444,6 +469,7 @@ export default function PaymentModal({
       setState(result.state);
       if (result.state.remaining > 0) clearCompletionCountdown();
       else {
+        setLastPaymentAutoCompleteEnabled(result.state.payments.at(-1)?.autoCompleteEnabled !== false);
         completionPausedRef.current = false;
         if (hasPaymentAction) setCompletedAtMs(Date.now());
       }
@@ -476,8 +502,12 @@ export default function PaymentModal({
         setState(refreshedState);
       }
       setStagedCustomerPayment(null);
+      setLastPaymentAutoCompleteEnabled(refreshedState.payments.at(-1)?.autoCompleteEnabled !== false);
       if (refreshedState.remaining > 0) clearCompletionCountdown();
-      else completionPausedRef.current = false;
+      else {
+        completionPausedRef.current = false;
+        if (hasPaymentAction) setCompletedAtMs(Date.now());
+      }
       setInput("");
       setResetPaymentsConfirm(false);
     } catch (resetError) {
@@ -526,6 +556,50 @@ export default function PaymentModal({
   const orderedPayments = state.payments.slice().sort(
     (left, right) => Date.parse(left.paidAt) - Date.parse(right.paidAt) || left.paymentId - right.paymentId,
   );
+  const signReceiptPayments = orderedPayments.filter(payment => payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity === null);
+  const transferNoticePayments = orderedPayments.filter(payment => payment.accountInfoEnabled === 1);
+  const availableReceiptTypes: AvailableReceiptType[] = orderedPayments.length > 0
+    ? ["GENERAL", ...(signReceiptPayments.length > 0 ? ["SIGN" as const] : []), ...(transferNoticePayments.length > 0 ? ["BANK_TRANSFER_GUIDE" as const] : [])]
+    : [];
+  const receiptCheckoutIds = completedCheckoutIds.length > 0 ? completedCheckoutIds : state.checkoutId ? [state.checkoutId] : [];
+  const printGeneralReceipt = () => printCompletedReceipts(receiptCheckoutIds, true);
+  const handleReceiptClick = () => {
+    if (availableReceiptTypes.length === 0) return;
+    if (availableReceiptTypes.length > 1) {
+      setReceiptChooserOpen(true);
+      return;
+    }
+    void printGeneralReceipt();
+  };
+  const printSignReceipt = async (paymentId: number) => {
+    if (!signReceiptPayments.some(payment => payment.paymentId === paymentId) || signReceiptPrinting) return;
+    setReceiptChooserOpen(false);
+    setSignReceiptPrinting(true);
+    setError("");
+    try {
+      await printReceipt({ customerPaymentId: paymentId });
+    } catch (printError) {
+      console.error("Manual customer sign receipt print failed", printError);
+      setError(printError instanceof Error ? printError.message : "증빙용영수증을 출력하지 못했습니다.");
+    } finally {
+      setSignReceiptPrinting(false);
+    }
+  };
+  const printTransferNotice = async (paymentId: number) => {
+    if (!transferNoticePayments.some(payment => payment.paymentId === paymentId) || transferNoticePrinting) return;
+    setReceiptChooserOpen(false);
+    setTransferNoticePrinting(true);
+    setError("");
+    try {
+      const notice = await prepareAccountTransferNotice({ mode: "MANUAL", paymentId });
+      await printAccountTransferNotice(notice);
+    } catch (printError) {
+      console.error("Manual account transfer notice print failed", printError);
+      setError(printError instanceof Error ? printError.message : "계좌이체 안내 출력에 실패했습니다.");
+    } finally {
+      setTransferNoticePrinting(false);
+    }
+  };
   const billSessionIds = new Set(state.sessionIds);
   const billRows = buildPartyOrderRows(orderDetails
     .filter(order => billSessionIds.has(order.sessionId) && order.status !== "CANCELLED")
@@ -537,15 +611,26 @@ export default function PaymentModal({
       discountAmount: String(discount.amount),
       discountRate: null,
     })));
-  const discountGroups = new Map<string, { label: string; unitAmount: number; count: number; total: number }>();
-  for (const discount of state.discounts) {
-    if (discount.amount <= 0) continue;
-    const key = JSON.stringify([discount.type, discount.label, discount.amount]);
-    const group = discountGroups.get(key) ?? { label: discount.label, unitAmount: discount.amount, count: 0, total: 0 };
-    group.count += 1;
-    group.total += discount.amount;
-    discountGroups.set(key, group);
-  }
+  const discountTotal = state.discounts.reduce(
+    (sum, discount) => sum + Math.max(0, discount.amount),
+    0,
+  );
+  const hasDiscount = discountTotal > 0;
+  const renderOrderAmountSummary = () => (
+    <div className="mt-3">
+      {hasDiscount && <>
+        <div className="flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-700">
+          <span>주문금액</span><b>{money(state.gross)}</b>
+        </div>
+        <div className="mt-2 flex justify-between text-sm text-slate-900">
+          <span>할인금액</span><b className="text-red-600">- {money(discountTotal)}</b>
+        </div>
+      </>}
+      <div className={`flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-900 ${hasDiscount ? "mt-3" : ""}`}>
+        <span>받을금액</span><b className="text-lg font-extrabold text-blue-700">{money(state.total)}</b>
+      </div>
+    </div>
+  );
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
@@ -584,24 +669,12 @@ export default function PaymentModal({
                 {orderTab === "summary" ? (
                   <div className="py-3">
                     {billRows.length ? <OrderSummaryRows items={billRows} /> : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>}
-                    <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-700">
-                      <span>주문합계</span><b>{money(state.gross)}</b>
-                    </div>
-                    {[...discountGroups.entries()].map(([key, discount]) => (
-                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_52px_76px_58px] gap-1 text-sm" key={key}>
-                        <span className="min-w-0 truncate" title={discount.label}>{discount.label}</span>
-                        <span className="text-right text-slate-500">{money(discount.unitAmount)}</span>
-                        <span className="text-center text-slate-500">× {discount.count}</span>
-                        <b className="text-right text-red-600">-{money(discount.total)}</b>
-                      </div>
-                    ))}
-                    <div className="mt-3 flex justify-between border-t border-blue-200 pt-3 text-base font-bold text-slate-900">
-                      <span>받을금액</span><b className="text-lg font-extrabold text-blue-700">{money(displayRemaining)}</b>
-                    </div>
+                    {renderOrderAmountSummary()}
                   </div>
                 ) : (
                   <div className="py-2">
                     {renderOrderDetails(state.sessionIds)}
+                    {renderOrderAmountSummary()}
                   </div>
                 )}
               </div>
@@ -622,7 +695,7 @@ export default function PaymentModal({
                     <Fragment key={payment.paymentId}>
                       <button
                         aria-label={`${prepaid ? "선불" : ""}${paymentMethodLabel(payment)} ${money(payment.receivedAmount)} 결제내역 삭제`}
-                        className={`${paymentInfoRowStyle} w-full items-center py-3 text-left text-slate-900`}
+                        className="flex w-full flex-col py-3 text-left text-slate-900"
                         disabled={busy}
                         onClick={() => {
                           completionPausedRef.current = true;
@@ -632,10 +705,20 @@ export default function PaymentModal({
                         }}
                         type="button"
                       >
-                        <span className={`min-w-0 truncate ${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle}`}>
-                          {prepaid ? "선불" : ""}{paymentMethodLabel(payment)}
-                        </span>
-                        <b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(payment.receivedAmount)}</b>
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className={`min-w-0 truncate ${prepaid ? paymentInfoSmallLabelStyle : paymentInfoLabelStyle}`}>
+                            {prepaid ? "선불" : ""}{paymentMethodLabel(payment)}
+                          </span>
+                          <b className={`shrink-0 ${paymentInfoAmountStyle}`}>{money(payment.receivedAmount)}</b>
+                        </div>
+                        {payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerName && payment.customerBalanceAfterPayment !== null && (
+                          <div className="mt-0.5 flex min-w-0 items-center whitespace-nowrap text-sm font-normal leading-5 text-slate-500">
+                            <span className="shrink-0">(</span>
+                            <span className="min-w-0 truncate">{payment.customerName}</span>
+                            <span className="shrink-0 whitespace-pre"> 결제 후 </span>
+                            <span className="ml-auto shrink-0 whitespace-nowrap">{money(payment.customerBalanceAfterPayment)})</span>
+                          </div>
+                        )}
                       </button>
                       {payment.changeAmount > 0 && (
                         <div className={`${paymentInfoRowStyle} items-center py-3 text-slate-900`}>
@@ -681,12 +764,22 @@ export default function PaymentModal({
               >결제 초기화</button>
               <button
                 className={paymentFooterButtonStyle}
-                disabled={receiptPrinting || autoPrintPending}
-                onClick={() => void printCompletedReceipts(completedCheckoutIds, true)}
+                disabled={availableReceiptTypes.length === 0 || busy || receiptPrinting || autoPrintPending || signReceiptPrinting || transferNoticePrinting}
+                onClick={handleReceiptClick}
                 type="button"
-              >영수증</button>
+              >{availableReceiptTypes.length > 0 ? `영수증(${availableReceiptTypes.length})` : "영수증"}</button>
             </div>
           </section>
+          {receiptChooserOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onClick={() => setReceiptChooserOpen(false)}>
+            <section aria-labelledby="receipt-chooser-title" aria-modal="true" className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
+              <PosSubHeader backIconSize={19} backLabel="영수증 선택 닫기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => setReceiptChooserOpen(false)} title="출력 영수증 선택" titleId="receipt-chooser-title" />
+              <div className="grid grid-cols-2 gap-3 p-5">
+                {availableReceiptTypes.includes("GENERAL") && <button className={`${paymentFooterButtonStyle} h-full min-w-0 px-3`} onClick={() => { setReceiptChooserOpen(false); void printGeneralReceipt(); }} type="button">영수증</button>}
+                {availableReceiptTypes.includes("SIGN") && signReceiptPayments.map(payment => <button className={`${paymentFooterButtonStyle} h-full min-w-0 px-3`} key={payment.paymentId} onClick={() => void printSignReceipt(payment.paymentId)} type="button">증빙용 영수증{signReceiptPayments.length > 1 ? ` · ${payment.customerName ?? payment.paymentId}` : ""}</button>)}
+                {availableReceiptTypes.includes("BANK_TRANSFER_GUIDE") && transferNoticePayments.map((payment, index) => <button className={`${paymentFooterButtonStyle} h-full min-w-0 px-3 ${signReceiptPayments.length + transferNoticePayments.length === 2 && index === transferNoticePayments.length - 1 ? "col-span-2" : ""}`} key={payment.paymentId} onClick={() => void printTransferNotice(payment.paymentId)} type="button">계좌이체 안내{transferNoticePayments.length > 1 ? ` · ${payment.methodName}` : ""}</button>)}
+              </div>
+            </section>
+          </div>}
           <section className="flex min-h-0 flex-col px-4 pt-6 pb-4">
             <NumericInputKeypad className="h-[395.25px]" disabled={busy || transactionCompleted} inputEdgeToEdge inputLabel="" inputOffset={-2} onKey={append} scale={0.85} value={money(entered)} />
             {error && <p className="mt-2 text-center text-base font-bold text-red-600">{error}</p>}
@@ -736,12 +829,12 @@ export default function PaymentModal({
               disabled={busy || !transactionCompleted || state.remaining !== 0}
               onClick={() => void complete()}
               type="button"
-            >{transactionCompleted && state.remaining === 0 && autoCompleteSeconds !== null && autoCompleteSeconds > 0 && secondsUntilClose !== null ? `${secondsUntilClose}초후 결제완료` : "결제완료"}</button>
+            >{transactionCompleted && state.remaining === 0 && lastPaymentAutoCompleteEnabled && autoCompleteSeconds !== null && autoCompleteSeconds > 0 && secondsUntilClose !== null ? `${secondsUntilClose}초후 결제완료` : "결제완료"}</button>
           </section>
         </div>
       </section>
       {otherOpen && (
-        <OtherPaymentDialog allowOverpayment={Boolean(selectedCustomer) && !stagedCustomerPayment} busy={busy} close={() => setOtherOpen(false)} remaining={displayRemaining} customerRemaining={state.remaining} selectedCustomer={selectedCustomer} submit={submitOtherPayment} submitCustomer={stageCustomerPayment} />
+        <OtherPaymentDialog allowOverpayment={Boolean(selectedCustomer) && !stagedCustomerPayment} busy={busy} close={() => setOtherOpen(false)} onSelectCustomer={() => setCustomerSelectOpen(true)} remaining={displayRemaining} customerRemaining={state.remaining} selectedCustomer={selectedCustomer} submit={submitOtherPayment} submitCustomer={stageCustomerPayment} />
       )}
       {overpaymentPrompt && <ConfirmOverpaymentDialog
         compact={overpaymentPrompt.kind === "CARD" || overpaymentPrompt.kind === "CASH"}

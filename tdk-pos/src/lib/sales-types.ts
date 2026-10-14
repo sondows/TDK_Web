@@ -23,6 +23,7 @@ export type SalesListResponse = {
 
 export type SaleDetail = {
   checkoutId: number;
+  receiptLookupCode: string | null;
   occurredAt: string;
   orderedAt: string;
   customerName?: string | null;

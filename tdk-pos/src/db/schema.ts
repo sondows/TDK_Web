@@ -94,6 +94,8 @@ export const customers = mysqlTable(
     email: varchar("email", { length: 255 }),
     memo: text("memo"),
     isPaymentManaged: tinyint("is_payment_managed").notNull().default(0),
+    autoCompletePayment: tinyint("auto_complete_payment").notNull().default(1),
+    autoPrintSignReceipt: tinyint("auto_print_sign_receipt").notNull().default(1),
     usesFixedCoupon: tinyint("uses_fixed_coupon").notNull().default(0),
     fixedCouponAmount: decimal("fixed_coupon_amount", { precision: 14, scale: 2 }),
     fixedCouponBalancePolicy: mysqlEnum("fixed_coupon_balance_policy", ["CASH_CHANGE", "FORFEIT"]).notNull().default("FORFEIT"),
@@ -258,7 +260,7 @@ export const menus = mysqlTable("menus", {
   }),
   isActive: tinyint("is_active").notNull().default(1),
   isQrVisible: tinyint("is_qr_visible").notNull().default(1),
-  countsAsPerson: tinyint("counts_as_person").notNull().default(0),
+  menuNumber: int("menu_number"),
   sortOrder: int("sort_order").notNull().default(0),
   createdAt: datetime("created_at")
     .notNull()
@@ -521,6 +523,7 @@ export const paymentMethodSettings = mysqlTable("payment_method_settings", {
   validUntil: date("valid_until", { mode: "string" }),
   accountInfoEnabled: tinyint("account_info_enabled").notNull().default(0),
   accountInfoPrintEnabled: tinyint("account_info_print_enabled").notNull().default(0),
+  autoCompleteEnabled: tinyint("auto_complete_enabled").notNull().default(1),
   bankName: varchar("bank_name", { length: 100 }),
   accountNumber: varchar("account_number", { length: 100 }),
   accountHolder: varchar("account_holder", { length: 100 }),
@@ -531,6 +534,7 @@ export const paymentMethodSettings = mysqlTable("payment_method_settings", {
 
 export const checkouts = mysqlTable("checkouts", {
   checkoutId: bigint("checkout_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  receiptLookupCode: varchar("receipt_lookup_code", { length: 16 }),
   subtotalAmount: decimal("subtotal_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
   discountAmount: decimal("discount_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
   totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
@@ -540,7 +544,7 @@ export const checkouts = mysqlTable("checkouts", {
   createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   completedAt: datetime("completed_at"),
   note: varchar("note", { length: 500 }),
-}, (table) => [index("idx_checkouts_status_time").on(table.status, table.createdAt)]);
+}, (table) => [index("idx_checkouts_status_time").on(table.status, table.createdAt), uniqueIndex("uq_checkouts_receipt_lookup_code").on(table.receiptLookupCode)]);
 
 export const checkoutItems = mysqlTable("checkout_items", {
   checkoutItemId: bigint("checkout_item_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validateCustomerCreate, type CustomerCreateDraft, type CustomerFieldErrors, type CustomerSummary } from "@/lib/customer";
-import AdminBackLink from "@/app/pos/admin/AdminBackLink";
+import PosSubHeader from "@/app/pos/PosSubHeader";
+import StaffToggle from "@/app/admin/staff/StaffToggle";
 import styles from "../admin.module.css";
 
 export default function CustomerCreateModal({ customer, onClose, onSaved }: { customer: CustomerSummary | null; onClose: () => void; onSaved: () => void }) {
@@ -11,6 +12,8 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
   const busyRef = useRef(false);
   const [draft, setDraft] = useState<CustomerCreateDraft>({
     name: customer?.name ?? "", contactName: customer?.contactName ?? "", phone: customer?.phone ?? "", email: customer?.email ?? "", memo: customer?.memo ?? "", isPaymentManaged: customer?.isPaymentManaged ?? false,
+    autoCompletePayment: customer?.autoCompletePayment ?? true,
+    autoPrintSignReceipt: customer?.autoPrintSignReceipt ?? true,
     usesFixedCoupon: customer?.usesFixedCoupon ?? false, fixedCouponAmount: customer?.fixedCouponAmount ? String(customer.fixedCouponAmount) : "",
     fixedCouponBalancePolicy: customer?.fixedCouponBalancePolicy ?? "FORFEIT",
     fixedCouponCashChangeEnabled: customer?.fixedCouponCashChangeEnabled ?? false,
@@ -52,7 +55,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
       const response = await fetch(customer ? `/api/customers/${customer.customerId}` : "/api/customers", {
         method: customer ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(customer ? { ...draft, isActive } : draft),
+        body: JSON.stringify({ ...draft, isActive }),
       });
       const result = await response.json() as { success?: boolean; errors?: CustomerFieldErrors; message?: string };
       if (!response.ok || !result.success) {
@@ -85,10 +88,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
       onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
       ref={dialogRef}
     >
-      <div className={styles.customerModalHeader}>
-        {customer ? <div className="flex items-center gap-3"><AdminBackLink ariaLabel="고객관리로 돌아가기" title="고객관리로 돌아가기" disabled={busy} onNavigate={onClose} size={36} iconSize={18} /><h2 id="customer-create-title">고객 수정</h2></div> : <h2 id="customer-create-title">고객등록</h2>}
-        {!customer && <button aria-label="고객등록 닫기" className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button>}
-      </div>
+      <PosSubHeader backLabel={customer ? "고객관리로 돌아가기" : "고객 등록 닫기"} backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} onBack={onClose} title={customer ? "고객 수정" : "고객 등록"} titleId="customer-create-title" trailing={<StaffToggle checked={isActive} disabled={busy} label="사용" onChange={setIsActive} variant="customer" />} trailingClassName={styles.customerHeaderStatus} />
       <form noValidate onSubmit={submit}>
         <div className={styles.customerModalFields}>
           <div className={styles.customerField}>
@@ -162,58 +162,65 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
             />
             {errors.memo && <p className={styles.customerFieldError} role="alert">{errors.memo}</p>}
           </div>
-          <div className={`${styles.customerPaymentField} ${styles.customerInlineSetting}`}>
-            <label className={styles.customerPaymentLabel} htmlFor="customer-create-payment-managed">
-              <input
-                checked={draft.isPaymentManaged}
-                disabled={busy}
-                id="customer-create-payment-managed"
-                onChange={event => update("isPaymentManaged", event.target.checked)}
-                type="checkbox"
-              />
-              결제관리
-            </label>
-            <p>선불금·미수금 등 고객별 결제관리가 필요한 경우 사용</p>
+          <div className={styles.customerPaymentField}>
+            <StaffToggle
+              checked={draft.isPaymentManaged}
+              disabled={busy}
+              label={<span className="flex min-w-0 items-baseline gap-1"><strong className="shrink-0 font-bold">결제관리</strong><span className="text-xs font-normal text-slate-500">(선불금·미수금 관리 사용)</span></span>}
+              onChange={checked => update("isPaymentManaged", checked)}
+              variant="customer"
+            />
           </div>
           <div className={`${styles.customerPaymentField} ${styles.customerCouponSetting}`}>
-            <label className={styles.customerPaymentLabel} htmlFor="customer-fixed-coupon-enabled">
-              <input checked={draft.usesFixedCoupon} disabled={busy} id="customer-fixed-coupon-enabled" onChange={event => update("usesFixedCoupon", event.target.checked)} type="checkbox" />
-              정액쿠폰 사용
-            </label>
+            <StaffToggle
+              checked={draft.usesFixedCoupon}
+              disabled={busy}
+              label={<span className="flex min-w-0 items-baseline gap-1"><strong className="shrink-0 font-bold">정액쿠폰</strong><span className="text-[11px] font-normal text-slate-500">(금액지정·초과금액 반환여부·현금거스름 사용여부)</span></span>}
+              onChange={checked => update("usesFixedCoupon", checked)}
+              variant="customer"
+            />
             {draft.usesFixedCoupon && <div className={styles.customerCouponOptions}>
               <div className={styles.customerCouponAmountRow}>
-                <label htmlFor="customer-fixed-coupon-amount">쿠폰 1장 금액</label>
+                <label htmlFor="customer-fixed-coupon-amount">쿠폰금액</label>
                 <input aria-invalid={Boolean(errors.fixedCouponAmount)} className={`${styles.customerFieldInput} ${styles.customerCouponAmountInput}`} disabled={busy} id="customer-fixed-coupon-amount" inputMode="numeric" min="1" onChange={event => update("fixedCouponAmount", event.target.value.replace(/\D/g, ""))} type="number" value={draft.fixedCouponAmount} />
                 {errors.fixedCouponAmount && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponAmount}</p>}
               </div>
               <div aria-label="초과금액 처리" className={styles.customerCouponPolicyRow} role="group">
-                <span>초과금액 처리</span>
+                <span>초과금액</span>
                 <div>
-                  <label><input checked={draft.fixedCouponBalancePolicy === "CASH_CHANGE"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "CASH_CHANGE")} type="radio" />잔액 현금반환</label>
-                  <label><input checked={draft.fixedCouponBalancePolicy === "FORFEIT"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "FORFEIT")} type="radio" />잔액 반환 없음</label>
+                  <label><input checked={draft.fixedCouponBalancePolicy === "CASH_CHANGE"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "CASH_CHANGE")} type="radio" />잔액 현금 반환</label>
+                  <label><input checked={draft.fixedCouponBalancePolicy === "FORFEIT"} disabled={busy} name="fixed-coupon-balance-policy" onChange={() => update("fixedCouponBalancePolicy", "FORFEIT")} type="radio" />잔액 반환 없음 (기타소득처리)</label>
                 </div>
                 {errors.fixedCouponBalancePolicy && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponBalancePolicy}</p>}
               </div>
               <div className={styles.customerCouponCashRow}>
                 <label className={styles.customerPaymentLabel} htmlFor="customer-fixed-coupon-cash-change">
-                  <input checked={draft.fixedCouponCashChangeEnabled} disabled={busy} id="customer-fixed-coupon-cash-change" onChange={event => update("fixedCouponCashChangeEnabled", event.target.checked)} type="checkbox" />현금 거스름 사용
+                  <input checked={draft.fixedCouponCashChangeEnabled} disabled={busy} id="customer-fixed-coupon-cash-change" onChange={event => update("fixedCouponCashChangeEnabled", event.target.checked)} type="checkbox" />현금거스름사용
                 </label>
-                {draft.fixedCouponCashChangeEnabled && <div className={styles.customerCouponThreshold}>
-                  <label htmlFor="customer-fixed-coupon-cash-change-percent">현금 반환 기준</label>
-                  <input aria-invalid={Boolean(errors.fixedCouponCashChangeMinPercent)} className={`${styles.customerFieldInput} ${styles.customerPercentInput}`} disabled={busy} id="customer-fixed-coupon-cash-change-percent" inputMode="numeric" min="0" max="100" onChange={event => update("fixedCouponCashChangeMinPercent", event.target.value.replace(/\D/g, ""))} type="number" value={draft.fixedCouponCashChangeMinPercent} />
-                  <span>% 이상 사용 시</span>
-                  {errors.fixedCouponCashChangeMinPercent && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponCashChangeMinPercent}</p>}
-                </div>}
+                <div className={styles.customerCouponThreshold}>
+                  <input aria-label="현금 거스름 반환 기준 비율" aria-invalid={Boolean(errors.fixedCouponCashChangeMinPercent)} className={`${styles.customerFieldInput} ${styles.customerPercentInput}`} disabled={busy || !draft.fixedCouponCashChangeEnabled} id="customer-fixed-coupon-cash-change-percent" inputMode="numeric" min="0" max="100" onChange={event => update("fixedCouponCashChangeMinPercent", event.target.value.replace(/\D/g, ""))} type="number" value={draft.fixedCouponCashChangeMinPercent} />
+                  <label htmlFor="customer-fixed-coupon-cash-change-percent">% 이상 사용 시 현금 거스름 반환</label>
+                </div>
+                {errors.fixedCouponCashChangeMinPercent && <p className={styles.customerFieldError} role="alert">{errors.fixedCouponCashChangeMinPercent}</p>}
               </div>
             </div>}
           </div>
-          {customer && <div className={`${styles.customerPaymentField} ${styles.customerInlineSetting}`}>
-            <label className={styles.customerPaymentLabel} htmlFor="customer-edit-active">
-              <input checked={isActive} disabled={busy} id="customer-edit-active" onChange={event => setIsActive(event.target.checked)} type="checkbox" />
-              사용
-            </label>
-            <p>사용중지한 고객은 POS 고객 선택에서 제외됩니다.</p>
-          </div>}
+          <div className={styles.customerPaymentField}>
+            <StaffToggle
+              checked={draft.autoCompletePayment}
+              label={<span className="flex min-w-0 items-baseline gap-1 whitespace-nowrap"><strong className="font-bold">자동결제</strong><span className="font-normal text-slate-500">(설정된 시간이 지나면 자동 결제 완료)</span></span>}
+              onChange={checked => update("autoCompletePayment", checked)}
+              variant="customer"
+            />
+          </div>
+          <div className={styles.customerPaymentField}>
+            <StaffToggle
+              checked={draft.autoPrintSignReceipt}
+              label={<span className="flex min-w-0 items-baseline gap-1 whitespace-nowrap"><strong className="font-bold">사인영수증출력</strong><span className="font-normal text-slate-500">(증빙용 사인 영수증 출력)</span></span>}
+              onChange={checked => update("autoPrintSignReceipt", checked)}
+              variant="customer"
+            />
+          </div>
           {notice && <p className={styles.customerModalNotice} role="status">{notice}</p>}
         </div>
         <div className={styles.customerModalFooter}>

@@ -18,7 +18,7 @@ internal static partial class PrinterTest
         const int height = 1000;
         var dc = Native.CreateCompatibleDC(IntPtr.Zero);
         if (dc == IntPtr.Zero) throw LastError("인쇄 이미지 컨텍스트 생성");
-        IntPtr bitmap = IntPtr.Zero, oldBitmap = IntPtr.Zero, bodyFont = IntPtr.Zero, titleFont = IntPtr.Zero, amountFont = IntPtr.Zero, oldFont = IntPtr.Zero;
+        IntPtr bitmap = IntPtr.Zero, oldBitmap = IntPtr.Zero, bodyFont = IntPtr.Zero, titleFont = IntPtr.Zero, amountFont = IntPtr.Zero, accountFont = IntPtr.Zero, oldFont = IntPtr.Zero;
         try
         {
             var info = new BitmapInfo {
@@ -36,7 +36,7 @@ internal static partial class PrinterTest
             var hasLogo = TryDrawLogo(notice.ReceiptLogo, image, out var logoHeight);
             Marshal.Copy(image, 0, pixels, image.Length);
             bodyFont = CreateFont(ReceiptFontSize, 500);
-            titleFont = CreateFont(30, 700);
+            titleFont = CreateFont(32, 700);
             amountFont = CreateFont(34, 700);
             oldFont = Native.SelectObject(dc, bodyFont);
             if (oldFont == IntPtr.Zero) throw LastError("한글 글꼴 선택");
@@ -46,7 +46,7 @@ internal static partial class PrinterTest
             var y = hasLogo ? logoHeight : DrawStoreName(dc, notice.StoreName);
             y += 28; // Blank line below the logo or store name.
             Native.SelectObject(dc, titleFont);
-            Draw(dc, Width / 2, y, "계좌이체 안내", true);
+            Draw(dc, Width / 2, y, "계좌이체 입금안내", true);
             y += 68; // Title and one blank line.
             Native.SelectObject(dc, bodyFont);
             y = DrawSeparator(dc, y);
@@ -60,12 +60,37 @@ internal static partial class PrinterTest
             y += 44;
             Native.SelectObject(dc, bodyFont);
             y = DrawSeparator(dc, y);
-            Draw(dc, Left, y, "입금계좌", false);
-            y += 30;
-            y = DrawWrapped(dc, Left, y, $"{notice.BankName}({notice.AccountHolder})", Right - Left, 31);
-            y = DrawWrapped(dc, Left, y, notice.AccountNumber, Right - Left, 31);
-            y = DrawSeparator(dc, y + 3);
-            var outputHeight = y + 28; // Blank line after the last divider.
+            y += 31; // One blank line above the account details.
+            var accountName = $"{notice.BankName}({notice.AccountHolder})";
+            Native.SelectObject(dc, amountFont);
+            if (TextWidth(dc, accountName) + TextWidth(dc, notice.AccountNumber) + TextWidth(dc, " ") > AmountRight - Left)
+            {
+                for (var size = 32; size >= ReceiptFontSize; size -= 2)
+                {
+                    var candidate = CreateFont(size, 700);
+                    Native.SelectObject(dc, candidate);
+                    if (accountFont != IntPtr.Zero) Native.DeleteObject(accountFont);
+                    accountFont = candidate;
+                    if (TextWidth(dc, accountName) + TextWidth(dc, notice.AccountNumber) + TextWidth(dc, " ") <= AmountRight - Left) break;
+                }
+            }
+            var accountLineHeight = accountFont == IntPtr.Zero ? 42 : 34;
+            if (TextWidth(dc, accountName) + TextWidth(dc, notice.AccountNumber) + TextWidth(dc, " ") <= AmountRight - Left)
+            {
+                Draw(dc, Left, y, accountName, false);
+                DrawRight(dc, AmountRight, y, notice.AccountNumber);
+                y += accountLineHeight;
+            }
+            else
+            {
+                y = DrawWrapped(dc, Left, y, accountName, Right - Left, accountLineHeight);
+                y = DrawWrappedRight(dc, AmountRight, y, notice.AccountNumber, AmountRight - Left, accountLineHeight);
+            }
+            Native.SelectObject(dc, bodyFont);
+            y = DrawSeparator(dc, y + 31); // One blank line below the account details.
+            y += 18;
+            Draw(dc, Width / 2, y, "입금 후 직원에게 알려주세요.", true);
+            var outputHeight = y + 58; // Leave one blank line after the instruction.
             if (outputHeight > height) throw new InvalidOperationException("계좌이체 안내서가 인쇄 가능한 길이를 초과했습니다.");
             if (!Native.GdiFlush()) throw LastError("영수증 이미지 완성");
             Marshal.Copy(pixels, image, 0, image.Length);
@@ -85,9 +110,32 @@ internal static partial class PrinterTest
             if (bodyFont != IntPtr.Zero) Native.DeleteObject(bodyFont);
             if (titleFont != IntPtr.Zero) Native.DeleteObject(titleFont);
             if (amountFont != IntPtr.Zero) Native.DeleteObject(amountFont);
+            if (accountFont != IntPtr.Zero) Native.DeleteObject(accountFont);
             if (oldBitmap != IntPtr.Zero) Native.SelectObject(dc, oldBitmap);
             if (bitmap != IntPtr.Zero) Native.DeleteObject(bitmap);
             Native.DeleteDC(dc);
         }
+    }
+
+    private static int DrawWrappedRight(IntPtr dc, int right, int y, string text, int maxWidth, int lineHeight)
+    {
+        var line = new System.Text.StringBuilder();
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var candidate = line.ToString() + rune;
+            if (TextWidth(dc, candidate) > maxWidth && line.Length > 0)
+            {
+                DrawRight(dc, right, y, line.ToString());
+                y += lineHeight;
+                line.Clear();
+            }
+            line.Append(rune.ToString());
+        }
+        if (line.Length > 0)
+        {
+            DrawRight(dc, right, y, line.ToString());
+            y += lineHeight;
+        }
+        return y;
     }
 }

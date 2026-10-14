@@ -26,6 +26,7 @@ app.Use(async (context, next) =>
     if (!isShutdownRequest &&
         !isPosExitRequest &&
         !context.Request.Path.Equals("/cash-drawer/open", StringComparison.OrdinalIgnoreCase) &&
+        !context.Request.Path.Equals("/api/printer/document", StringComparison.OrdinalIgnoreCase) &&
         !context.Request.Path.Equals("/api/printer/receipt", StringComparison.OrdinalIgnoreCase) &&
         !context.Request.Path.Equals("/api/printer/account-transfer/print", StringComparison.OrdinalIgnoreCase))
     {
@@ -117,6 +118,26 @@ app.MapPost("/api/printer/receipt", (SaleReceipt receipt, IConfiguration configu
     catch (Exception exception)
     {
         logger.LogError(exception, "판매 영수증 출력 실패: {PrinterName}, checkout {CheckoutId}", printerName, receipt.CheckoutId);
+        var statusCode = exception is System.ComponentModel.Win32Exception { NativeErrorCode: 1801 } ? 404 : 500;
+        return Results.Json(new { success = false, printerName, error = exception.Message }, statusCode: statusCode);
+    }
+});
+
+app.MapPost("/api/printer/document", (PosPrintDocument document, IConfiguration configuration, ILogger<Program> logger) =>
+{
+    var error = document.Validate();
+    if (error is not null) return Results.Json(new { success = false, error }, statusCode: 400);
+    var printerName = configuration["Printer:Name"];
+    if (string.IsNullOrWhiteSpace(printerName))
+        return Results.Json(new { success = false, error = "Printer:Name 설정이 비어 있습니다." }, statusCode: 500);
+    try
+    {
+        var jobId = PrinterTest.PrintDocument(printerName, document);
+        return Results.Ok(new { success = true, printerName, jobId });
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(exception, "인쇄 문서 출력 실패: {PrinterName}", printerName);
         var statusCode = exception is System.ComponentModel.Win32Exception { NativeErrorCode: 1801 } ? 404 : 500;
         return Results.Json(new { success = false, printerName, error = exception.Message }, statusCode: statusCode);
     }

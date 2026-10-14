@@ -1,7 +1,8 @@
-import { desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
+  auditLogs,
   checkoutItems,
   checkouts,
   customerPrepaidLedger,
@@ -22,6 +23,8 @@ import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
+import { buildCustomerConfirmationPrintDocument, buildSalePrintDocument } from "@/lib/print-document";
+import { isSaleLookupCode } from "@/lib/lookup-code";
 import type { SaleDetail, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
 
 const finishedStatuses = new Set(["PAID", "CANCELLED", "REFUNDED"]);
@@ -85,6 +88,14 @@ export async function GET(request: Request) {
   try {
     if (!(await ensurePosAccess()) && !(await getCurrentAdminStaff())) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
     const url = new URL(request.url);
+    const lookupCode = url.searchParams.get("lookupCode");
+    if (lookupCode !== null) {
+      if (!isSaleLookupCode(lookupCode)) return Response.json({ success: false, message: "판매 조회 코드를 찾을 수 없습니다." }, { status: 404 });
+      const [checkout] = await db.select({ checkoutId: checkouts.checkoutId }).from(checkouts)
+        .where(eq(checkouts.receiptLookupCode, lookupCode)).limit(1);
+      if (!checkout) return Response.json({ success: false, message: "판매 조회 코드를 찾을 수 없습니다." }, { status: 404 });
+      return detailResponse(checkout.checkoutId);
+    }
     const checkoutId = Number(url.searchParams.get("checkoutId"));
     if (Number.isInteger(checkoutId) && checkoutId > 0) return detailResponse(checkoutId);
     const legacyDate = url.searchParams.get("date");
@@ -102,10 +113,26 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     if (!(await ensurePosAccess())) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
-    const body = await request.json() as { checkoutId?: unknown; tableId?: unknown; isReprint?: unknown };
+    const body = await request.json() as { checkoutId?: unknown; tableId?: unknown; customerPaymentId?: unknown; isReprint?: unknown };
     if (body.checkoutId !== undefined && body.tableId !== undefined)
       return Response.json({ success: false, message: "거래와 테이블을 동시에 지정할 수 없습니다." }, { status: 400 });
+    if (body.customerPaymentId !== undefined && (body.checkoutId !== undefined || body.tableId !== undefined))
+      return Response.json({ success: false, message: "고객결제와 다른 영수증 대상을 동시에 지정할 수 없습니다." }, { status: 400 });
     let checkoutId = body.checkoutId;
+    let customerPayment: { paymentId: number; customerId: number; customerName: string } | null = null;
+    if (body.customerPaymentId !== undefined) {
+      if (!Number.isSafeInteger(body.customerPaymentId) || Number(body.customerPaymentId) <= 0)
+        return Response.json({ success: false, message: "고객결제 거래를 확인해 주세요." }, { status: 400 });
+      const [target] = await db.select({ checkoutId: payments.checkoutId, paymentId: payments.paymentId, customerId: customers.customerId, customerName: customers.name, customerCouponQuantity: payments.customerCouponQuantity, status: payments.status, methodCode: paymentMethods.methodCode })
+        .from(payments)
+        .innerJoin(paymentMethods, eq(paymentMethods.paymentMethodId, payments.paymentMethodId))
+        .innerJoin(customers, eq(customers.customerId, payments.customerId))
+        .where(eq(payments.paymentId, Number(body.customerPaymentId))).limit(1);
+      if (!target || target.status !== "APPROVED" || target.methodCode !== "CUSTOMER_PAYMENT" || target.customerCouponQuantity !== null)
+        return Response.json({ success: false, message: "유효한 고객 선불금 결제를 찾을 수 없습니다." }, { status: 409 });
+      checkoutId = target.checkoutId;
+      customerPayment = target;
+    }
     if (body.tableId !== undefined) {
       if (!Number.isSafeInteger(body.tableId) || Number(body.tableId) <= 0)
         return Response.json({ success: false, message: "테이블을 확인해 주세요." }, { status: 400 });
@@ -119,7 +146,8 @@ export async function POST(request: Request) {
 
     const sale = await loadSaleDetail(Number(checkoutId));
     if (!sale) return Response.json({ success: false, message: "판매 거래를 찾을 수 없습니다." }, { status: 404 });
-    if (sale.checkoutStatus !== "PAID" || sale.displayStatus === "CANCELLED")
+    if ((!customerPayment && (sale.checkoutStatus !== "PAID" || sale.displayStatus === "CANCELLED")) ||
+        (customerPayment && (sale.checkoutStatus === "CANCELLED" || sale.checkoutStatus === "REFUNDED")))
       return Response.json({ success: false, message: "완료된 유효 결제 거래만 출력할 수 있습니다." }, { status: 409 });
 
     // checkout_items records the effective quantity when the checkout is created.
@@ -132,35 +160,66 @@ export async function POST(request: Request) {
       return Response.json({ success: false, message: "저장된 메뉴 내역과 거래 금액이 일치하지 않아 영수증을 출력할 수 없습니다." }, { status: 409 });
 
     const approvedPayments = sale.payments.filter(payment => payment.status === "APPROVED");
-    const partialCancellation = sale.displayStatus === "PARTIALLY_CANCELLED";
-    if (!partialCancellation && sale.approvedAmount !== sale.totalAmount)
+    const partialCancellation = !customerPayment && sale.displayStatus === "PARTIALLY_CANCELLED";
+    if (!customerPayment && !partialCancellation && sale.approvedAmount !== sale.totalAmount)
       return Response.json({ success: false, message: "저장된 결제금액과 결제내역이 일치하지 않습니다." }, { status: 409 });
     const effectiveTotal = partialCancellation ? sale.approvedAmount : sale.totalAmount;
     const cancelledAmount = partialCancellation ? Math.max(0, sale.totalAmount - effectiveTotal) : 0;
-    if (sale.approvedAmount !== effectiveTotal || effectiveTotal <= 0 || effectiveTotal > sale.totalAmount)
+    if ((!customerPayment && sale.approvedAmount !== effectiveTotal) || sale.approvedAmount > effectiveTotal || effectiveTotal <= 0 || effectiveTotal > sale.totalAmount)
       return Response.json({ success: false, message: "저장된 결제금액과 결제내역이 일치하지 않습니다." }, { status: 409 });
+    let customerConfirmation: { paymentId: number; customerName: string; amount: number; balanceAfterPayment: number; barcodeValue: string } | null = null;
+    if (customerPayment) {
+      const [ledger] = await db.select({ ledgerId: customerPrepaidLedger.ledgerId, amount: customerPrepaidLedger.amount })
+        .from(customerPrepaidLedger)
+        .where(and(eq(customerPrepaidLedger.paymentId, customerPayment.paymentId), eq(customerPrepaidLedger.entryType, "CUSTOMER_PAYMENT"))).limit(1);
+      if (!ledger || Number(ledger.amount) >= 0 || !approvedPayments.some(payment => payment.paymentId === customerPayment.paymentId))
+        return Response.json({ success: false, message: "고객결제 잔액 기록을 확인할 수 없습니다." }, { status: 409 });
+      const [balance] = await db.select({ amount: sql<string>`COALESCE(SUM(${customerPrepaidLedger.amount}), 0)` })
+        .from(customerPrepaidLedger)
+        .where(and(eq(customerPrepaidLedger.customerId, customerPayment.customerId), sql`${customerPrepaidLedger.ledgerId} <= ${ledger.ledgerId}`));
+      customerConfirmation = {
+        paymentId: customerPayment.paymentId,
+        customerName: customerPayment.customerName,
+        amount: Math.abs(Number(ledger.amount)),
+        balanceAfterPayment: Number(balance.amount),
+        // A compact Code 39 value keeps the native barcode inside the 80 mm print width.
+        // paymentId is globally unique; no customer data is encoded.
+        barcodeValue: `P${customerPayment.paymentId.toString(36).toUpperCase()}`,
+      };
+    }
     const discounts = sale.discounts.filter(discount => discount.amount > 0);
     const itemizedDiscounts = discounts.reduce((sum, discount) => sum + discount.amount, 0) === sale.discountAmount
       ? discounts : [];
 
-    const [storeInfo, receiptLogo] = await Promise.all([getStoreInfo(), getReceiptLogoRaster()]);
-    return Response.json({ success: true, checkoutId: sale.checkoutId, receipt: {
+    const [storeInfo, receiptLogo, generalPrintHistory] = await Promise.all([
+      getStoreInfo(), getReceiptLogoRaster(),
+      customerPayment ? Promise.resolve([]) : db.select({ id: auditLogs.auditLogId }).from(auditLogs)
+        .where(and(eq(auditLogs.actionType, "PRINT"), eq(auditLogs.entityType, "GENERAL_RECEIPT"),
+          eq(auditLogs.entityId, sale.checkoutId))).limit(1),
+    ]);
+    const receipt = {
         storeInfo,
         receiptLogo,
         checkoutId: sale.checkoutId,
-        isReprint: body.isReprint === false ? false : true,
+        lookupCode: sale.receiptLookupCode,
+        isReprint: !customerPayment && generalPrintHistory.length > 0,
         statusLabel: partialCancellation ? "일부취소" : null,
         tableLabel: sale.tableNos.map(tableNo => `${tableNo}T`).join("+"),
         orderedAt: sale.orderedAt.slice(0, 16).replace("T", " "),
-        items: sale.items.filter(item => item.printOnReceipt && !(item.itemType === "COMPONENT" && item.unitPrice === 0)),
+        transactionAt: sale.occurredAt.slice(0, 16).replace("T", " "),
+        tableNos: sale.tableNos,
+        items: sale.items.filter(item => item.printOnReceipt && (customerConfirmation ? !(item.itemType === "COMPONENT" && item.unitPrice === 0) : true)),
         subtotalAmount: sale.subtotalAmount,
         discountAmount: sale.discountAmount,
         discounts: itemizedDiscounts,
         cancelledAmount,
         totalAmount: effectiveTotal,
         remainingAmount: Math.max(0, effectiveTotal - sale.approvedAmount),
+        ...(customerConfirmation ? { customerConfirmation } : {}),
         payments: approvedPayments.map(payment => ({
-          method: payment.method,
+          paymentId: payment.paymentId,
+          method: payment.methodCode === "CUSTOMER_PAYMENT" && !payment.customerCouponQuantity ? "고객선불금" : payment.method,
+          methodCode: payment.methodCode,
           amount: payment.appliedAmount,
           receivedAmount: payment.amount,
           prepaidCreditAmount: payment.prepaidCreditAmount,
@@ -168,7 +227,11 @@ export async function POST(request: Request) {
           cashReceived: payment.cashReceived,
           cashChange: payment.cashChange,
         })),
-    } });
+    };
+    const document = customerConfirmation
+      ? buildCustomerConfirmationPrintDocument(receipt)
+      : buildSalePrintDocument(receipt);
+    return Response.json({ success: true, checkoutId: sale.checkoutId, receipt, document });
   } catch (error) {
     console.error("receipt preparation failed", error);
     return Response.json({ success: false, message: "영수증 정보를 준비할 수 없습니다." }, { status: 500 });
@@ -317,6 +380,7 @@ async function detailResponse(checkoutId: number) {
 async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
   const [checkout] = await db.select({
     checkoutId: checkouts.checkoutId,
+    receiptLookupCode: checkouts.receiptLookupCode,
     status: checkouts.status,
     subtotalAmount: checkouts.subtotalAmount,
     discountAmount: checkouts.discountAmount,
@@ -412,6 +476,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     .reduce((latest, value) => value > latest ? value : latest);
   const sale: SaleDetail = {
     checkoutId,
+    receiptLookupCode: checkout.receiptLookupCode,
     occurredAt: transactionAt,
     orderedAt: firstOrderedAt ?? checkout.createdAt,
     tableLabel: tables.length ? `${tables.join("·")}T` : "-",

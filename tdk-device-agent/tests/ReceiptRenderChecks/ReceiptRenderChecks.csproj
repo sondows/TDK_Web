@@ -10,5 +10,6 @@
     <Compile Include="../../SaleReceipt.cs" Link="SaleReceipt.cs" />
     <Compile Include="../../AccountTransferNotice.cs" Link="AccountTransferNotice.cs" />
     <Compile Include="../../AccountTransferPrinter.cs" Link="AccountTransferPrinter.cs" />
+    <Compile Include="../../PosPrintDocument.cs" Link="PosPrintDocument.cs" />
   </ItemGroup>
 </Project>

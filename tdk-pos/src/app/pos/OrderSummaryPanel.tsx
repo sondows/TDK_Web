@@ -34,6 +34,7 @@ type Table = {
 };
 type DetailItem = {
   orderItemId: number;
+  status: string;
   menuId: number;
   parentOrderItemId: number | null;
   itemType: "NORMAL" | "COMPONENT" | "SERVICE";
@@ -231,14 +232,26 @@ export default function OrderSummaryPanel({
           .filter((o) => o.sessionId === sessionId)
           .slice()
           .sort((a, b) => a.orderId - b.orderId);
-  const cancelables = details
-    .flatMap((o) => o.items)
-    .filter((i) => i.effectiveQty > 0);
+  const partySourceDetails = orderDetails
+    .filter(order => party?.sessionIds.includes(order.sessionId) && order.sessionId !== sessionId)
+    .slice()
+    .sort((a, b) => a.orderId - b.orderId);
+  const editableOrders = [...details, ...partySourceDetails].filter(order => order.status === "OPEN" || order.status === "ACCEPTED");
+  const editableItems = editableOrders.flatMap(order => order.items.filter(item =>
+    item.status !== "CANCELLED" && (item.parentOrderItemId === null ||
+      order.items.some(parent => parent.orderItemId === item.parentOrderItemId && parent.status !== "CANCELLED")),
+  ));
+  const isFreeComponent = (item: DetailItem) => item.itemType === "COMPONENT" && item.parentOrderItemId !== null && Number(item.unitPrice) === 0 && item.cancelledQty === 0;
+  const cancelables = editableItems.filter(item => item.effectiveQty > 0 && !isFreeComponent(item));
+  const freeComponents = editableItems.filter(isFreeComponent);
   const draft = (i: DetailItem) =>
     c.draft[i.orderItemId] ?? { checked: false, keep: 1, touched: false };
   const chosen = cancelables
     .map((i) => ({ i, d: draft(i), qty: draft(i).keep }))
     .filter((x) => x.d.checked && x.qty > 0);
+  const componentChanges = freeComponents
+    .map(i => ({ i, quantity: draft(i).keep }))
+    .filter(x => draft(x.i).checked && x.quantity !== x.i.effectiveQty);
   const isFullOrderCancellation =
     cancelables.length > 0 &&
     cancelables.every((item) =>
@@ -278,9 +291,9 @@ export default function OrderSummaryPanel({
       ...x,
       mode: true,
       draft: Object.fromEntries(
-        cancelables.map((i) => [
+        editableItems.map((i) => [
           i.orderItemId,
-          { checked: false, keep: 1, touched: false },
+          { checked: false, keep: isFreeComponent(i) ? i.effectiveQty : 1, touched: false },
         ]),
       ),
     }));
@@ -314,6 +327,8 @@ export default function OrderSummaryPanel({
             orderItemId: x.i.orderItemId,
             qty: x.qty,
           })),
+          componentQuantities: componentChanges.map(x => ({ orderItemId: x.i.orderItemId, quantity: x.quantity })),
+          currentSessionId: sessionId,
           reason: c.reason,
           detail: c.detail,
           ...credentials,
@@ -389,24 +404,31 @@ export default function OrderSummaryPanel({
     >
       <header className="flex items-baseline gap-1.5 border-b border-violet-100 pb-1 text-sm font-bold text-violet-800">
         {showTable && <span>{sessionTableNos[o.sessionId] ? `${sessionTableNos[o.sessionId]}T` : `세션 ${o.sessionId}`} ·</span>}
-        <span>{n + 1}차 주문</span>
+        <span>{scopedDetails.slice(0, n).filter(previous => previous.sessionId === o.sessionId).length + 1}차 주문</span>
         <time className="font-medium text-violet-700">({time(o.orderedAt)})</time>
       </header>
       {orderedItems(o.items).map((i) => {
         const d = draft(i),
-          selectable = !readOnly && c.mode && i.effectiveQty > 0,
+          editableComponent = !readOnly && c.mode && isFreeComponent(i) && i.status !== "CANCELLED" &&
+            o.items.some(parent => parent.orderItemId === i.parentOrderItemId && parent.status !== "CANCELLED") &&
+            (o.status === "OPEN" || o.status === "ACCEPTED"),
+          selectable = !readOnly && c.mode && (o.status === "OPEN" || o.status === "ACCEPTED") && i.status !== "CANCELLED" &&
+            (i.parentOrderItemId === null || o.items.some(parent => parent.orderItemId === i.parentOrderItemId && parent.status !== "CANCELLED")) &&
+            (editableComponent || i.effectiveQty > 0),
           selectedForCancellation = selectable && d.checked,
-          fullyCancelled = i.effectiveQty === 0,
+          fullyCancelled = i.status === "CANCELLED" || o.status === "CANCELLED" || (i.effectiveQty === 0 && i.cancelledQty > 0),
           effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
         return (
           <div
             className={`mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
             key={i.orderItemId}
-            onClick={() => selectable && toggle(i)}
+            onClick={() => selectable && (editableComponent
+              ? edit(i, { checked: !d.checked, keep: i.effectiveQty, touched: true })
+              : toggle(i))}
           >
             <div className="grid grid-cols-[minmax(0,1fr)_52px_52px_68px] items-center gap-1 text-sm">
               <span
-                className={`truncate font-medium ${selectedForCancellation ? "text-red-700 line-through" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
+                className={`truncate font-medium ${selectedForCancellation ? (editableComponent ? "text-red-700" : "text-red-700 line-through") : fullyCancelled ? "text-slate-500 line-through" : ""}`}
               >
                 {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
                 {i.itemName}{i.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
@@ -419,11 +441,11 @@ export default function OrderSummaryPanel({
               {selectedForCancellation ? (
                 <span className="grid grid-cols-[1.5rem_1fr_1.5rem] items-center text-center">
                   <button
-                    disabled={d.keep <= 1}
+                    disabled={d.keep <= (editableComponent ? 0 : 1)}
                     onClick={(e) => {
                       e.stopPropagation();
                       edit(i, {
-                        keep: Math.max(1, d.keep - 1),
+                        keep: Math.max(editableComponent ? 0 : 1, d.keep - 1),
                         checked: true,
                         touched: true,
                       });
@@ -435,11 +457,11 @@ export default function OrderSummaryPanel({
                   </button>
                   <b className="tabular-nums text-red-700">{d.keep}</b>
                   <button
-                    disabled={d.keep >= i.effectiveQty}
+                    disabled={d.keep >= (editableComponent ? i.qty : i.effectiveQty)}
                     onClick={(e) => {
                       e.stopPropagation();
                       edit(i, {
-                        keep: Math.min(i.effectiveQty, d.keep + 1),
+                        keep: Math.min(editableComponent ? i.qty : i.effectiveQty, d.keep + 1),
                         checked: true,
                         touched: true,
                       });
@@ -516,28 +538,6 @@ export default function OrderSummaryPanel({
   const partyDiscounts = discounts.filter((discount) =>
     partySessionIds.includes(discount.sessionId),
   );
-  const discountRows = (entries: SessionDiscount[]) => {
-    const effectiveEntries = entries.filter(
-      (discount) => Number(discount.discountAmount) > 0,
-    );
-    return effectiveEntries.length ? (
-      <div className="mt-3">
-        {effectiveEntries.map((discount, index) => (
-          <div
-            className="flex justify-between text-sm text-slate-900"
-            key={`${discount.sessionId}:${discount.discountType}:${index}`}
-          >
-            <span>
-              {discount.discountType === "SNS_REVIEW"
-                ? "SNS 리뷰 할인"
-                : discount.label}
-            </span>
-            <b className="text-red-600">-{money(Number(discount.discountAmount))}</b>
-          </div>
-        ))}
-      </div>
-    ) : null;
-  };
   const partyGross = partyFinancials?.gross ?? partyTotal;
   const partyDiscountTotal = partyFinancials?.discount ?? partyDiscounts.reduce(
     (sum, discount) => sum + Number(discount.discountAmount),
@@ -549,9 +549,11 @@ export default function OrderSummaryPanel({
   // Party aggregates are displayed separately in the party-order section.
   const billingDiscounts = selectedDiscounts;
   const billingGrossTotal = orderGrossTotal;
-  const hasBillingDiscount = billingDiscounts.some(
-    (discount) => Number(discount.discountAmount) > 0,
+  const billingDiscountTotal = billingDiscounts.reduce(
+    (sum, discount) => sum + Math.max(0, Number(discount.discountAmount) || 0),
+    0,
   );
+  const hasBillingDiscount = billingDiscountTotal > 0;
   const prepaidAmount = selected?.prepaidAmount ?? 0;
   const receivableAmount = Math.max(
     0,
@@ -578,7 +580,7 @@ export default function OrderSummaryPanel({
           </div>
         )}
         <div className="flex flex-col gap-y-[7px] py-2">
-          {partyRows.map((item) => (
+          {c.mode && viewTab === "detail" ? renderDetailRows(false, partySourceDetails, true) : partyRows.map((item) => (
             <div className="space-y-1" key={item.rowKey}>
               {[item, ...item.components].map((row, index) => (
                 <div
@@ -627,12 +629,17 @@ export default function OrderSummaryPanel({
           : details.length
             ? readOnly ? renderDetailRows(true) : rows
             : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>}
-        {hasBillingDiscount && <div className={`mt-3 flex justify-between ${viewTab === "summary" ? "border-t border-blue-200" : ""} pt-3 text-base font-bold text-slate-700`}>
-          <span>주문합계</span>
-          <b>{money(billingGrossTotal)}</b>
-        </div>}
-        {discountRows(billingDiscounts)}
-        {prepaidRow}
+        {hasBillingDiscount && <>
+          <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : "border-violet-200"} pt-3 text-base font-bold text-slate-700`}>
+            <span>주문금액</span>
+            <b>{money(billingGrossTotal)}</b>
+          </div>
+          <div className="mt-2 flex justify-between text-sm text-slate-900">
+            <span>할인금액</span>
+            <b className="text-red-600">- {money(billingDiscountTotal)}</b>
+          </div>
+        </>}
+        {hasBillingDiscount && prepaidRow}
         <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : "border-violet-200"} pt-3 text-base font-bold text-slate-900`}>
           <span>받을금액</span>
           <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
@@ -723,7 +730,7 @@ export default function OrderSummaryPanel({
                 </button>
                 <button
                   className="min-h-14 rounded-xl bg-[#7C3AED] font-bold text-white"
-                  disabled={!chosen.length || c.busy}
+                  disabled={(!chosen.length && !componentChanges.length) || c.busy}
                   onClick={() => {
                     onBlockingUiChange(true);
                     update((x) => ({ ...x, confirm: true, error: "" }));
@@ -738,7 +745,7 @@ export default function OrderSummaryPanel({
             <div className="shrink-0 pb-2.5 pt-3">
               <button
                 className="min-h-14 w-full rounded-xl bg-[#7C3AED] font-bold text-white"
-                disabled={!sessionId || !cancelables.length}
+                disabled={!sessionId || (!cancelables.length && !freeComponents.length)}
                 onClick={start}
                 type="button"
               >
@@ -788,6 +795,7 @@ export default function OrderSummaryPanel({
         <Confirm
           c={c}
           chosen={chosen}
+          componentChanges={componentChanges}
           amount={amount}
           close={() => update((x) => ({ ...x, confirm: false, error: "" }))}
           setReason={(reason) => update((x) => ({ ...x, reason, error: "" }))}
@@ -845,6 +853,7 @@ export default function OrderSummaryPanel({
 function Confirm({
   c,
   chosen,
+  componentChanges,
   amount,
   close,
   setReason,
@@ -853,6 +862,7 @@ function Confirm({
 }: {
   c: CancelState;
   chosen: Array<{ i: DetailItem; d: { keep: number }; qty: number }>;
+  componentChanges: Array<{ i: DetailItem; quantity: number }>;
   amount: number;
   close: () => void;
   setReason: (s: string) => void;
@@ -888,6 +898,14 @@ function Confirm({
                   <b className="col-start-5 text-right">
                     {money(x.qty * Number(x.i.unitPrice))}
                   </b>
+                </div>
+              ))}
+              {componentChanges.map(({ i, quantity }) => (
+                <div className="grid border-b border-slate-100 px-3 py-2 text-sm last:border-0" key={`component:${i.orderItemId}`} style={cancelDetailGridStyle}>
+                  <span className="truncate font-medium">{i.itemName} 제공수량</span>
+                  <span className="text-right">0</span>
+                  <span className="col-start-4 text-center">{i.effectiveQty} → {quantity}</span>
+                  <b className="col-start-5 text-right">0</b>
                 </div>
               ))}
             </div>

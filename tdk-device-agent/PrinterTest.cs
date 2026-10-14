@@ -57,12 +57,34 @@ internal static partial class PrinterTest
             throw new InvalidOperationException("이 프린터 테스트는 Windows에서만 사용할 수 있습니다.");
 
         var raster = RenderReceipt(receipt);
-        var command = BuildPrintCommand(raster);
+        var command = BuildPrintCommand(raster, receipt.CustomerConfirmation?.BarcodeValue);
         return SendToWindowsPrinter(printerName, command, $"TDK POS receipt {receipt.CheckoutId}");
     }
 
-    private static byte[] BuildPrintCommand(byte[] receiptRaster)
+    private static byte[] BuildPrintCommand(byte[] receiptRaster, string? barcodeValue = null)
     {
+        if (barcodeValue is not null)
+        {
+            var barcode = Encoding.ASCII.GetBytes(barcodeValue);
+            if (barcode.Length is < 1 or > 80)
+                throw new InvalidOperationException("고객확인용 바코드 값이 올바르지 않습니다.");
+            var rasterCommand = new byte[8 + receiptRaster.Length];
+            WriteRasterCommand(rasterCommand, 0, receiptRaster);
+            var commandWithBarcode = new List<byte>(2 + rasterCommand.Length + barcode.Length + 32);
+            commandWithBarcode.AddRange([0x1b, 0x40]); // ESC @
+            commandWithBarcode.AddRange(rasterCommand);
+            commandWithBarcode.Add(0x0a);
+            commandWithBarcode.AddRange([0x1b, 0x61, 0x01]); // ESC a 1: center
+            commandWithBarcode.AddRange([0x1d, 0x48, 0x02]); // GS H 2: readable token below barcode
+            commandWithBarcode.AddRange([0x1d, 0x77, 0x02]); // GS w 2: module width
+            commandWithBarcode.AddRange([0x1d, 0x68, 0x60]); // GS h 96: bar height
+            commandWithBarcode.AddRange([0x1d, 0x6b, 0x45, (byte)barcode.Length]); // GS k 69: Code 39
+            commandWithBarcode.AddRange(barcode);
+            commandWithBarcode.Add(0x0a);
+            commandWithBarcode.AddRange([0x1b, 0x61, 0x00]); // Restore left alignment.
+            commandWithBarcode.AddRange([0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x01]); // Feed and cut.
+            return commandWithBarcode.ToArray();
+        }
         var cutOffset = 2 + 8 + receiptRaster.Length;
         var command = new byte[cutOffset + 4 + 3];
         command[0] = 0x1b; // ESC @: initialize printer state.
@@ -102,6 +124,8 @@ internal static partial class PrinterTest
         IntPtr oldBitmap = IntPtr.Zero;
         IntPtr bodyFont = IntPtr.Zero;
         IntPtr emphasisFont = IntPtr.Zero;
+        IntPtr titleFont = IntPtr.Zero;
+        IntPtr customerInfoFont = IntPtr.Zero;
         IntPtr oldFont = IntPtr.Zero;
 
         try
@@ -134,6 +158,11 @@ internal static partial class PrinterTest
 
             bodyFont = CreateFont(ReceiptFontSize, 500);
             emphasisFont = CreateFont(ReceiptFontSize, 700);
+            if (receipt.CustomerConfirmation is not null)
+            {
+                titleFont = CreateFont(32, 700);
+                customerInfoFont = CreateFont(18, 500);
+            }
             oldFont = Native.SelectObject(dc, bodyFont);
             if (oldFont == IntPtr.Zero) throw LastError("한글 글꼴 선택");
 
@@ -141,7 +170,9 @@ internal static partial class PrinterTest
             Native.SetTextColor(dc, 0); // black
 
             // Keep the existing clear strip below the last payment row.
-            var outputHeight = DrawSaleReceipt(dc, receipt, bodyFont, emphasisFont, hasLogo ? logoHeight : null) + 12;
+            var outputHeight = (receipt.CustomerConfirmation is null
+                ? DrawSaleReceipt(dc, receipt, bodyFont, emphasisFont, hasLogo ? logoHeight : null)
+                : DrawCustomerReceipt(dc, receipt, bodyFont, emphasisFont, titleFont, customerInfoFont, hasLogo ? logoHeight : null)) + 12;
             if (outputHeight > height)
                 throw new InvalidOperationException("영수증 내용이 인쇄 가능한 길이를 초과했습니다.");
 
@@ -162,6 +193,8 @@ internal static partial class PrinterTest
             if (oldFont != IntPtr.Zero) Native.SelectObject(dc, oldFont);
             if (bodyFont != IntPtr.Zero) Native.DeleteObject(bodyFont);
             if (emphasisFont != IntPtr.Zero) Native.DeleteObject(emphasisFont);
+            if (titleFont != IntPtr.Zero) Native.DeleteObject(titleFont);
+            if (customerInfoFont != IntPtr.Zero) Native.DeleteObject(customerInfoFont);
             if (oldBitmap != IntPtr.Zero) Native.SelectObject(dc, oldBitmap);
             if (bitmap != IntPtr.Zero) Native.DeleteObject(bitmap);
             Native.DeleteDC(dc);
@@ -196,6 +229,24 @@ internal static partial class PrinterTest
         y += 28;
         y = DrawSeparator(dc, y);
 
+        y = DrawReceiptItems(dc, receipt, y);
+
+        Native.SelectObject(dc, emphasisFont);
+        DrawAmount(dc, y, "받을금액", receipt.TotalAmount);
+        y += 32;
+
+        Native.SelectObject(dc, bodyFont);
+        foreach (var payment in receipt.Payments)
+        {
+            var rowTop = y;
+            y = DrawWrapped(dc, Left, y, payment.Method, 240, 31);
+            DrawRight(dc, AmountRight, rowTop, Money(payment.Amount));
+        }
+        return y;
+    }
+
+    private static int DrawReceiptItems(IntPtr dc, SaleReceipt receipt, int y)
+    {
         Draw(dc, Left, y, "상품명", false);
         DrawRight(dc, UnitRight, y, "단가");
         DrawRight(dc, QuantityRight, y, "수량");
@@ -212,17 +263,92 @@ internal static partial class PrinterTest
             DrawRight(dc, AmountRight, rowTop, Money(item.Amount));
         }
         y = DrawSeparator(dc, y);
+        return y;
+    }
+
+    private static int DrawCustomerReceipt(IntPtr dc, SaleReceipt receipt, IntPtr bodyFont, IntPtr emphasisFont, IntPtr titleFont, IntPtr customerInfoFont, int? logoHeight)
+    {
+        var confirmation = receipt.CustomerConfirmation ?? throw new InvalidOperationException("고객 선불금 결제 정보가 없습니다.");
+        var store = receipt.StoreInfo ?? throw new InvalidOperationException("매장정보가 없습니다.");
+        var y = logoHeight ?? DrawStoreName(dc, receipt.StoreInfo!.StoreName);
+        if (logoHeight is not null)
+        {
+            y += 12;
+            Draw(dc, Width / 2, y, store.StoreName, true);
+            y += 32;
+        }
+        var businessDetails = string.Join("  ", new[]
+        {
+            $"사업자 {store.BusinessNumber}",
+            string.IsNullOrWhiteSpace(store.Representative) ? null : $"대표 {store.Representative}",
+            $"전화 {store.Phone}",
+        }.Where(detail => detail is not null));
+        Native.SelectObject(dc, customerInfoFont);
+        y = DrawWrappedCentered(dc, y, businessDetails, Right - Left, 24);
+        y = DrawWrappedCentered(dc, y, store.Address, Right - Left, 24);
+        y += 16;
+        Native.SelectObject(dc, bodyFont);
+        y = DrawSeparator(dc, y);
+        Native.SelectObject(dc, titleFont);
+        Draw(dc, Width / 2, y, "영 수 증", true);
+        y += 40;
+        Native.SelectObject(dc, bodyFont);
+        y = DrawSeparator(dc, y);
+        y = DrawReceiptItems(dc, receipt, y);
 
         Native.SelectObject(dc, emphasisFont);
-        DrawAmount(dc, y, "받을금액", receipt.TotalAmount);
-        y += 32;
-
+        DrawAmount(dc, y, "총 결제금액", receipt.TotalAmount);
+        y += 44;
         Native.SelectObject(dc, bodyFont);
         foreach (var payment in receipt.Payments)
         {
+            var isCustomerPayment = payment.PaymentId == confirmation.PaymentId;
             var rowTop = y;
-            y = DrawWrapped(dc, Left, y, payment.Method, 240, 31);
+            y = DrawWrapped(dc, Left, y, isCustomerPayment ? "고객선불금" : payment.Method, 240, 31);
             DrawRight(dc, AmountRight, rowTop, Money(payment.Amount));
+            if (!isCustomerPayment) continue;
+            Native.SelectObject(dc, customerInfoFont);
+            var balanceText = $"{Money(confirmation.BalanceAfterPayment)})";
+            var labelWidth = Math.Max(80, AmountRight - Left - TextWidth(dc, balanceText) - 16);
+            var nameRunes = confirmation.CustomerName.EnumerateRunes().Select(rune => rune.ToString()).ToList();
+            var balanceLabel = $"({confirmation.CustomerName} 결제 후 잔액";
+            while (nameRunes.Count > 0 && TextWidth(dc, balanceLabel) > labelWidth)
+            {
+                nameRunes.RemoveAt(nameRunes.Count - 1);
+                balanceLabel = $"({string.Concat(nameRunes)}… 결제 후 잔액";
+            }
+            Draw(dc, Left, y, balanceLabel, false);
+            DrawRight(dc, AmountRight, y, balanceText);
+            y += 28;
+            Native.SelectObject(dc, bodyFont);
+        }
+        y += 12;
+        y = DrawSeparator(dc, y);
+
+        Draw(dc, Left, y, "고객확인", false);
+        y += 112; // Signature area: label plus three blank text rows.
+        y = DrawSeparator(dc, y);
+        return y + 28; // One blank row before the native barcode command.
+    }
+
+    private static int DrawWrappedCentered(IntPtr dc, int y, string text, int maxWidth, int lineHeight)
+    {
+        var line = new StringBuilder();
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var candidate = line.ToString() + rune;
+            if (line.Length > 0 && TextWidth(dc, candidate) > maxWidth)
+            {
+                Draw(dc, Width / 2, y, line.ToString(), true);
+                y += lineHeight;
+                line.Clear();
+            }
+            line.Append(rune.ToString());
+        }
+        if (line.Length > 0)
+        {
+            Draw(dc, Width / 2, y, line.ToString(), true);
+            y += lineHeight;
         }
         return y;
     }
@@ -341,7 +467,7 @@ internal static partial class PrinterTest
         DrawRight(dc, AmountRight, y, Money(amount));
     }
 
-    private static string Money(int amount) => amount.ToString("N0", CultureInfo.InvariantCulture);
+    private static string Money(long amount) => amount.ToString("N0", CultureInfo.InvariantCulture);
 
     private static void DrawRight(IntPtr dc, int x, int y, string text)
     {

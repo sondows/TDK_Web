@@ -14,6 +14,7 @@ export type OtherPaymentMethod = {
   validUntil: string | null;
   accountInfoEnabled: number | null;
   accountInfoPrintEnabled: number | null;
+  autoCompleteEnabled: number | null;
   bankName: string | null;
   accountNumber: string | null;
   accountHolder: string | null;

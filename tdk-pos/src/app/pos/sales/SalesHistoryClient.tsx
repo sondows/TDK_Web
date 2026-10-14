@@ -104,6 +104,13 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
   const [detail, setDetail] = useState<SaleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [receiptLookupOpen, setReceiptLookupOpen] = useState(false);
+  const [receiptLookupCode, setReceiptLookupCode] = useState("");
+  const [receiptLookupError, setReceiptLookupError] = useState(false);
+  const [receiptLookupBusy, setReceiptLookupBusy] = useState(false);
+  const receiptLookupInputRef = useRef<HTMLInputElement>(null);
+  const receiptLookupRequestId = useRef(0);
+  const receiptLookupInFlight = useRef(false);
   const [printingCheckoutId, setPrintingCheckoutId] = useState<number | null>(null);
   const printingRef = useRef(false);
   const [printError, setPrintError] = useState("");
@@ -237,6 +244,61 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     }
   };
 
+  const openReceiptLookup = () => {
+    receiptLookupRequestId.current++;
+    receiptLookupInFlight.current = false;
+    setReceiptLookupCode("");
+    setReceiptLookupError(false);
+    setReceiptLookupBusy(false);
+    setReceiptLookupOpen(true);
+  };
+
+  const closeReceiptLookup = () => {
+    receiptLookupRequestId.current++;
+    receiptLookupInFlight.current = false;
+    setReceiptLookupOpen(false);
+    setReceiptLookupBusy(false);
+  };
+
+  useEffect(() => {
+    if (!receiptLookupOpen) return;
+    receiptLookupInputRef.current?.focus();
+  }, [receiptLookupOpen]);
+
+  const findReceipt = async () => {
+    if (receiptLookupInFlight.current) return;
+    const lookupCode = receiptLookupCode.replace(/[\r\n]/g, "").trim();
+    if (!lookupCode) {
+      setReceiptLookupError(true);
+      receiptLookupInputRef.current?.focus();
+      receiptLookupInputRef.current?.select();
+      return;
+    }
+    receiptLookupInFlight.current = true;
+    const requestId = ++receiptLookupRequestId.current;
+    setReceiptLookupBusy(true);
+    setReceiptLookupError(false);
+    try {
+      const response = await fetch(`/api/sales?lookupCode=${encodeURIComponent(lookupCode)}`, { cache: "no-store" });
+      const result = await response.json() as SaleDetailResponse;
+      if (!response.ok || !result.success || !result.sale) throw new Error("Receipt lookup failed");
+      if (requestId !== receiptLookupRequestId.current) return;
+      setDetail(result.sale);
+      setPrintSuccess("");
+      setReceiptLookupOpen(false);
+    } catch {
+      if (requestId !== receiptLookupRequestId.current) return;
+      setReceiptLookupError(true);
+      receiptLookupInputRef.current?.focus();
+      receiptLookupInputRef.current?.select();
+    } finally {
+      if (requestId === receiptLookupRequestId.current) {
+        receiptLookupInFlight.current = false;
+        setReceiptLookupBusy(false);
+      }
+    }
+  };
+
   const printReceipt = async (checkoutId: number) => {
     if (printingRef.current) return;
     printingRef.current = true;
@@ -267,6 +329,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
               <strong className="min-w-0 truncate text-lg font-extrabold text-white">{displayDate(period.startDate)}</strong>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              <button className={`${POS_HEADER_ACTION_CLASS_NAME} rounded-lg px-2 py-1 transition-colors hover:bg-white/10 active:scale-[0.98]`} onClick={openReceiptLookup} type="button">영수증조회 ⋮</button>
               {([
               ["previousMonth", "전월"],
               ["previousWeek", "전주"],
@@ -323,6 +386,16 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
         {error && <p className="shrink-0 border-t border-red-100 bg-red-50 px-6 py-3 font-bold text-red-600">{error}</p>}
       </section>
       {detail && <SaleDetailDialog sale={detail} close={() => { setDetail(null); setPrintSuccess(""); }} print={() => void printReceipt(detail.checkoutId)} printing={printingCheckoutId === detail.checkoutId} printSuccess={printSuccess} />}
+      {receiptLookupOpen && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4"><section aria-labelledby="receipt-lookup-title" aria-modal="true" className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
+        <PosSubHeader onBack={closeReceiptLookup} title="영수증 조회" titleId="receipt-lookup-title" />
+        <form className="p-5" onSubmit={event => { event.preventDefault(); void findReceipt(); }}>
+          <div className="flex items-center gap-2">
+            <input ref={receiptLookupInputRef} aria-label="영수증 바코드 입력/스캔" autoComplete="off" className="min-h-14 min-w-0 flex-1 rounded-lg border border-slate-300 px-4 text-lg outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600" onChange={event => { setReceiptLookupCode(event.target.value); setReceiptLookupError(false); }} placeholder="바코드 입력/스캔" type="text" value={receiptLookupCode} />
+            <button className="min-h-14 shrink-0 rounded-lg bg-blue-600 px-5 text-lg font-bold text-white disabled:opacity-50" disabled={receiptLookupBusy} type="submit">조회</button>
+          </div>
+          {receiptLookupError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">판매내역을 찾을 수 없습니다.</p>}
+        </form>
+      </section></div>}
       {summaryOpen && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className={`flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${summary ? "max-w-2xl" : "max-w-[336px]"}`} role="dialog">
         <PosSubHeader onBack={closeSummary} title={summary ? "매출현황" : "관리자 확인"} trailing={summary ? <p className="text-lg font-bold text-white/90">{displayDate(period.startDate)}</p> : undefined} />
         {summary ? <div className="min-h-0 flex-1 overflow-y-auto p-5"><div className="grid grid-cols-2 gap-3">

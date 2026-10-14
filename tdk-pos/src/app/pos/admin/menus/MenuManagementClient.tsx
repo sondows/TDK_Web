@@ -9,9 +9,10 @@ import PosSubHeader from "../../PosSubHeader";
 type Category = { categoryId: number; name: string; sortOrder: number };
 type ComponentMenu = { menuId: number; name: string; price: string };
 type MenuComponent = { menuComponentId: number; componentMenuId: number; itemName: string; price: string; qtyPerUnit: number; printOnKitchen: number; printOnReceipt: number; sortOrder: number };
-type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; countsAsPerson: number; isActive: number; sortOrder: number; imageUrl: string | null; components: MenuComponent[] };
+type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; isActive: number; menuNumber: number | null; sortOrder: number; imageUrl: string | null; components: MenuComponent[] };
 type MenuComponentInput = { componentMenuId: number; qtyPerUnit: number; printOnKitchen: boolean; printOnReceipt: boolean };
-type MenuPayload = { name: string; price: string; categoryId: number; countsAsPerson: boolean; isActive: boolean; components: MenuComponentInput[] };
+type MenuPayload = { name: string; price: string; categoryId: number; menuNumber: number | null; isActive: boolean; components: MenuComponentInput[] };
+type DuplicateMenuNumberCheck = (categoryId: number, menuNumber: number | null, exceptMenuId?: number) => string | null;
 
 const categoryDisplayName = (name: string) => ({ "김치찌개": "찌개", "사이드": "단품", "주류·음료": "음료" }[name] ?? name);
 const parsePrice = (value: string) => Number(value.replaceAll(",", "").trim());
@@ -27,6 +28,13 @@ export default function MenuManagementClient({ categories, initialMenus, compone
   const [movingMenuId, setMovingMenuId] = useState<number | null>(null);
 
   const visibleGroups = useMemo(() => categories.filter(category => activeCategoryId === null || category.categoryId === activeCategoryId).map(category => ({ category, menus: menuRows.filter(menu => menu.categoryId === category.categoryId) })), [activeCategoryId, categories, menuRows]);
+  const checkDuplicateMenuNumber: DuplicateMenuNumberCheck = (categoryId, menuNumber, exceptMenuId) => {
+    if (menuNumber === null) return null;
+    const duplicate = menuRows.some(menu => menu.categoryId === categoryId && menu.menuNumber === menuNumber && menu.menuId !== exceptMenuId);
+    if (!duplicate) return null;
+    const categoryName = categories.find(category => category.categoryId === categoryId)?.name ?? "선택한 카테고리";
+    return `${categoryDisplayName(categoryName)} 분류에서 이미 사용 중인 메뉴번호입니다.`;
+  };
 
   const moveMenu = async (menu: Menu, direction: "up" | "down") => {
     setMovingMenuId(menu.menuId); setMessage("");
@@ -58,8 +66,8 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     </div>
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
     <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} />)}</div>
-    {isCreateOpen && <CreateMenuDialog categories={categories} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
-    {editingMenu && <EditMenuDialog categories={categories} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} update={updateMenu} />}
+    {isCreateOpen && <CreateMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
+    {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} update={updateMenu} />}
   </section>;
 }
 
@@ -75,29 +83,128 @@ function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu }: { cate
   </div></section>;
 }
 
-function CreateMenuDialog({ categories, componentMenus, defaultCategoryId, close, create }: { categories: Category[]; componentMenus: ComponentMenu[]; defaultCategoryId: number; close: () => void; create: (payload: MenuPayload) => Promise<void> }) {
-  const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [categoryId, setCategoryId] = useState(defaultCategoryId); const [countsAsPerson, setCountsAsPerson] = useState(false); const [isActive, setIsActive] = useState(true); const [components, setComponents] = useState<MenuComponentInput[]>([]); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  const submit = async () => { if (!name.trim() || !price.trim() || !Number.isFinite(Number(price))) { setError("메뉴명, 가격, 카테고리를 확인하세요."); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, countsAsPerson, isActive, components }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
-  return <Dialog close={close} saving={saving} title="새 메뉴 추가"><label className="mt-5 block text-sm font-bold">메뉴명 *<input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label><label className="mt-4 block text-sm font-bold">가격 *<span className="mt-2 flex items-center gap-2"><input className={inputClass + " text-right"} inputMode="decimal" onChange={event => setPrice(event.target.value)} value={price} /></span></label><CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} /><MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} /><Toggles countsAsPerson={countsAsPerson} isActive={isActive} setCountsAsPerson={setCountsAsPerson} setIsActive={setIsActive} />{error && <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>}<DialogFooter cancel={close} saving={saving} submit={submit} submitText="메뉴 추가" /></Dialog>;
+function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, defaultCategoryId, close, create }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; defaultCategoryId: number; close: () => void; create: (payload: MenuPayload) => Promise<void> }) {
+  const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [menuNumberInput, setMenuNumberInput] = useState(""); const [categoryId, setCategoryId] = useState(defaultCategoryId); const [isActive, setIsActive] = useState(true); const [components, setComponents] = useState<MenuComponentInput[]>([]); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
+  const submit = async () => { const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !price.trim() || !Number.isFinite(Number(price)) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber); if (duplicateMessage) { setError(duplicateMessage); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, menuNumber, isActive, components }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
+  return <Dialog close={close} saving={saving} title="새 메뉴 추가">
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
+      <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
+      <PosUseToggle isActive={isActive} setIsActive={setIsActive} />
+    </div>
+    <label className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>메뉴명 *</span><input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label>
+    <div className="mt-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+      <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>가격 *</span><PriceInput onChange={setPrice} value={price} /></label>
+      <MenuNumberField value={menuNumberInput} setValue={setMenuNumberInput} />
+    </div>
+    <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
+    {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
+    <DialogFooter cancel={close} saving={saving} submit={submit} submitText="메뉴 추가" />
+  </Dialog>;
 }
 
-function EditMenuDialog({ categories, componentMenus, close, menu, update }: { categories: Category[]; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
-  const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [countsAsPerson, setCountsAsPerson] = useState(menu.countsAsPerson === 1); const [isActive, setIsActive] = useState(menu.isActive === 1); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
+function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, close, menu, update }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
+  const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [menuNumberInput, setMenuNumberInput] = useState(menu.menuNumber === null ? "" : String(menu.menuNumber)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [isActive, setIsActive] = useState(menu.isActive === 1); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
   const selectImage = (file: File | undefined) => { if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 10 * 1024 * 1024) { setError("JPG, PNG, WebP 형식의 10MB 이하 이미지를 선택하세요."); return; } setError(""); setCropSource(URL.createObjectURL(file)); setZoom(1); };
   const applyCrop = async () => { if (!cropSource || !cropPixels) return; try { const image = new Image(); image.src = cropSource; await image.decode(); const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 1200; const context = canvas.getContext("2d"); if (!context) throw new Error("이미지를 처리할 수 없습니다."); context.drawImage(image, cropPixels.x, cropPixels.y, cropPixels.width, cropPixels.height, 0, 0, 1200, 1200); const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error("이미지를 처리할 수 없습니다.")), "image/webp", 0.92)); setCroppedImage(new File([blob], "menu-crop.webp", { type: "image/webp" })); setPreviewUrl(URL.createObjectURL(blob)); setRemoveImage(false); setCropSource(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "이미지를 자를 수 없습니다."); } };
-  const submit = async () => { const numericPrice = parsePrice(price); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId)) { setError("메뉴명, 가격, 카테고리를 확인하세요."); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("countsAsPerson", String(countsAsPerson)); form.set("isActive", String(isActive)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
-  return <><Dialog close={close} saving={saving} title="메뉴 수정"><label className="mt-5 block text-sm font-bold">메뉴명 *<input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label><label className="mt-4 block text-sm font-bold">가격 *<span className="mt-2 flex items-center gap-2"><input className={inputClass + " text-right"} inputMode="decimal" onBlur={() => { const value = parsePrice(price); if (Number.isFinite(value)) setPrice(formatPriceInput(value)); }} onChange={event => setPrice(event.target.value.replace(/[^\d,.-]/g, ""))} value={price} /><span>원</span></span></label><CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} /><MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} /><ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} /><Toggles countsAsPerson={countsAsPerson} isActive={isActive} setCountsAsPerson={setCountsAsPerson} setIsActive={setIsActive} />{error && <p className="mt-4 text-sm font-semibold text-red-600">{error}</p>}<DialogFooter cancel={close} saving={saving} submit={submit} submitText="저장" /></Dialog>{cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}</>;
+  const submit = async () => { const numericPrice = parsePrice(price); const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber, menu.menuId); if (duplicateMessage) { setError(duplicateMessage); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("menuNumber", menuNumber === null ? "" : String(menuNumber)); form.set("isActive", String(isActive)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
+  return <><Dialog close={close} saving={saving} title="메뉴 수정">
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
+      <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
+      <PosUseToggle isActive={isActive} setIsActive={setIsActive} />
+    </div>
+    <label className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>메뉴명 *</span><input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label>
+    <div className="mt-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+      <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>가격 *</span><PriceInput onBlur={() => { const value = parsePrice(price); if (Number.isFinite(value)) setPrice(formatPriceInput(value)); }} onChange={value => setPrice(value.replace(/[^\d,.-]/g, ""))} value={price} /></label>
+      <MenuNumberField value={menuNumberInput} setValue={setMenuNumberInput} />
+    </div>
+    <ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} />
+    <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
+    {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
+    <DialogFooter cancel={close} saving={saving} submit={submit} submitText="저장" />
+  </Dialog>{cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}</>;
 }
 
-const inputClass = "mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3";
+const inputClass = "min-h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3";
+function PriceInput({ value, onChange, onBlur }: { value: string; onChange: (value: string) => void; onBlur?: () => void }) {
+  return <span className="flex min-h-10 w-full min-w-0 items-center rounded-lg border border-slate-300 px-3 focus-within:border-blue-500"><input className="min-h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-right outline-none focus:ring-0" inputMode="decimal" onBlur={onBlur} onChange={event => onChange(event.target.value)} value={value} /><span className="ml-2 shrink-0">원</span></span>;
+}
+function parseMenuNumberInput(value: string): number | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const number = Number(trimmed);
+  return Number.isSafeInteger(number) && number > 0 && number <= 2_147_483_647 ? number : undefined;
+}
+function MenuNumberField({ value, setValue }: { value: string; setValue: (value: string) => void }) {
+  return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold">메뉴번호<input aria-label="메뉴번호" className={inputClass} inputMode="numeric" maxLength={10} onChange={event => setValue(event.target.value.replace(/\D/g, ""))} pattern="[0-9]*" value={value} /></label>;
+}
 function MenuComponentsEditor({ componentMenus, components, setComponents }: { componentMenus: ComponentMenu[]; components: MenuComponentInput[]; setComponents: (value: MenuComponentInput[]) => void }) {
   const [newComponentMenuId, setNewComponentMenuId] = useState("");
   const add = () => { const componentMenuId = Number(newComponentMenuId); if (!componentMenuId || components.some(component => component.componentMenuId === componentMenuId)) return; setComponents([...components, { componentMenuId, qtyPerUnit: 1, printOnKitchen: true, printOnReceipt: false }]); setNewComponentMenuId(""); };
   const patch = (index: number, values: Partial<MenuComponentInput>) => setComponents(components.map((component, rowIndex) => rowIndex === index ? { ...component, ...values } : component));
-  return <section className="mt-5 rounded-xl border border-slate-200 p-4"><h3 className="font-bold">포함 구성 메뉴</h3><p className="mt-1 text-xs text-slate-500">판매 메뉴 주문 시 자동으로 추가됩니다. 포함 구성은 기본 단가 0원입니다.</p>{components.map((component, index) => { const menu = componentMenus.find(row => row.menuId === component.componentMenuId); return <div className="mt-3 grid grid-cols-[minmax(0,1fr)_90px_64px_64px_64px] items-center gap-2" key={component.componentMenuId}><span className="truncate text-sm font-semibold">{menu?.name ?? "등록된 메뉴가 없습니다."}</span><label className="text-xs text-slate-500">수량<input aria-label="메뉴 1개당 구성 수량" className="mt-1 min-h-10 w-full rounded-lg border px-2 text-right text-sm text-slate-900" max="1000" min="1" onChange={event => patch(index, { qtyPerUnit: Math.max(1, Math.min(1000, Number(event.target.value) || 1)) })} type="number" value={component.qtyPerUnit} /></label><label className="text-center text-xs"><input checked={component.printOnKitchen} onChange={event => patch(index, { printOnKitchen: event.target.checked })} type="checkbox" /> 주방</label><label className="text-center text-xs"><input checked={component.printOnReceipt} onChange={event => patch(index, { printOnReceipt: event.target.checked })} type="checkbox" /> 영수증</label><button className="min-h-10 rounded-lg border border-red-200 text-sm font-bold text-red-600" onClick={() => setComponents(components.filter((_, rowIndex) => rowIndex !== index))} type="button">삭제</button></div>; })}<div className="mt-3 flex gap-2"><select aria-label="구성 메뉴 선택" className="min-h-11 min-w-0 flex-1 rounded-lg border px-3" onChange={event => setNewComponentMenuId(event.target.value)} value={newComponentMenuId}><option value="">구성할 메뉴 선택</option>{componentMenus.filter(menu => !components.some(component => component.componentMenuId === menu.menuId)).map(menu => <option key={menu.menuId} value={menu.menuId}>{menu.name} · {formatMoney(menu.price)}</option>)}</select><button className="min-h-11 rounded-lg bg-slate-800 px-4 font-bold text-white disabled:bg-slate-300" disabled={!newComponentMenuId} onClick={add} type="button">+ 구성 추가</button></div></section>;
-}function Dialog({ close, saving, title, children }: { close: () => void; saving: boolean; title: string; children: React.ReactNode }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={() => !saving && close()}><section aria-modal="true" className="relative max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog"><PosSubHeader disabled={saving} onBack={close} title={title} /><div className="p-6">{children}</div></section></div>; }
-function CategorySelect({ categories, categoryId, setCategoryId }: { categories: Category[]; categoryId: number; setCategoryId: (value: number) => void }) { return <label className="mt-4 block text-sm font-bold">카테고리 *<select className={inputClass} onChange={event => setCategoryId(Number(event.target.value))} value={categoryId}>{categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}</select></label>; }
-function Toggles({ countsAsPerson, isActive, setCountsAsPerson, setIsActive }: { countsAsPerson: boolean; isActive: boolean; setCountsAsPerson: (value: boolean) => void; setIsActive: (value: boolean) => void }) { return <><label className="mt-5 flex min-h-11 items-center gap-3 font-bold"><input checked={countsAsPerson} className="size-5" onChange={event => setCountsAsPerson(event.target.checked)} type="checkbox" />인원수 메뉴</label><label className="mt-3 flex min-h-11 items-center gap-3 font-bold"><input checked={isActive} className="size-5" onChange={event => setIsActive(event.target.checked)} type="checkbox" />POS 사용</label></>; }
-function DialogFooter({ cancel, saving, submit, submitText }: { cancel: () => void; saving: boolean; submit: () => void; submitText: string }) { return <footer className="mt-6 grid grid-cols-2 gap-3"><button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold" disabled={saving} onClick={cancel} type="button">취소</button><button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:bg-slate-300" disabled={saving} onClick={submit} type="button">{saving ? "저장 중" : submitText}</button></footer>; }
-function ImageEditor({ inputRef, previewUrl, select, selectImage, remove }: { inputRef: React.RefObject<HTMLInputElement | null>; previewUrl: string | null; select: () => void; selectImage: (file: File | undefined) => void; remove: () => void }) { return <section className="mt-5"><h3 className="text-sm font-bold">메뉴 이미지</h3><div className="mt-2 flex items-center gap-4"><div className="flex size-28 items-center justify-center overflow-hidden rounded-xl border border-slate-300 bg-slate-100">{previewUrl ? <img alt="메뉴 이미지 미리보기" className="size-full object-cover" src={previewUrl} /> : <span className="text-xs font-semibold text-slate-400">이미지 없음</span>}</div><div className="flex flex-wrap gap-2"><input accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => { selectImage(event.target.files?.[0]); event.currentTarget.value = ""; }} ref={inputRef} type="file" /><button className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 font-bold" onClick={select} type="button">이미지 선택</button><button className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 font-bold text-slate-600 disabled:text-slate-300" disabled={!previewUrl} onClick={remove} type="button">이미지 제거</button></div></div></section>; }
-function CropDialog({ cropSource, crop, setCrop, zoom, setZoom, onCropComplete, setCropSource, apply }: { cropSource: string; crop: { x: number; y: number }; setCrop: (value: { x: number; y: number }) => void; zoom: number; setZoom: (value: number) => void; onCropComplete: (_area: Area, pixels: Area) => void; setCropSource: (value: string | null) => void; apply: () => void }) { return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 p-4"><section className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl"><h2 className="text-xl font-extrabold">이미지 자르기</h2><div className="relative mt-4 h-[min(65dvh,480px)] overflow-hidden rounded-xl bg-slate-900"><Cropper aspect={1} crop={crop} image={cropSource} onCropChange={setCrop} onCropComplete={(_croppedArea, croppedAreaPixels) => onCropComplete(_croppedArea, croppedAreaPixels)} onZoomChange={setZoom} zoom={zoom} /></div><label className="mt-4 flex items-center gap-3 text-sm font-bold">확대/축소<input className="flex-1 accent-blue-600" max="3" min="1" onChange={event => setZoom(Number(event.target.value))} step="0.05" type="range" value={zoom} /></label><footer className="mt-5 grid grid-cols-2 gap-3"><button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold" onClick={() => setCropSource(null)} type="button">취소</button><button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white" onClick={apply} type="button">적용</button></footer></section></div>; }
+  return <section className="mt-3 rounded-xl border border-slate-200 p-3">
+    <div className="flex flex-wrap items-baseline gap-x-2">
+      <h3 className="text-sm font-bold">포함 구성 메뉴</h3>
+      <p className="text-xs text-slate-500">주문 시 0원으로 제공되는 세트 메뉴 구성품</p>
+    </div>
+    {components.map((component, index) => {
+      const menu = componentMenus.find(row => row.menuId === component.componentMenuId);
+      return <div className="grid grid-cols-[minmax(0,1fr)_96px_auto_auto_52px] items-center gap-2 border-t border-slate-100 py-2" key={component.componentMenuId}>
+        <span className="truncate text-sm font-semibold">{menu?.name ?? "등록된 메뉴가 없습니다."}</span>
+        <label className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-500">수량<input aria-label="메뉴 1개당 구성 수량" className="min-h-8 w-14 rounded-md border px-1.5 text-right text-sm text-slate-900" max="1000" min="1" onChange={event => patch(index, { qtyPerUnit: Math.max(1, Math.min(1000, Number(event.target.value) || 1)) })} type="number" value={component.qtyPerUnit} /></label>
+        <label className="flex items-center gap-1 whitespace-nowrap text-xs"><input checked={component.printOnKitchen} onChange={event => patch(index, { printOnKitchen: event.target.checked })} type="checkbox" />주방</label>
+        <label className="flex items-center gap-1 whitespace-nowrap text-xs"><input checked={component.printOnReceipt} onChange={event => patch(index, { printOnReceipt: event.target.checked })} type="checkbox" />영수증</label>
+        <button className="min-h-8 rounded-md border border-red-200 text-xs font-bold text-red-600" onClick={() => setComponents(components.filter((_, rowIndex) => rowIndex !== index))} type="button">삭제</button>
+      </div>;
+    })}
+    <div className="mt-2 flex gap-2">
+      <select aria-label="구성 메뉴 선택" className="min-h-9 min-w-0 flex-1 rounded-lg border px-2.5 text-sm" onChange={event => setNewComponentMenuId(event.target.value)} value={newComponentMenuId}>
+        <option value="">구성할 메뉴 선택</option>
+        {componentMenus.filter(menu => !components.some(component => component.componentMenuId === menu.menuId)).map(menu => <option key={menu.menuId} value={menu.menuId}>{menu.name} · {formatMoney(menu.price)}</option>)}
+      </select>
+      <button className="min-h-9 whitespace-nowrap rounded-lg bg-slate-800 px-3 text-sm font-bold text-white disabled:bg-slate-300" disabled={!newComponentMenuId} onClick={add} type="button">+ 구성 메뉴 추가</button>
+    </div>
+  </section>;
+}
+function Dialog({ close, saving, title, children }: { close: () => void; saving: boolean; title: string; children: React.ReactNode }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={() => !saving && close()}>
+    <section aria-modal="true" className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
+      <div className="shrink-0"><PosSubHeader disabled={saving} onBack={close} title={title} /></div>
+      <div className="min-h-0 overflow-y-auto p-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">{children}</div>
+    </section>
+  </div>;
+}
+function CategorySelect({ categories, categoryId, setCategoryId }: { categories: Category[]; categoryId: number; setCategoryId: (value: number) => void }) {
+  return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold"><span>카테고리 *</span><select className={inputClass} onChange={event => setCategoryId(Number(event.target.value))} value={categoryId}>{categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}</select></label>;
+}
+function PosUseToggle({ isActive, setIsActive }: { isActive: boolean; setIsActive: (value: boolean) => void }) {
+  return <label className="flex min-h-10 items-center justify-self-start gap-[11px] whitespace-nowrap text-sm font-bold">
+    <span>POS 사용</span>
+    <input aria-label="POS 사용" checked={isActive} className="peer sr-only" onChange={event => setIsActive(event.target.checked)} role="switch" type="checkbox" />
+    <span aria-hidden="true" className={`flex h-[34px] w-[76px] items-center justify-between rounded-full p-1 text-xs font-extrabold text-white transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2 ${isActive ? "bg-blue-600" : "flex-row-reverse bg-slate-400"}`}>
+      <span>{isActive ? "ON" : "OFF"}</span>
+      <span className="size-[26px] shrink-0 rounded-full bg-white shadow-sm" />
+    </span>
+  </label>;
+}
+function DialogFooter({ cancel, saving, submit, submitText }: { cancel: () => void; saving: boolean; submit: () => void; submitText: string }) {
+  return <footer className="sticky bottom-0 mt-4 grid grid-cols-2 gap-3 bg-white pt-2">
+    <button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold" disabled={saving} onClick={cancel} type="button">취소</button>
+    <button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:bg-slate-300" disabled={saving} onClick={submit} type="button">{saving ? "저장 중" : submitText}</button>
+  </footer>;
+}
+function ImageEditor({ inputRef, previewUrl, select, selectImage, remove }: { inputRef: React.RefObject<HTMLInputElement | null>; previewUrl: string | null; select: () => void; selectImage: (file: File | undefined) => void; remove: () => void }) {
+  return <section className="mt-3">
+    <h3 className="text-sm font-bold">메뉴 이미지</h3>
+    <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_96px] items-center gap-3">
+      <div className="flex flex-col items-start gap-2">
+        <input accept="image/jpeg,image/png,image/webp" className="hidden" onChange={event => { selectImage(event.target.files?.[0]); event.currentTarget.value = ""; }} ref={inputRef} type="file" />
+        <button className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold" onClick={select} type="button">이미지 선택</button>
+        <button className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-600 disabled:text-slate-300" disabled={!previewUrl} onClick={remove} type="button">이미지 제거</button>
+      </div>
+      <div className="flex size-24 items-center justify-center overflow-hidden rounded-lg border border-slate-300 bg-slate-100">
+        {previewUrl ? <img alt="메뉴 이미지 미리보기" className="size-full object-cover" src={previewUrl} /> : <span className="text-[11px] font-semibold text-slate-400">이미지 없음</span>}
+      </div>
+    </div>
+  </section>;
+}function CropDialog({ cropSource, crop, setCrop, zoom, setZoom, onCropComplete, setCropSource, apply }: { cropSource: string; crop: { x: number; y: number }; setCrop: (value: { x: number; y: number }) => void; zoom: number; setZoom: (value: number) => void; onCropComplete: (_area: Area, pixels: Area) => void; setCropSource: (value: string | null) => void; apply: () => void }) { return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 p-4"><section className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl"><h2 className="text-xl font-extrabold">이미지 자르기</h2><div className="relative mt-4 h-[min(65dvh,480px)] overflow-hidden rounded-xl bg-slate-900"><Cropper aspect={1} crop={crop} image={cropSource} onCropChange={setCrop} onCropComplete={(_croppedArea, croppedAreaPixels) => onCropComplete(_croppedArea, croppedAreaPixels)} onZoomChange={setZoom} zoom={zoom} /></div><label className="mt-4 flex items-center gap-3 text-sm font-bold">확대/축소<input className="flex-1 accent-blue-600" max="3" min="1" onChange={event => setZoom(Number(event.target.value))} step="0.05" type="range" value={zoom} /></label><footer className="mt-5 grid grid-cols-2 gap-3"><button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold" onClick={() => setCropSource(null)} type="button">취소</button><button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white" onClick={apply} type="button">적용</button></footer></section></div>; }

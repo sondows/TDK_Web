@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ReceiptRenderChecks")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+052498b36e1700c711345e6e1e8ea188e736233e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7b45da1f9f493f0e28f1e31649899dac31b406f8")]
 [assembly: System.Reflection.AssemblyProductAttribute("ReceiptRenderChecks")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ReceiptRenderChecks")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

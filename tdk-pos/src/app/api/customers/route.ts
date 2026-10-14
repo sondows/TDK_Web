@@ -41,6 +41,8 @@ export async function GET(request: Request) {
       email: customers.email,
       memo: customers.memo,
       isPaymentManaged: customers.isPaymentManaged,
+      autoCompletePayment: customers.autoCompletePayment,
+      autoPrintSignReceipt: customers.autoPrintSignReceipt,
       usesFixedCoupon: customers.usesFixedCoupon,
       fixedCouponAmount: customers.fixedCouponAmount,
       fixedCouponBalancePolicy: customers.fixedCouponBalancePolicy,
@@ -62,6 +64,8 @@ export async function GET(request: Request) {
       customers: rows.map(row => ({
         ...row,
         isPaymentManaged: row.isPaymentManaged === 1,
+        autoCompletePayment: row.autoCompletePayment === 1,
+        autoPrintSignReceipt: row.autoPrintSignReceipt === 1,
         usesFixedCoupon: row.usesFixedCoupon === 1,
         fixedCouponAmount: row.fixedCouponAmount === null ? null : Number(row.fixedCouponAmount),
         fixedCouponCashChangeEnabled: row.fixedCouponCashChangeEnabled === 1,

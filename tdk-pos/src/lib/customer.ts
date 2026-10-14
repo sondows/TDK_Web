@@ -6,6 +6,8 @@ export type CustomerSummary = {
   email: string | null;
   memo: string | null;
   isPaymentManaged: boolean;
+  autoCompletePayment: boolean;
+  autoPrintSignReceipt: boolean;
   usesFixedCoupon: boolean;
   fixedCouponAmount: number | null;
   fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
@@ -23,6 +25,8 @@ export type CustomerCreateDraft = {
   email: string;
   memo: string;
   isPaymentManaged: boolean;
+  autoCompletePayment: boolean;
+  autoPrintSignReceipt: boolean;
   usesFixedCoupon: boolean;
   fixedCouponAmount: string;
   fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
@@ -30,7 +34,7 @@ export type CustomerCreateDraft = {
   fixedCouponCashChangeMinPercent: string;
 };
 
-export type CustomerFieldErrors = Partial<Record<"name" | "contactName" | "phone" | "email" | "memo" | "isPaymentManaged" | "usesFixedCoupon" | "fixedCouponAmount" | "fixedCouponBalancePolicy" | "fixedCouponCashChangeEnabled" | "fixedCouponCashChangeMinPercent", string>>;
+export type CustomerFieldErrors = Partial<Record<"name" | "contactName" | "phone" | "email" | "memo" | "isActive" | "isPaymentManaged" | "autoCompletePayment" | "autoPrintSignReceipt" | "usesFixedCoupon" | "fixedCouponAmount" | "fixedCouponBalancePolicy" | "fixedCouponCashChangeEnabled" | "fixedCouponCashChangeMinPercent", string>>;
 
 export type CustomerCreateValues = {
   name: string;
@@ -39,6 +43,9 @@ export type CustomerCreateValues = {
   email: string | null;
   memo: string | null;
   isPaymentManaged: number;
+  isActive: number;
+  autoCompletePayment: number;
+  autoPrintSignReceipt: number;
   usesFixedCoupon: number;
   fixedCouponAmount: string | null;
   fixedCouponBalancePolicy: "CASH_CHANGE" | "FORFEIT";
@@ -72,6 +79,15 @@ export function validateCustomerCreate(input: unknown): { values: CustomerCreate
   if (body.isPaymentManaged !== undefined && typeof body.isPaymentManaged !== "boolean") {
     errors.isPaymentManaged = "결제관리 여부를 확인해 주세요.";
   }
+  if (body.isActive !== undefined && typeof body.isActive !== "boolean") {
+    errors.isActive = "고객 사용 여부를 확인해 주세요.";
+  }
+  if (body.autoCompletePayment !== undefined && typeof body.autoCompletePayment !== "boolean") {
+    errors.autoCompletePayment = "Customer automatic completion setting must be true or false.";
+  }
+  if (body.autoPrintSignReceipt !== undefined && typeof body.autoPrintSignReceipt !== "boolean") {
+    errors.autoPrintSignReceipt = "사인영수증출력 설정을 확인해 주세요.";
+  }
   if (body.usesFixedCoupon !== undefined && typeof body.usesFixedCoupon !== "boolean") {
     errors.usesFixedCoupon = "정액쿠폰 사용 여부를 확인해 주세요.";
   }
@@ -88,23 +104,27 @@ export function validateCustomerCreate(input: unknown): { values: CustomerCreate
   const fixedCouponCashChangeEnabled = rawCashChangeEnabled === true;
   const rawCashChangePercent = body.fixedCouponCashChangeMinPercent;
   let fixedCouponCashChangeMinPercent: number | null = null;
-  if (usesFixedCoupon && fixedCouponCashChangeEnabled) {
+  if (rawCashChangePercent !== undefined && rawCashChangePercent !== null && rawCashChangePercent !== "") {
     const percent = typeof rawCashChangePercent === "string" || typeof rawCashChangePercent === "number" ? Number(rawCashChangePercent) : NaN;
-    if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+    if ((!Number.isInteger(percent) || percent < 0 || percent > 100) && usesFixedCoupon && fixedCouponCashChangeEnabled) {
       errors.fixedCouponCashChangeMinPercent = "현금 거스름 기준을 0~100 사이의 정수로 입력해 주세요.";
-    } else {
+    } else if (Number.isInteger(percent) && percent >= 0 && percent <= 100) {
       fixedCouponCashChangeMinPercent = percent;
     }
+  } else if (usesFixedCoupon && fixedCouponCashChangeEnabled) {
+    errors.fixedCouponCashChangeMinPercent = "현금 거스름 기준을 0~100 사이의 정수로 입력해 주세요.";
   }
   const rawCouponAmount = body.fixedCouponAmount;
   let fixedCouponAmount: string | null = null;
-  if (usesFixedCoupon) {
+  if (rawCouponAmount !== undefined && rawCouponAmount !== null && rawCouponAmount !== "") {
     const couponAmount = typeof rawCouponAmount === "string" || typeof rawCouponAmount === "number" ? Number(rawCouponAmount) : NaN;
-    if (!Number.isSafeInteger(couponAmount) || couponAmount <= 0 || couponAmount > 999999999999) {
+    if ((!Number.isSafeInteger(couponAmount) || couponAmount <= 0 || couponAmount > 999999999999) && usesFixedCoupon) {
       errors.fixedCouponAmount = "쿠폰 1장 금액을 1원 이상의 정수로 입력해 주세요.";
-    } else {
+    } else if (Number.isSafeInteger(couponAmount) && couponAmount > 0 && couponAmount <= 999999999999) {
       fixedCouponAmount = couponAmount.toFixed(2);
     }
+  } else if (usesFixedCoupon) {
+    errors.fixedCouponAmount = "쿠폰 1장 금액을 1원 이상의 정수로 입력해 주세요.";
   }
   if (Object.keys(errors).length) return { values: null, errors };
   return {
@@ -115,6 +135,9 @@ export function validateCustomerCreate(input: unknown): { values: CustomerCreate
       email: email || null,
       memo: memo || null,
       isPaymentManaged: body.isPaymentManaged === true ? 1 : 0,
+      isActive: body.isActive === false ? 0 : 1,
+      autoCompletePayment: body.autoCompletePayment === false ? 0 : 1,
+      autoPrintSignReceipt: body.autoPrintSignReceipt === false ? 0 : 1,
       usesFixedCoupon: usesFixedCoupon ? 1 : 0,
       fixedCouponAmount,
       fixedCouponBalancePolicy,

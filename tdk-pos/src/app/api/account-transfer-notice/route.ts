@@ -1,11 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { checkouts, paymentMethodSettings, paymentOtherDetails, payments } from "@/db/schema";
+import { paymentMethodSettings, paymentOtherDetails, payments } from "@/db/schema";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
+import { buildAccountTransferPrintDocument } from "@/lib/print-document";
 
 export const runtime = "nodejs";
 
@@ -29,28 +30,28 @@ export async function POST(request: Request) {
       accountNumber = (body.accountNumber as string).trim();
       accountHolder = (body.accountHolder as string).trim();
       totalAmount = testAmount;
-    } else if (body.mode === "LIVE") {
+    } else if (body.mode === "LIVE" || body.mode === "MANUAL") {
       if (!await getCurrentStaff() && await getPosLoginMode() !== "SHARED")
         return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
       const paymentId = body.paymentId;
       if (!Number.isSafeInteger(paymentId) || Number(paymentId) <= 0)
         return Response.json({ success: false, message: "결제내역을 확인해 주세요." }, { status: 400 });
       const [row] = await db.select({
-        totalAmount: checkouts.totalAmount,
+        totalAmount: payments.appliedAmount,
+        accountInfoPrintEnabled: paymentMethodSettings.accountInfoPrintEnabled,
         bankName: paymentMethodSettings.bankName,
         accountNumber: paymentMethodSettings.accountNumber,
         accountHolder: paymentMethodSettings.accountHolder,
       }).from(payments)
-        .innerJoin(checkouts, eq(checkouts.checkoutId, payments.checkoutId))
         .innerJoin(paymentOtherDetails, eq(paymentOtherDetails.paymentId, payments.paymentId))
         .innerJoin(paymentMethodSettings, eq(paymentMethodSettings.paymentMethodId, payments.paymentMethodId))
         .where(and(
           eq(payments.paymentId, Number(paymentId)),
           eq(payments.status, "APPROVED"),
           eq(paymentMethodSettings.accountInfoEnabled, 1),
-          eq(paymentMethodSettings.accountInfoPrintEnabled, 1),
         )).limit(1);
-      if (!row || !validText(row.bankName) || !validText(row.accountNumber) || !validText(row.accountHolder))
+      if (!row || (body.mode === "LIVE" && row.accountInfoPrintEnabled !== 1) ||
+          !validText(row.bankName) || !validText(row.accountNumber) || !validText(row.accountHolder))
         return Response.json({ success: false, message: "출력 가능한 계좌정보를 찾지 못했습니다." }, { status: 404 });
       bankName = row.bankName!.trim();
       accountNumber = row.accountNumber!.trim();
@@ -62,12 +63,21 @@ export async function POST(request: Request) {
       return Response.json({ success: false, message: "출력 요청을 확인해 주세요." }, { status: 400 });
     }
 
-    const [storeInfo, receiptLogo] = await Promise.all([getStoreInfo(), getReceiptLogoRaster()]);
+    const storeInfo = await getStoreInfo();
+    let receiptLogo;
+    try {
+      receiptLogo = await getReceiptLogoRaster({ throwOnLoadError: true });
+    } catch (error) {
+      console.error("account transfer notice receipt logo load failed", error);
+      return Response.json({ success: false, message: "등록된 영수증 로고를 불러오지 못했습니다. 매장 명판 설정을 확인해 주세요." }, { status: 500 });
+    }
     if (!storeInfo.storeName.trim())
       return Response.json({ success: false, message: "매장 명판 설정에 상호명을 등록해 주세요." }, { status: 409 });
+    const notice = { storeName: storeInfo.storeName, receiptLogo, totalAmount, bankName, accountNumber, accountHolder };
     return Response.json({
       success: true,
-      notice: { storeName: storeInfo.storeName, receiptLogo, totalAmount, bankName, accountNumber, accountHolder },
+      notice,
+      document: buildAccountTransferPrintDocument(notice),
     });
   } catch (error) {
     console.error("account transfer notice preparation failed", error);

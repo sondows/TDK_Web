@@ -4,45 +4,45 @@ import mysql from "mysql2/promise";
 dotenv.config({ path: ".env.local" });
 
 const catalog = [
-  ["KIMCHI_PORK", "흑돼지김치찌개", "Kimchi Stew", "김치찌개", "10000.00", 1, 1],
-  ["KIMCHI_MOKSAL", "목살김치찌개", "Kimchi Stew", "김치찌개", "11000.00", 1, 2],
-  ["KIMCHI_BULGOGI", "불고기김치찌개", "Beef bulgogi kimchi Stew", "김치찌개", "11000.00", 1, 3],
-  ["KIMCHI_TUNA", "참치김치찌개", "Tuna Kimchi Stew", "김치찌개", "10000.00", 1, 4],
-  ["KIMCHI_SAURY", "꽁치김치찌개", "Mackerel Kimchi Stew", "김치찌개", "11000.00", 1, 5],
+  ["KIMCHI_PORK", "흑돼지김치찌개", "Kimchi Stew", "김치찌개", "10000.00", 1],
+  ["KIMCHI_MOKSAL", "목살김치찌개", "Kimchi Stew", "김치찌개", "11000.00", 2],
+  ["KIMCHI_BULGOGI", "불고기김치찌개", "Beef bulgogi kimchi Stew", "김치찌개", "11000.00", 3],
+  ["KIMCHI_TUNA", "참치김치찌개", "Tuna Kimchi Stew", "김치찌개", "10000.00", 4],
+  ["KIMCHI_SAURY", "꽁치김치찌개", "Mackerel Kimchi Stew", "김치찌개", "11000.00", 5],
 
-  ["SIDE_MACKEREL", "고등어구이", "Grilled mackerel", "사이드", "8000.00", 0, 1],
-  ["SIDE_EGGROLL", "계란말이", "Egg roll", "사이드", "4000.00", 0, 2],
-  ["EXTRA_DUMPLING", "만두사리", "Dumplings", "사이드", "3000.00", 0, 3],
-  ["EXTRA_HAM", "햄사리", "Ham", "사이드", "3000.00", 0, 4],
-  ["EXTRA_UDON", "우동사리", null, "사이드", "1500.00", 0, 5],
-  ["EXTRA_RAMEN", "라면사리", "Noodles", "사이드", "1000.00", 0, 6],
-  ["SIDE_RICE", "공기밥", "Boiled rice", "사이드", "1000.00", 0, 7],
-  ["SIDE_SEASONED_LAVER", "김가루", "Seasoned laver", "사이드", "1000.00", 0, 8],
-  ["SIDE_DRY_SEAWEED", "도시락김", "Dried seaweed", "사이드", "1000.00", 0, 9],
+  ["SIDE_MACKEREL", "고등어구이", "Grilled mackerel", "사이드", "8000.00", 1],
+  ["SIDE_EGGROLL", "계란말이", "Egg roll", "사이드", "4000.00", 2],
+  ["EXTRA_DUMPLING", "만두사리", "Dumplings", "사이드", "3000.00", 3],
+  ["EXTRA_HAM", "햄사리", "Ham", "사이드", "3000.00", 4],
+  ["EXTRA_UDON", "우동사리", null, "사이드", "1500.00", 5],
+  ["EXTRA_RAMEN", "라면사리", "Noodles", "사이드", "1000.00", 6],
+  ["SIDE_RICE", "공기밥", "Boiled rice", "사이드", "1000.00", 7],
+  ["SIDE_SEASONED_LAVER", "김가루", "Seasoned laver", "사이드", "1000.00", 8],
+  ["SIDE_DRY_SEAWEED", "도시락김", "Dried seaweed", "사이드", "1000.00", 9],
 
-  ["DRINK_SOJU", "소주", "Soju", "주류·음료", "5000.00", 0, 1],
-  ["DRINK_BEER", "맥주", "Beer", "주류·음료", "5000.00", 0, 2],
-  ["DRINK_SOFT", "음료", "Beverage", "주류·음료", "2000.00", 0, 3],
-  ["DRINK_MAKGEOLLI", "막걸리", "Makguli", "주류·음료", "3000.00", 0, 4],
+  ["DRINK_SOJU", "소주", "Soju", "주류·음료", "5000.00", 1],
+  ["DRINK_BEER", "맥주", "Beer", "주류·음료", "5000.00", 2],
+  ["DRINK_SOFT", "음료", "Beverage", "주류·음료", "2000.00", 3],
+  ["DRINK_MAKGEOLLI", "막걸리", "Makguli", "주류·음료", "3000.00", 4],
 
-  ["EXTRA_PORK", "흑돼지추가", "Pork Shoulder", "추가", "8000.00", 0, 1],
-  ["EXTRA_MOKSAL", "목살추가", "Pork boston butt", "추가", "9000.00", 0, 2],
-  ["EXTRA_BULGOGI", "불고기추가", "Beef bulgogi", "추가", "9000.00", 0, 3],
-  ["EXTRA_TUNA", "참치추가", "Tuna", "추가", "6000.00", 0, 4],
-  ["EXTRA_SAURY", "꽁치추가", "Mackerel", "추가", "7000.00", 0, 5],
-  ["EXTRA_KIMCHI", "찌개김치추가", "Kimchi(200g)", "추가", "4000.00", 0, 6],
-  ["EXTRA_TOFU", "두부추가", "Bean curd(200g)", "추가", "1000.00", 0, 7],
-  ["EXTRA_VEGETABLE", "야채추가", "Vegetable", "추가", "1000.00", 0, 8],
-  ["EXTRA_RAW_EGG", "날계란", "Egg", "추가", "500.00", 0, 9],
+  ["EXTRA_PORK", "흑돼지추가", "Pork Shoulder", "추가", "8000.00", 1],
+  ["EXTRA_MOKSAL", "목살추가", "Pork boston butt", "추가", "9000.00", 2],
+  ["EXTRA_BULGOGI", "불고기추가", "Beef bulgogi", "추가", "9000.00", 3],
+  ["EXTRA_TUNA", "참치추가", "Tuna", "추가", "6000.00", 4],
+  ["EXTRA_SAURY", "꽁치추가", "Mackerel", "추가", "7000.00", 5],
+  ["EXTRA_KIMCHI", "찌개김치추가", "Kimchi(200g)", "추가", "4000.00", 6],
+  ["EXTRA_TOFU", "두부추가", "Bean curd(200g)", "추가", "1000.00", 7],
+  ["EXTRA_VEGETABLE", "야채추가", "Vegetable", "추가", "1000.00", 8],
+  ["EXTRA_RAW_EGG", "날계란", "Egg", "추가", "500.00", 9],
 
-  ["PACK_CONTAINER", "포장용기", "Packing", "포장", "500.00", 0, 1],
-  ["PACK_PORK_EASY", "흑돼지간편포장", "Kimchi stew", "포장", "7000.00", 0, 2],
-  ["PACK_MOKSAL_EASY", "목살간편포장", "Pork Kimchi Stew", "포장", "7700.00", 1, 3],
-  ["PACK_BULGOGI_EASY", "불고기간편포장", "Beef bulgogi Kimchi stew", "포장", "7700.00", 0, 4],
-  ["PACK_TUNA_EASY", "참치간편포장", "Tuna-Kimchi Stew", "포장", "7000.00", 1, 5],
-  ["PACK_SAURY_EASY", "꽁치간편포장", "Mackerel Kimchi Stew", "포장", "7700.00", 1, 6],
-  ["PACK_SIDE_DISH", "반찬포장", "Side dish take-out", "포장", "3000.00", 0, 7],
-  ["PACK_BROTH", "육수포장", "Broth packing", "포장", "1500.00", 0, 8],
+  ["PACK_CONTAINER", "포장용기", "Packing", "포장", "500.00", 1],
+  ["PACK_PORK_EASY", "흑돼지간편포장", "Kimchi stew", "포장", "7000.00", 2],
+  ["PACK_MOKSAL_EASY", "목살간편포장", "Pork Kimchi Stew", "포장", "7700.00", 3],
+  ["PACK_BULGOGI_EASY", "불고기간편포장", "Beef bulgogi Kimchi stew", "포장", "7700.00", 4],
+  ["PACK_TUNA_EASY", "참치간편포장", "Tuna-Kimchi Stew", "포장", "7000.00", 5],
+  ["PACK_SAURY_EASY", "꽁치간편포장", "Mackerel Kimchi Stew", "포장", "7700.00", 6],
+  ["PACK_SIDE_DISH", "반찬포장", "Side dish take-out", "포장", "3000.00", 7],
+  ["PACK_BROTH", "육수포장", "Broth packing", "포장", "1500.00", 8],
 ];
 
 const categorySortOrders = new Map([
@@ -87,7 +87,7 @@ async function ensureCategory(name) {
   return categoryId;
 }
 
-async function ensureMenu([menuCode, posName, englishName, , price, countsAsPerson, sortOrder], categoryId) {
+async function ensureMenu([menuCode, posName, englishName, , price, sortOrder], categoryId) {
   const [rows] = await connection.query(
     "SELECT menu_id FROM menus WHERE menu_code = ? ORDER BY menu_id",
     [menuCode],
@@ -97,15 +97,15 @@ async function ensureMenu([menuCode, posName, englishName, , price, countsAsPers
   let menuId;
   if (rows.length === 0) {
     const [result] = await connection.query(
-      "INSERT INTO menus (menu_code, pos_name, category_id, price, is_active, is_qr_visible, counts_as_person, sort_order) VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
-      [menuCode, posName, categoryId, price, countsAsPerson, sortOrder],
+      "INSERT INTO menus (menu_code, pos_name, category_id, price, is_active, is_qr_visible, sort_order) VALUES (?, ?, ?, ?, 1, 1, ?)",
+      [menuCode, posName, categoryId, price, sortOrder],
     );
     menuId = Number(result.insertId);
   } else {
     menuId = Number(rows[0].menu_id);
     await connection.query(
-      "UPDATE menus SET pos_name = ?, category_id = ?, price = ?, is_active = 1, counts_as_person = ?, sort_order = ? WHERE menu_id = ?",
-      [posName, categoryId, price, countsAsPerson, sortOrder, menuId],
+      "UPDATE menus SET pos_name = ?, category_id = ?, price = ?, is_active = 1, sort_order = ? WHERE menu_id = ?",
+      [posName, categoryId, price, sortOrder, menuId],
     );
   }
 

@@ -279,38 +279,6 @@
   background: rgb(15 23 42 / 42%);
 }
 
-.customerModalHeader {
-  display: flex;
-  min-height: 58px;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e2e8eb;
-  padding: 0 24px;
-}
-
-.customerModalHeader h2 {
-  font-size: 19px;
-  font-weight: 700;
-}
-
-.customerModalClose {
-  display: flex;
-  width: 32px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  color: #60717a;
-  font-size: 24px;
-  line-height: 1;
-}
-
-.customerModalClose:hover {
-  background: #f2f5f6;
-  color: #25343b;
-}
-
-.customerModalClose:disabled,
 .customerCancelButton:disabled,
 .customerSubmitButton:disabled {
   cursor: not-allowed;
@@ -400,6 +368,10 @@
   padding-top: 17px;
 }
 
+.customerPaymentField .staffToggle > span:first-child {
+  min-width: 0;
+}
+
 .customerPaymentLabel {
   display: inline-flex;
   align-items: center;
@@ -423,37 +395,21 @@
   line-height: 1.5;
 }
 
-.customerInlineSetting {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-top: 10px;
-}
-
-.customerInlineSetting p {
-  margin: 0;
-}
-
 .customerCouponSetting {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: center;
-  column-gap: 14px;
-  row-gap: 5px;
+  display: block;
   padding-top: 10px;
 }
 
 .customerCouponOptions {
   display: grid;
-  grid-template-rows: auto auto auto;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
-  margin-left: 8px;
+  margin: 12px 0 0 20px;
 }
 
 .customerCouponAmountRow {
   display: grid;
-  grid-template-columns: max-content minmax(120px, 210px);
+  grid-template-columns: 76px minmax(120px, 210px);
   align-items: center;
   gap: 9px;
 }
@@ -468,9 +424,10 @@
 }
 
 .customerCouponPolicyRow {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -485,8 +442,8 @@
 
 .customerCouponPolicyRow > div {
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .customerCouponPolicyRow label {
@@ -504,15 +461,28 @@
   min-width: 0;
 }
 
+.customerCouponCashRow {
+  flex-wrap: wrap;
+}
+
+.customerCouponCashRow > .customerFieldError {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.customerCouponCashRow > .customerPaymentLabel {
+  white-space: nowrap;
+}
+
 .customerCouponThreshold > label,
 .customerCouponThreshold > span {
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .customerPercentInput {
-  width: 72px;
-  min-width: 72px;
+  width: 56px;
+  min-width: 56px;
   padding-right: 6px;
   padding-left: 6px;
 }
@@ -522,18 +492,12 @@
 }
 
 @media (max-width: 640px) {
-  .customerInlineSetting {
-    flex-wrap: wrap;
-    gap: 5px 10px;
-  }
-
   .customerCouponSetting {
-    grid-template-columns: 1fr;
-    row-gap: 7px;
+    display: block;
   }
 
   .customerCouponOptions {
-    margin-left: 18px;
+    margin-left: 12px;
   }
 
 }
@@ -781,6 +745,15 @@
 .staffToggleControl input:checked + .staffToggleTrack::after { transform: translateX(20px); }
 .staffToggleControl input:focus-visible + .staffToggleTrack { outline: 2px solid #455a64; outline-offset: 3px; }
 .staffToggleValue { min-width: 28px; color: #52636c; font-size: 12px; }
+.staffToggleCustomer { width: 100%; }
+.staffToggleCustomer .staffToggleControl { flex: 0 0 74px; width: 74px; height: 32px; }
+.staffToggleCustomer .staffToggleTrack { width: 74px; height: 32px; background: #aebac0; }
+.staffToggleCustomer .staffToggleTrack::after { top: 4px; left: 4px; width: 24px; height: 24px; }
+.staffToggleCustomer .staffToggleControl input:checked + .staffToggleTrack::after { transform: translateX(42px); }
+.staffToggleCustomer .staffToggleValue { position: absolute; top: 0; right: 7px; bottom: 0; left: 32px; display: flex; min-width: 0; align-items: center; justify-content: center; color: #26343b; font-size: 11px; font-weight: 700; line-height: 1; }
+.staffToggleCustomer .staffToggleControl input:checked + .staffToggleTrack .staffToggleValue { right: 32px; left: 8px; color: #fff; }
+.customerHeaderStatus .staffToggleCustomer { width: auto; gap: 9px; color: #fff; }
+.customerHeaderStatus .staffToggleControl input:checked + .staffToggleTrack { background: #2563eb; }
 .staffToggleDisabled { opacity: 0.45; cursor: not-allowed; }
 
 .staffModalFooter { justify-content: space-between; }

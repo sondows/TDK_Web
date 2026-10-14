@@ -38,6 +38,7 @@ export async function GET(request: Request) {
       validUntil: paymentMethodSettings.validUntil,
       accountInfoEnabled: paymentMethodSettings.accountInfoEnabled,
       accountInfoPrintEnabled: paymentMethodSettings.accountInfoPrintEnabled,
+      autoCompleteEnabled: paymentMethodSettings.autoCompleteEnabled,
       bankName: paymentMethodSettings.bankName,
       accountNumber: paymentMethodSettings.accountNumber,
       accountHolder: paymentMethodSettings.accountHolder,
@@ -76,6 +77,7 @@ export async function POST(request: Request) {
     const validUntil = validityEnabled ? body.validUntil : null;
     const accountInfoEnabled = body.accountInfoEnabled === true;
     const accountInfoPrintEnabled = body.accountInfoPrintEnabled === true;
+    const autoCompleteEnabled = body.autoCompleteEnabled === undefined ? true : body.autoCompleteEnabled === true;
     const bankName = typeof body.bankName === "string" ? body.bankName.trim() : "";
     const accountNumber = typeof body.accountNumber === "string" ? body.accountNumber.trim() : "";
     const accountHolder = typeof body.accountHolder === "string" ? body.accountHolder.trim() : "";
@@ -88,6 +90,9 @@ export async function POST(request: Request) {
     const accountPrintSettings = body.accountInfoPrintEnabled === undefined ? {} : {
       accountInfoPrintEnabled: accountInfoPrintEnabled ? 1 : 0,
     };
+    const autoCompleteSettings = body.autoCompleteEnabled === undefined ? {} : {
+      autoCompleteEnabled: autoCompleteEnabled ? 1 : 0,
+    };
     if ((id !== null && (!Number.isSafeInteger(id) || id <= 0)) || !name || name.length > 100 ||
       (inputType !== "AMOUNT" && inputType !== "QUANTITY") ||
       (inputType === "QUANTITY" && (!Number.isSafeInteger(unitAmount) || unitAmount <= 0 || unitAmount > 999999999)) ||
@@ -97,6 +102,7 @@ export async function POST(request: Request) {
       (validityEnabled && (!validDate(validFrom) || !validDate(validUntil) || validFrom > validUntil)) ||
       (body.accountInfoEnabled !== undefined && typeof body.accountInfoEnabled !== "boolean") ||
       (body.accountInfoPrintEnabled !== undefined && typeof body.accountInfoPrintEnabled !== "boolean") ||
+      (body.autoCompleteEnabled !== undefined && typeof body.autoCompleteEnabled !== "boolean") ||
       [bankName, accountNumber, accountHolder].some(value => value.length > 100 || /[\r\n]/.test(value)) ||
       (accountInfoEnabled && (!bankName || !accountNumber || !accountHolder))) {
       return Response.json({ success: false, message: "설정 값을 확인해 주세요." }, { status: 400 });
@@ -123,6 +129,7 @@ export async function POST(request: Request) {
           validUntil: validityEnabled ? validUntil as string : null,
           ...accountSettings,
           ...accountPrintSettings,
+          ...autoCompleteSettings,
           updatedByStaffId: staff!.staffId,
         };
         if (existing.configured) await tx.update(paymentMethodSettings).set(settings).where(eq(paymentMethodSettings.paymentMethodId, methodId));
@@ -147,13 +154,14 @@ export async function POST(request: Request) {
           validUntil: validityEnabled ? validUntil as string : null,
           ...accountSettings,
           ...accountPrintSettings,
+          autoCompleteEnabled: autoCompleteEnabled ? 1 : 0,
           updatedByStaffId: staff!.staffId,
         });
       }
       await tx.insert(auditLogs).values({
         staffId: staff!.staffId, actionType: id === null ? "CREATE" : "UPDATE",
         entityType: "PAYMENT_METHOD", entityId: methodId,
-        description: JSON.stringify({ name, isActive, sortOrder, inputType, unitAmount: inputType === "QUANTITY" ? unitAmount : null, balancePolicy: inputType === "QUANTITY" ? balancePolicy : null, cashChangeEnabled, cashChangeMinPercent: cashChangeEnabled === true ? cashChangeMinPercent : null, validFrom, validUntil, ...(body.accountInfoEnabled === undefined ? {} : { accountInfoEnabled }), ...(body.accountInfoPrintEnabled === undefined ? {} : { accountInfoPrintEnabled }) }),
+        description: JSON.stringify({ name, isActive, sortOrder, inputType, unitAmount: inputType === "QUANTITY" ? unitAmount : null, balancePolicy: inputType === "QUANTITY" ? balancePolicy : null, cashChangeEnabled, cashChangeMinPercent: cashChangeEnabled === true ? cashChangeMinPercent : null, validFrom, validUntil, ...(body.accountInfoEnabled === undefined ? {} : { accountInfoEnabled }), ...(body.accountInfoPrintEnabled === undefined ? {} : { accountInfoPrintEnabled }), ...(body.autoCompleteEnabled === undefined ? {} : { autoCompleteEnabled }) }),
       });
       return methodId;
     });
