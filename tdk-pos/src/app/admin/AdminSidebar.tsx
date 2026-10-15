@@ -4,10 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./admin.module.css";
 
-const navigation = [
+type NavigationItem = { label: string; href: string; child?: boolean } | { label: string; section: true };
+
+const navigation: NavigationItem[] = [
   { label: "대시보드", href: "/admin" },
-  { label: "매출조회", href: "/admin/sales-report" },
-  { label: "구 POS 일별 매출", href: "/admin/legacy-sales" },
+  { label: "판매조회", section: true },
+  { label: "매출조회", href: "/admin/sales-report", child: true },
+  { label: "품목별 매출", href: "/admin/item-sales", child: true },
+  { label: "구 POS 일별매출", href: "/admin/legacy-sales", child: true },
   { label: "고객 관리", href: "/admin/customers" },
   { label: "직원 관리", href: "/admin/staff" },
   { label: "POS 설정", href: "/admin/settings/pos" },
@@ -21,8 +25,11 @@ const navigation = [
 
 export default function AdminSidebar({ menuOnly = false }: { menuOnly?: boolean }) {
   const pathname = usePathname();
+  const salesChildActive = ["/admin/sales-report", "/admin/item-sales", "/admin/legacy-sales"]
+    .some(href => pathname === href || pathname.startsWith(`${href}/`));
   return <aside className={styles.sidebar}><nav aria-label="관리센터 메뉴" className={styles.navigation}>
-    {(menuOnly ? navigation.filter(item => item.href === "/admin/menus") : navigation).map(item => {
+    {(menuOnly ? navigation.filter(item => "href" in item && item.href === "/admin/menus") : navigation).map(item => {
+      if ("section" in item) return <div className={`${styles.navLink} ${styles.navSectionHeading}${salesChildActive ? ` ${styles.navLinkParentActive}` : ""}`} key={item.label}>{item.label}</div>;
       const posChildActive = ["/admin/tables", "/admin/menus", "/admin/settings/discounts", "/admin/settings/other-payments"]
         .some(href => pathname === href || pathname.startsWith(`${href}/`));
       const parentActive = (item.href === "/admin/settings/pos" && posChildActive)

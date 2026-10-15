@@ -149,6 +149,9 @@
 
 .navLinkChild { padding-left: 30px; }
 .navLinkParentActive { background: #f2f5f6; }
+.navSectionHeading { color: #344e5a; font-weight: 700; cursor: default; }
+.navSectionHeading:hover { color: #344e5a; background: transparent; }
+.navSectionHeading.navLinkParentActive:hover { background: #f2f5f6; }
 
 .main {
   min-width: 0;

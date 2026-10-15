@@ -13,6 +13,7 @@ type Row = {
   label: string; date: string; source: Source; overlapDays: number;
   salesAmount: number; saleCount: number; discountAmount: number;
   cardAmount: number; cashAmount: number; bankTransferAmount: number; otherAmount: number;
+  salesDayCount: number; dailySalesAverage: number | null;
   customerAverage: number | null; tableAverage: number | null;
   durationMinutes: number | null; tableGuestAverage: number | null;
 };
@@ -95,6 +96,7 @@ export default function SalesReportClient() {
   const totals = report?.totals;
   const summary = [
     ["매출", totals ? `${amount(totals.salesAmount)}원` : "-"],
+    ["일매출평균", totals?.dailySalesAverage == null ? "-" : `${amount(totals.dailySalesAverage)}원`],
     ["판매건수", totals ? `${amount(totals.saleCount)}건` : "-"],
     ["할인", totals ? `${amount(totals.discountAmount)}원` : "-"],
     ["객단가", totals?.customerAverage == null ? "-" : `${amount(totals.customerAverage)}원`],
@@ -110,9 +112,9 @@ export default function SalesReportClient() {
           <button aria-selected={view === key} className={`${styles.tab} ${view === key ? styles.tabActive : ""}`} key={key} onClick={() => changeView(key)} role="tab" type="button">{label}</button>)}
       </div></div>
     <section className={styles.period} aria-label="조회기간"><strong>조회기간</strong>
-      {view === "yearly" ? <div className={styles.periodInputs}><label>시작 연도<select aria-label="시작 연도" onChange={event => updateRange(`${event.target.value}-01-01`, endDate)} value={startDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label><span>~</span><label>종료 연도<select aria-label="종료 연도" onChange={event => updateRange(startDate, `${event.target.value}-12-31`)} value={endDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label></div>
-        : view === "monthly" ? <div className={styles.periodInputs}><label>시작 년월<input aria-label="시작 년월" onChange={event => { if (event.target.value) updateRange(`${event.target.value}-01`, endDate); }} type="month" value={startDate.slice(0, 7)} /></label><span>~</span><label>종료 년월<input aria-label="종료 년월" onChange={event => { if (event.target.value) updateRange(startDate, lastOfMonth(event.target.value)); }} type="month" value={endDate.slice(0, 7)} /></label></div>
-          : <div className={styles.periodInputs}><label>시작일<input aria-label="시작일" onChange={event => updateRange(event.target.value, endDate)} type="date" value={startDate} /></label><span>~</span><label>종료일<input aria-label="종료일" onChange={event => updateRange(startDate, event.target.value)} type="date" value={endDate} /></label></div>}
+      {view === "yearly" ? <div className={styles.periodInputs}><label><select aria-label="시작 연도" onChange={event => updateRange(`${event.target.value}-01-01`, endDate)} value={startDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label><span>~</span><label><select aria-label="종료 연도" onChange={event => updateRange(startDate, `${event.target.value}-12-31`)} value={endDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label></div>
+        : view === "monthly" ? <div className={styles.periodInputs}><label><input aria-label="시작 년월" onChange={event => { if (event.target.value) updateRange(`${event.target.value}-01`, endDate); }} type="month" value={startDate.slice(0, 7)} /></label><span>~</span><label><input aria-label="종료 년월" onChange={event => { if (event.target.value) updateRange(startDate, lastOfMonth(event.target.value)); }} type="month" value={endDate.slice(0, 7)} /></label></div>
+          : <div className={styles.periodInputs}><label><input aria-label="시작일" onChange={event => updateRange(event.target.value, endDate)} type="date" value={startDate} /></label><span>~</span><label><input aria-label="종료일" onChange={event => updateRange(startDate, event.target.value)} type="date" value={endDate} /></label></div>}
     </section>
     {!validRange && <p className={styles.error} role="alert">시작일과 종료일을 확인해 주세요.</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}

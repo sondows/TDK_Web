@@ -1,0 +1,28 @@
+.listHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.listHeading h2 { color: #25343b; font-size: 18px; font-weight: 700; }
+.sortButtons { display: flex; gap: 6px; }
+.sortButtons button { min-height: 36px; border: 1px solid #cbd5da; border-radius: 4px; background: #fff; color: #52636c; padding: 0 12px; font-size: 13px; font-weight: 700; }
+.sortButtons button:hover { background: #f2f5f6; }
+.sortButtons .sortActive { border-color: #455a64; background: #e8eff2; color: #25343b; }
+.sortButtons button:focus-visible, .itemRow:focus-visible, .dialog button:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+.tableScroll { max-height: min(66vh, 720px); overflow: auto; border: 1px solid #dce3e7; border-radius: 5px; background: #fff; }
+.table { width: 100%; min-width: 680px; border-collapse: separate; border-spacing: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.table th, .table td { height: 46px; padding: 10px 12px; border-bottom: 1px solid #e8edef; text-align: right; white-space: nowrap; }
+.table thead th { position: sticky; top: 0; z-index: 1; background: #f2f5f6; color: #52636c; }
+.table .nameCell { text-align: left; }
+.itemRow { cursor: pointer; }
+.itemRow:hover, .itemRow:focus-visible { background: #edf4f6; }
+.itemRow th { font-weight: 600; }
+.amountCell { font-weight: 700; }
+.empty { padding: 30px 16px; text-align: center; color: #60717a; }
+.dialog { width: min(680px, calc(100vw - 24px)); max-height: min(85vh, 800px); border: 1px solid #cbd5da; border-radius: 6px; background: #fff; padding: 20px; color: #25343b; box-shadow: 0 16px 40px rgb(22 37 45 / 20%); }
+.dialog::backdrop { background: rgb(20 35 43 / 45%); }
+.dialogHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.dialogHeading h2 { font-size: 20px; font-weight: 700; }
+.dialogHeading button { width: 36px; height: 36px; border: 1px solid #cbd5da; border-radius: 4px; color: #52636c; font-size: 24px; }
+.detailSummary { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; border: 1px solid #dce3e7; background: #f8fafb; padding: 12px; font-size: 14px; }
+.detailSummary span { color: #60717a; }
+.detailSummary strong { text-align: right; font-variant-numeric: tabular-nums; }
+.detailScroll { max-height: 45vh; overflow: auto; margin-top: 16px; border: 1px solid #dce3e7; }
+.detailScroll .table { min-width: 0; }
+@media (max-width: 760px) { .listHeading h2 { font-size: 16px; } .sortButtons button { padding: 0 8px; } .dialog { padding: 12px; } }

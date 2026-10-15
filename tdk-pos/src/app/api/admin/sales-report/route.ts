@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 type View = "yearly" | "monthly" | "daily" | "detail";
 type ReportRow = ReturnType<typeof addTotals> & {
   label: string; date: string; source: SalesSource | "MIXED" | null; overlapDays: number;
+  salesDayCount: number; dailySalesAverage: number | null;
   customerAverage: number | null; tableAverage: number | null;
   durationMinutes: number | null; tableGuestAverage: number | null;
 };
@@ -16,6 +17,7 @@ const todayInKorea = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Se
 const sourceOf = (days: DailySales[]): ReportRow["source"] => !days.length ? null : days.every(day => day.source === days[0].source) ? days[0].source : "MIXED";
 function reportRow(label: string, date: string, days: DailySales[]): ReportRow {
   const totals = addTotals(days);
+  const salesDayCount = days.filter(day => day.salesAmount > 0).length;
   const legacySales = days.some(day => day.source === "LEGACY_POS" && day.saleCount > 0);
   const guestCount = days.reduce((sum, day) => sum + day.guestCount, 0);
   const incompleteGuestCount = days.reduce((sum, day) => sum + day.incompleteGuestCount, 0);
@@ -23,6 +25,7 @@ function reportRow(label: string, date: string, days: DailySales[]): ReportRow {
   const durationTotal = days.reduce((sum, day) => sum + day.durationTotalMinutes, 0);
   return { label, date, source: sourceOf(days), ...totals,
     overlapDays: days.filter(day => day.overlapWithOtherSource).length,
+    salesDayCount, dailySalesAverage: salesDayCount ? Math.round(totals.salesAmount / salesDayCount) : null,
     customerAverage: totals.saleCount ? Math.round(totals.salesAmount / totals.saleCount) : null,
     tableAverage: !legacySales && totals.saleCount ? Math.round(totals.salesAmount / totals.saleCount) : null,
     durationMinutes: !legacySales && totals.saleCount && durationCount === totals.saleCount ? Math.round(durationTotal / durationCount) : null,
