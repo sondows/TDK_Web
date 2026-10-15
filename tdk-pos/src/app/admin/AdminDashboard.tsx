@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
+import PosSubHeader from "@/app/pos/PosSubHeader";
 import styles from "./admin.module.css";
 
 type Summary = { total: number; totalCount: number; card: number; cardCount: number; cash: number; cashCount: number; other: number; otherCount: number; discount: number; discountCount: number; completedCount: number; cancelledCount: number };
@@ -143,7 +144,7 @@ export default function AdminDashboard() {
           </tr>)}</tbody></table></div>
     </section>
     <dialog ref={detailDialog} className={`${styles.customerModal} ${styles.dashboardDetail}`} onClose={() => setDetail(null)}>
-      {detail && <><div className={styles.customerModalHeader}><div className={styles.dashboardDetailTitle}><AdminBackLink ariaLabel="판매내역으로 돌아가기" title="판매내역으로 돌아가기" onNavigate={() => detailDialog.current?.close()} size={38} iconSize={20} /><h2>판매 상세</h2></div><div className={styles.dashboardHeaderActions}><button type="button" className={styles.staffDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button></div></div>
+      {detail && <><PosSubHeader backIconSize={19} backLabel="판매내역으로 돌아가기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={<button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
         <div className={styles.dashboardDetailBody}>
           <dl className={styles.dashboardFacts}><div><dt>테이블</dt><dd>{detail.tableLabel}</dd></div><div><dt>주문시간</dt><dd>{dateTime(detail.orderedAt)}</dd></div><div><dt>결제상태</dt><dd>{labels[detail.displayStatus]}</dd></div></dl>
           <h3>메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>수량</th><th>금액</th></tr></thead><tbody>{detail.items.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>

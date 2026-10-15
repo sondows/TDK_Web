@@ -816,7 +816,9 @@
 .dashboardSaleRow { cursor: pointer; }
 .dashboardSaleRow:hover, .dashboardSaleRow:focus-visible { background: #f2f5f6; outline: 2px solid #b7cbd4; outline-offset: -2px; }
 .dashboardError { padding: 12px 20px; color: #bc3535; font-size: 13px; }
-.dashboardDetail { width: min(546px, calc(100vw - 32px)); }
+.dashboardDetail { width: min(546px, calc(100vw - 32px)); border-radius: 16px; }
+.dashboardDetailDeleteButton { border: 0; border-radius: 6px; background: transparent; padding: 6px 8px; color: #fecaca; font-size: 14px; font-weight: 700; }
+.dashboardDetailDeleteButton:hover { background: rgb(255 255 255 / 12%); color: #fff; }
 .dashboardDetailTitle { display: flex; min-width: 0; align-items: center; gap: 12px; }
 .dashboardDetailTitle h2 { min-width: 0; }
 .dashboardHeaderActions { display: flex; align-items: center; gap: 12px; }

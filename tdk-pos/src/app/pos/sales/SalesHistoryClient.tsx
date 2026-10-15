@@ -509,7 +509,7 @@ function CompactTableLabel({ tableNos }: { tableNos: string[] }) {
   return <span className="block min-w-0 overflow-hidden whitespace-nowrap font-bold" ref={elementRef}>{label}</span>;
 }
 
-function SaleDetailDialog({ sale, close, print, printing, printSuccess }: { sale: SaleDetail; close: () => void; print: () => void; printing: boolean; printSuccess: string }) {
+export function SaleDetailDialog({ sale, close, print, printing = false, printSuccess = "" }: { sale: SaleDetail; close: () => void; print?: () => void; printing?: boolean; printSuccess?: string }) {
   const status = statusStyle[sale.displayStatus];
   const cancelledPayments = sale.payments.filter((payment) => payment.status === "CANCELLED" || payment.status === "REFUNDED");
   const itemTotal = sale.items.reduce((sum, item) => sum + item.amount, 0);
@@ -555,10 +555,10 @@ function SaleDetailDialog({ sale, close, print, printing, printSuccess }: { sale
             <Section title="결제 취소내역">{cancelledPayments.map((payment) => <div className="grid grid-cols-[1fr_auto_70px] gap-3 border-b border-red-100 py-3 text-red-600" key={payment.paymentId}><span>{paymentDisplayName(payment)}</span><b>-{formatMoney(payment.amount)}</b><time className="text-right text-slate-600">{time(payment.cancelledAt ?? payment.paidAt)}</time>{payment.appliedAmount < payment.amount && <div className="col-span-3 flex justify-between text-sm text-red-600"><span>매출 적용</span><b>-{formatMoney(payment.appliedAmount)}</b></div>}{payment.prepaidReversalAmount > 0 && <div className="col-span-3 flex justify-between text-sm text-red-600"><span>선불 적립 취소</span><b>-{formatMoney(payment.prepaidReversalAmount)}</b></div>}</div>)}{!cancelledPayments.length && <Empty />}</Section>
           </div>}
         </div>
-        <footer className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+        {print && <footer className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
           {printSuccess && <p aria-live="polite" className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-center font-bold text-blue-700">{printSuccess}</p>}
           <button className="min-h-16 w-full rounded-xl bg-blue-600 px-6 py-3 text-xl font-extrabold text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={printing || itemTotalMismatch || sale.checkoutStatus !== "PAID" || sale.displayStatus === "CANCELLED"} onClick={print} type="button">{printing ? "출력 중..." : "영수증 재출력"}</button>
-        </footer>
+        </footer>}
       </section>
     </div>
   );

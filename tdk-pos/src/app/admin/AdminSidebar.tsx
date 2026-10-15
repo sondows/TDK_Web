@@ -6,6 +6,8 @@ import styles from "./admin.module.css";
 
 const navigation = [
   { label: "대시보드", href: "/admin" },
+  { label: "매출조회", href: "/admin/sales-report" },
+  { label: "구 POS 일별 매출", href: "/admin/legacy-sales" },
   { label: "고객 관리", href: "/admin/customers" },
   { label: "직원 관리", href: "/admin/staff" },
   { label: "POS 설정", href: "/admin/settings/pos" },

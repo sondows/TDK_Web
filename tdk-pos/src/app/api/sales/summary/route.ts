@@ -7,6 +7,7 @@ import { canViewSales } from "@/lib/permissions";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidPin } from "@/lib/pin";
 import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
+import { summarizeSalesFinancials, won } from "@/lib/sales-financial-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,6 @@ function dateRange(startDate: string, endDate: string) {
   end.setUTCDate(end.getUTCDate() + 1);
   return { start: `${startDate} 00:00:00`, end: `${end.toISOString().slice(0, 10)} 00:00:00` };
 }
-
-const won = (value: string | number) => Math.max(0, Math.floor(Number(value)));
 
 function todayInSeoul() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -125,35 +124,15 @@ export async function POST(request: Request) {
       sessionsByCheckout.set(checkoutId, [...idsForCheckout].map(id => ({ ...sessionById.get(id)!, checkoutId })));
     }
 
-    let grossSales = 0, netSales = 0, transactionCount = 0, cancellationCount = 0;
-    let discountAmount = 0, discountCount = 0, cancelledAmount = 0;
-    let cardAmount = 0, cardCount = 0, cashAmount = 0, cashCount = 0, otherAmount = 0, otherCount = 0;
+    const { grossSales, netSales, transactionCount, cancellationCount, discountAmount, discountCount, cancelledAmount,
+      cardAmount, cardCount, cashAmount, cashCount, otherAmount, otherCount } = summarizeSalesFinancials(checkoutRows, paymentRows, startDate, endDate);
     let guestCount = 0, incompleteGuestCount = 0, durationTotal = 0, durationCount = 0;
-    for (const checkout of checkoutRows) {
-      const discount = won(checkout.discount);
-      discountAmount += discount;
-      if (discount > 0) discountCount++;
-    }
-    for (const payment of paymentRows) {
-      const amount = won(payment.appliedAmount);
-      if ((payment.status === "CANCELLED" || payment.status === "REFUNDED") && payment.cancelledAt && payment.cancelledAt >= startDate && payment.cancelledAt <= endDate) {
-        cancelledAmount += amount;
-        cancellationCount++;
-      }
-      if (payment.status !== "APPROVED") continue;
-      netSales += amount;
-      if (payment.methodType === "CARD") { cardAmount += amount; cardCount++; }
-      else if (payment.methodType === "CASH") { cashAmount += amount; cashCount++; }
-      else { otherAmount += amount; otherCount++; }
-    }
     for (const checkout of checkoutRows) {
       const relatedPayments = paymentsByCheckout.get(checkout.id) ?? [];
       const approved = relatedPayments.filter(row => row.status === "APPROVED").reduce((sum, row) => sum + won(row.appliedAmount), 0);
       const relatedSessions = sessionsByCheckout.get(checkout.id) ?? [];
       // A merged group paid with one checkout is one completed meal transaction.
-      grossSales += won(checkout.total);
       if (approved <= 0) continue;
-      transactionCount++;
       const people = relatedSessions.reduce((sum, row) => sum + row.adults + row.children, 0);
       if (!relatedSessions.length || people <= 0) incompleteGuestCount++;
       else guestCount += people;

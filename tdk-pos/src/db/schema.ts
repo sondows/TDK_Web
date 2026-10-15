@@ -112,6 +112,27 @@ export const customers = mysqlTable(
   ]
 );
 
+/** Read-only archive of daily totals from the former POS; no operational foreign keys. */
+export const legacyDailySales = mysqlTable("legacy_daily_sales", {
+  id: bigint("id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  businessDate: date("business_date").notNull(),
+  saleCount: int("sale_count", { unsigned: true }).notNull(),
+  grossSales: decimal("gross_sales", { precision: 14, scale: 2 }).notNull(),
+  discountAmount: decimal("discount_amount", { precision: 14, scale: 2 }).notNull(),
+  netSales: decimal("net_sales", { precision: 14, scale: 2 }).notNull(),
+  cardAmount: decimal("card_amount", { precision: 14, scale: 2 }).notNull(),
+  cashAmount: decimal("cash_amount", { precision: 14, scale: 2 }).notNull(),
+  bankTransferAmount: decimal("bank_transfer_amount", { precision: 14, scale: 2 }).notNull(),
+  otherAmount: decimal("other_amount", { precision: 14, scale: 2 }).notNull(),
+  cancelledCount: int("cancelled_count", { unsigned: true }).notNull(),
+  cancelledAmount: decimal("cancelled_amount", { precision: 14, scale: 2 }).notNull(),
+  source: varchar("source", { length: 30 }).notNull(),
+  importedAt: datetime("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("uq_legacy_daily_sales_business_date").on(table.businessDate),
+  index("idx_legacy_daily_sales_source_date").on(table.source, table.businessDate),
+]);
+
 export const staffSessions = mysqlTable("staff_sessions", {
   staffSessionId: bigint("staff_session_id", {
     mode: "number",
