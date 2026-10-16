@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { CustomerSummary } from "@/lib/customer";
+import { createRequestId } from "@/lib/request-id";
 import { adjustmentReasons, formatTradeBalance, tradeMethods } from "@/lib/customer-trade";
 import styles from "../admin.module.css";
 
@@ -16,15 +17,6 @@ function nowInKorea() {
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
 }
 
-function newRequestKey() {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const value = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
-  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
-}
-
 export default function CustomerTradeEntryModal({ action, balance, customer, onClose, onSaved }: {
   action: TradeAction;
   balance: number;
@@ -33,7 +25,7 @@ export default function CustomerTradeEntryModal({ action, balance, customer, onC
   onSaved: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const requestKey = useRef(newRequestKey());
+  const requestKey = useRef(createRequestId());
   const lastPayload = useRef<string | null>(null);
   const [amount, setAmount] = useState("");
   const [methodCode, setMethodCode] = useState<string>("CASH");
@@ -86,7 +78,7 @@ export default function CustomerTradeEntryModal({ action, balance, customer, onC
         methodCode: action === "ADJUSTMENT" ? undefined : methodCode,
         transactionAt, memo, reason, customReason,
       });
-      if (lastPayload.current !== null && lastPayload.current !== payload) requestKey.current = newRequestKey();
+      if (lastPayload.current !== null && lastPayload.current !== payload) requestKey.current = createRequestId();
       lastPayload.current = payload;
       const response = await fetch(`/api/customers/${customer.customerId}/ledger`, {
         method: "POST",

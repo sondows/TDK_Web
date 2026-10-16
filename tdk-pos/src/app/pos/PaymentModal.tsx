@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { formatMoney } from "@/lib/format-money";
+import { createRequestId } from "@/lib/request-id";
 import { printReceipt } from "@/lib/receipt-print";
 import { prepareAccountTransferNotice, printAccountTransferNotice } from "@/lib/account-transfer-notice";
 import { buildPartyOrderRows, type PartySummarySourceItem } from "@/lib/pos-order-summary-rows";
@@ -62,14 +63,7 @@ type StagedCustomerPayment = { customerId: number; name: string; amount: number;
 type PaymentDeletionTarget = { kind: "SAVED"; payment: Payment } | { kind: "STAGED_CUSTOMER" };
 type AvailableReceiptType = "GENERAL" | "SIGN" | "BANK_TRANSFER_GUIDE";
 const money = (amount: number) => formatMoney(amount);
-const newCustomerPaymentRequestKey = () => {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const value = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
-  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
-};
+const newCustomerPaymentRequestKey = createRequestId;
 const paymentMethodLabel = (payment: Payment) => {
   if (payment.methodCode === "CUSTOMER_PAYMENT" && payment.customerCouponQuantity) return `쿠폰 ${payment.customerCouponQuantity}매 고객결제`;
   if (payment.methodNameSnapshot) return payment.quantity ? `${payment.methodNameSnapshot} × ${payment.quantity}매` : payment.methodNameSnapshot;

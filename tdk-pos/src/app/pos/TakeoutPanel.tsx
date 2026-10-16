@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { formatPosTime } from "@/lib/pos-time";
+import { createRequestId } from "@/lib/request-id";
 import { displayPickupTime, formatTakeoutPhone, pickupAtAfterMinutes, pickupAtFromHHmm } from "@/lib/phone-takeout-time";
 import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
@@ -86,15 +87,19 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
     pending.current = true;
     setBusy(true);
     setError("");
+    let failureMessage = "포장 주문등록에 실패했습니다.";
     try {
-      if (!createRequest.current) createRequest.current = { kind: "TAKEOUT_WALK_IN", key: crypto.randomUUID() };
+      if (!createRequest.current) createRequest.current = { kind: "TAKEOUT_WALK_IN", key: createRequestId() };
       const response = await fetch("/api/pos/takeouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "TAKEOUT_WALK_IN", requestKey: createRequest.current.key, pickupAt, pickupPhone: phoneDigits || null, pickupCustomerId: phoneCustomer?.customerId ?? null }),
       });
       const result = await response.json() as { success?: boolean; message?: string; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
-      if (!response.ok || !result.success || !result.session) throw new Error(result.message ?? "포장 주문을 등록하지 못했습니다.");
+      if (!response.ok || !result.success || !result.session) {
+        failureMessage = result.message ?? failureMessage;
+        throw new Error(failureMessage);
+      }
       createRequest.current = null;
       setPhoneOrderOpen(false);
       onCreated({
@@ -112,7 +117,8 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         items: [],
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "포장 주문을 등록하지 못했습니다.");
+      console.error("Takeout registration failed", cause);
+      setError(failureMessage);
     } finally {
       pending.current = false;
       setBusy(false);
