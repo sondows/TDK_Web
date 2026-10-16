@@ -67,7 +67,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         tableNo: diningTables.tableNo,
       }).from(tableSessions).innerJoin(diningTables, eq(tableSessions.tableId, diningTables.tableId))
         .where(and(eq(tableSessions.sessionId, sourceSessionId), eq(tableSessions.status, "OPEN"))).limit(1);
-      if (!source) throw new CopyValidationError("사용 중인 테이블을 선택해 주세요.");
+      if (!source || source.tableId === null) throw new CopyValidationError("사용 중인 테이블을 선택해 주세요.");
       if (destinations.includes(source.tableId)) throw new CopyValidationError("원본 테이블은 복사 대상으로 선택할 수 없습니다.");
 
       await tx.execute(sql`SELECT session_id FROM table_sessions WHERE session_id = ${sourceSessionId} FOR UPDATE`);

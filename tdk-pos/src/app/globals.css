@@ -25,6 +25,65 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Reusable behavior for POS dialog copy and actions; do not apply to form fields. */
+.pos-display-copy,
+.pos-modal-copy {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pos-modal-action {
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.pos-modal-action:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.pos-modal-action:focus-visible {
+  outline: 2px solid #475569;
+  outline-offset: 2px;
+}
+
+/* POS is an interaction surface; opt display copy out, then restore real/editable fields. */
+[data-pos-app] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-pos-app] :is(input, textarea, select, [contenteditable="true"], [data-selectable="true"]) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Touch POS controls are never text-copy surfaces. */
+[data-pos-app] :is(button, [role="button"], [role="option"], [role="tab"]) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-pos-app] :is(button, [role="button"], [role="option"], [role="tab"]):focus:not(:focus-visible) {
+  outline: none;
+}
+
+[data-pos-app] [role="button"]:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+[data-pos-app] [role="dialog"] :is(h1, h2, h3),
+[data-pos-app] [role="alertdialog"] :is(h1, h2, h3) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-pos-app] [role="alertdialog"] p {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 [role="dialog"] [role="listbox"] > button[role="option"] {
   width: 100%;
 }
@@ -292,6 +351,18 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.pos-order-columns,
+.pos-order-row,
+.pos-order-total,
+.pos-order-heading,
+.pos-order-empty,
+.pos-menu-and-qty,
+.pos-table-info,
+.pos-table-occupied-content {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .pos-order-columns {
@@ -825,7 +896,14 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   background: color-mix(in srgb, var(--pos-menu-accent, #64748b) 7%, white);
   color: #0f172a;
   text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.pos-menu-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .pos-menu-card:hover {
@@ -838,8 +916,19 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   transform: scale(0.99);
 }
 
+.pos-menu-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
 .pos-menu-number {
   position: absolute;
+  z-index: 1;
   top: 6px;
   left: 8px;
   color: #94a3b8;
@@ -867,6 +956,7 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 
 .pos-menu-copy {
   position: absolute;
+  z-index: 1;
   inset: 0;
   display: flex;
   flex-direction: column;
@@ -919,6 +1009,7 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   --pos-cart-visual-size: 27px;
   --pos-cart-visual-shift: 8px;
   position: absolute;
+  z-index: 2;
   right: 0.3rem;
   bottom: 0.3rem;
   display: grid;

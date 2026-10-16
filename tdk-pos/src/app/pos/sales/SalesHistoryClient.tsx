@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { formatMoney } from "@/lib/format-money";
+import { salePlaceLabel } from "@/lib/sale-place-label";
 import { printReceipt as printLocalReceipt } from "@/lib/receipt-print";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SalesListResponse } from "@/lib/sales-types";
 import PosSubHeader from "../PosSubHeader";
@@ -422,6 +423,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
           keypad={<PinKeypad
             actionDisabled={!selectedEmployee || summaryBusy || summaryPin.length === 0}
             digitDisabled={!selectedEmployee || summaryBusy || summaryPin.length >= 4}
+            largeKeys
             onBackspace={() => updateSummaryPin(summaryPin.slice(0, -1))}
             onClear={() => updateSummaryPin("")}
             onDigit={appendSummaryPin}
@@ -468,7 +470,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
 
 function CompactTableLabel({ tableNos }: { tableNos: string[] }) {
   const elementRef = useRef<HTMLSpanElement>(null);
-  const fullLabel = tableNos.length ? tableNos.map((tableNo) => `${tableNo}T`).join("+") : "-";
+  const fullLabel = tableNos.length ? tableNos.map(salePlaceLabel).join("+") : "-";
   const [label, setLabel] = useState(fullLabel);
 
   useEffect(() => {
@@ -490,7 +492,7 @@ function CompactTableLabel({ tableNos }: { tableNos: string[] }) {
         return;
       }
       for (let visible = tableNos.length - 1; visible >= 1; visible -= 1) {
-        const value = `${tableNos.slice(0, visible).map((tableNo) => `${tableNo}T`).join("+")}+외${tableNos.length - visible}개`;
+        const value = `${tableNos.slice(0, visible).map(salePlaceLabel).join("+")}+외${tableNos.length - visible}개`;
         if (fits(value) || visible === 1) {
           setLabel(value);
           return;
@@ -527,7 +529,7 @@ export function SaleDetailDialog({ sale, close, print, printing = false, printSu
         <PosSubHeader backLabel="판매내역으로 돌아가기" onBack={close} title="거래 상세" trailing={<strong className={`rounded-lg bg-white px-3 py-2 ${status.className}`}>{status.label}</strong>} />
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           <div className="flex items-center gap-4 overflow-x-auto whitespace-nowrap rounded-xl bg-slate-50 px-5 py-4">
-            <strong className="shrink-0 text-3xl">{sale.tableNos.map(tableNo => `${tableNo}T`).join(" · ") || "-"}</strong>
+            <strong className="shrink-0 text-3xl">{sale.tableNos.map(salePlaceLabel).join(" · ") || "-"}</strong>
             {customerName && <span className="shrink-0 text-lg font-bold text-slate-700">고객 {customerName}</span>}
             <p className="text-lg text-slate-500">
               {orderedDate} 주문 {time(sale.orderedAt)} · {orderedDate === transactionDate ? "" : `${transactionDate} `}거래 {time(sale.occurredAt)} <span className="text-sm text-slate-400">(거래 #{sale.checkoutId})</span>

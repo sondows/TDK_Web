@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ se
         .from(tableSessions)
         .where(and(eq(tableSessions.sessionId, sourceSessionId), eq(tableSessions.status, "OPEN")))
         .limit(1);
-      if (!source) return { error: "원본 테이블의 사용 중인 세션을 찾을 수 없습니다.", status: 404 as const };
+      if (!source || source.tableId === null) return { error: "원본 테이블의 사용 중인 세션을 찾을 수 없습니다.", status: 404 as const };
       if (source.tableId === destinationTableId) return { error: "현재 선택된 테이블과 같은 테이블입니다.", status: 400 as const };
 
       const [destination] = await tx.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo })

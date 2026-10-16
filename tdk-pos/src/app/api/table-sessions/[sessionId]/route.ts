@@ -13,11 +13,12 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
   if (!Number.isInteger(sessionId) || sessionId <= 0) return Response.json({ success: false, message: "유효한 테이블 세션 번호가 필요합니다." }, { status: 400 });
 
   try {
-    const [tableSession] = await db.select({ status: tableSessions.status }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).limit(1);
+    const [tableSession] = await db.select({ status: tableSessions.status, sessionKind: tableSessions.sessionKind }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).limit(1);
     if (!tableSession) return Response.json({ success: false, message: "테이블 세션을 찾을 수 없습니다." }, { status: 404 });
+    if (tableSession.sessionKind !== "DINE_IN") return Response.json({ success: false, message: "포장 주문은 최종 결제완료로 종료해 주세요." }, { status: 409 });
     if (tableSession.status !== "OPEN") return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
     const closed = await db.transaction(async tx => {
-      const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN")));
+      const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
       if (updateResult.affectedRows !== 1) return false;
       await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(and(
         eq(tableSessionMerges.status, "ACTIVE"),

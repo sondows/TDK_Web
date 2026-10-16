@@ -107,6 +107,7 @@ export function buildPartyOrderRows(
     const rowKey = JSON.stringify([
       parent.itemType,
       parent.menuId,
+      parent.itemName,
       unitPrice,
       perUnitDiscount,
       discountsBySession.get(parent.sessionId) ?? "[]",
@@ -187,7 +188,7 @@ export function buildOrderSummaryRows(items: SummarySourceItem[]): SummaryRow[] 
     const unitPrice = Number(item.unitPrice);
     const rowKey = parentsWithComponents.has(item.orderItemId)
       ? `parent:${item.orderItemId}`
-      : `${item.itemType.toLowerCase()}:${item.menuId}:${unitPrice}`;
+      : JSON.stringify([item.itemType, item.menuId, item.itemName, unitPrice]);
     const sequence = { orderId: item.orderId, orderItemId: item.orderItemId };
     const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, itemType: item.itemType, components: [] };
     if (compareOrderSequence(sequence, row.orderSequence) < 0) row.orderSequence = sequence;

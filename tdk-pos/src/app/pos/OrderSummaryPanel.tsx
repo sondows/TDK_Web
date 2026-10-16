@@ -4,6 +4,7 @@ import PinAuthPanel from "@/components/PinAuthPanel";
 import PinKeypad from "@/components/PinKeypad";
 import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
+import { salePlaceLabel } from "@/lib/sale-place-label";
 import { PIN_LENGTH } from "@/lib/pin";
 import type { TableFinancials } from "@/lib/table-session-financials";
 import { buildPartyOrderRows, type SummaryRow } from "@/lib/pos-order-summary-rows";
@@ -22,6 +23,7 @@ type SessionDiscount = {
 };
 type Table = {
   tableId: number;
+  sessionKind?: "DINE_IN" | "TAKEOUT_WALK_IN" | "TAKEOUT_PHONE";
   sessionId: number | null;
   groupId: number | null;
   tableNo: string;
@@ -399,11 +401,11 @@ export default function OrderSummaryPanel({
   };
   const renderDetailRows = (readOnly: boolean, scopedDetails = details, showTable = false) => scopedDetails.map((o, n) => (
     <section
-      className="border-b border-violet-200 py-2 last:border-0"
+      className="pos-display-copy border-b border-violet-200 py-2 last:border-0"
       key={o.orderId}
     >
       <header className="flex items-baseline gap-1.5 border-b border-violet-100 pb-1 text-sm font-bold text-violet-800">
-        {showTable && <span>{sessionTableNos[o.sessionId] ? `${sessionTableNos[o.sessionId]}T` : `세션 ${o.sessionId}`} ·</span>}
+        {showTable && <span>{sessionTableNos[o.sessionId] ? salePlaceLabel(sessionTableNos[o.sessionId]) : `세션 ${o.sessionId}`} ·</span>}
         <span>{scopedDetails.slice(0, n).filter(previous => previous.sessionId === o.sessionId).length + 1}차 주문</span>
         <time className="font-medium text-violet-700">({time(o.orderedAt)})</time>
       </header>
@@ -420,7 +422,7 @@ export default function OrderSummaryPanel({
           effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
         return (
           <div
-            className={`mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
+            className={`pos-display-copy mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
             key={i.orderItemId}
             onClick={() => selectable && (editableComponent
               ? edit(i, { checked: !d.checked, keep: i.effectiveQty, touched: true })
@@ -497,7 +499,7 @@ export default function OrderSummaryPanel({
   ));
   const rows = renderDetailRows(false);
   const pendingRows = cart.map((i) => (
-    <div className="space-y-1" key={pendingCartItemKey(i)}>
+    <div className="pos-display-copy space-y-1" key={pendingCartItemKey(i)}>
       <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
         <span className="truncate font-medium">{i.menuName}{i.isComplimentary && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
         <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.isComplimentary ? 0 : i.unitPrice)}</span>
@@ -837,7 +839,8 @@ export default function OrderSummaryPanel({
           onPrintReceipt={onPrintReceipt}
           receiptPrinting={receiptPrinting}
           tableId={selected.tableId}
-          tableNo={selected.tableNo}
+          sessionId={selected.sessionKind && selected.sessionKind !== "DINE_IN" ? selected.sessionId ?? undefined : undefined}
+          tableNo={selected.sessionKind && selected.sessionKind !== "DINE_IN" ? "포장" : selected.tableNo}
         />
       )}
       {customerSelectOpen && selected?.sessionId && (

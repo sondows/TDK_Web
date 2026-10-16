@@ -60,7 +60,7 @@ function saleIdentityRows(input: SalePrintInput): PrintCommand[] {
   const store = input.storeInfo;
   return [
     row(`${store.address.trim()}${store.phone.trim() ? `(${store.phone.trim()})` : ""}`, store.businessNumber.trim()),
-    row(input.transactionAt, `TNo.${input.tableNos.join(".")}`, 24),
+    row(input.transactionAt, input.tableNos.some(tableNo => /^(포장|방문포장|전화포장)\d{4}(?:-\d+)?$/.test(tableNo)) ? input.tableLabel : `TNo.${input.tableNos.join(".")}`, 24),
     { type: "line" },
   ];
 }

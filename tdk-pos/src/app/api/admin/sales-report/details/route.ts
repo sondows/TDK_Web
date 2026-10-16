@@ -1,4 +1,5 @@
 import type { RowDataPacket } from "mysql2";
+import { salePlaceLabel } from "@/lib/sale-place-label";
 import { pool } from "@/db";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { won } from "@/lib/sales-financial-summary";
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
       "SELECT p.checkout_id AS checkoutId, p.applied_amount AS appliedAmount, p.status, pm.method_name AS methodName FROM payments p JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE p.checkout_id IN (?)", [ids],
     ) : [[] as PaymentRow[]];
     const [tables] = ids.length ? await connection.query<TableRow[]>(
-      "SELECT DISTINCT ci.checkout_id AS checkoutId, dt.table_no AS tableNo FROM checkout_items ci JOIN order_items oi ON oi.order_item_id = ci.order_item_id JOIN orders o ON o.order_id = oi.order_id JOIN table_sessions ts ON ts.session_id = o.session_id JOIN dining_tables dt ON dt.table_id = ts.table_id WHERE ci.checkout_id IN (?)", [ids],
+      "SELECT DISTINCT ci.checkout_id AS checkoutId, COALESCE(ts.display_name, dt.table_no) AS tableNo FROM checkout_items ci JOIN order_items oi ON oi.order_item_id = ci.order_item_id JOIN orders o ON o.order_id = oi.order_id JOIN table_sessions ts ON ts.session_id = o.session_id LEFT JOIN dining_tables dt ON dt.table_id = ts.table_id WHERE ci.checkout_id IN (?)", [ids],
     ) : [[] as TableRow[]];
     const paymentByCheckout = new Map<number, PaymentRow[]>();
     for (const row of payments) paymentByCheckout.set(row.checkoutId, [...(paymentByCheckout.get(row.checkoutId) ?? []), row]);
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
       const related = paymentByCheckout.get(checkout.checkoutId) ?? [];
       const tableNos = [...new Set(tableByCheckout.get(checkout.checkoutId) ?? [])].sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
       return { checkoutId: checkout.checkoutId, occurredAt: checkout.occurredAt,
-        tableLabel: tableNos.length ? tableNos.map(value => `${value}T`).join("+") : "-",
+        tableLabel: tableNos.length ? tableNos.map(salePlaceLabel).join("+") : "-",
         salesAmount: related.filter(row => row.status === "APPROVED").reduce((sum, row) => sum + won(row.appliedAmount), 0),
         paymentMethods: [...new Set(related.filter(row => ["APPROVED", "CANCELLED", "REFUNDED"].includes(row.status)).map(row => row.methodName))].join("+") || "-",
         status: displayStatus(checkout.status, related), source: "TDK_POS" as const };

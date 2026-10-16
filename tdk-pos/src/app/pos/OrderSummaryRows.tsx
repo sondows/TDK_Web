@@ -17,7 +17,7 @@ export default function OrderSummaryRows({ items }: { items: SummaryRow[] }) {
   );
 
   return (
-    <div className="flex flex-col gap-y-[7px]">
+    <div className="pos-display-copy flex flex-col gap-y-[7px]">
       {items.map(item => (
         <div className="space-y-1" key={item.rowKey}>
           {renderRow(item)}

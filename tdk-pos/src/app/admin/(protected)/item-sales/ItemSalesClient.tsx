@@ -22,7 +22,7 @@ const count = (value: number) => `${value.toLocaleString("ko-KR")}개`;
 const average = (value: number, days: number) => days ? `${(value / days).toLocaleString("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}개` : "-";
 
 export default function ItemSalesClient() {
-  const [startDate, setStartDate] = useState(() => `${todayInKorea().slice(0, 7)}-01`);
+  const [startDate, setStartDate] = useState(todayInKorea);
   const [endDate, setEndDate] = useState(todayInKorea);
   const [sort, setSort] = useState<Sort>("quantity");
   const [report, setReport] = useState<Report | null>(null);

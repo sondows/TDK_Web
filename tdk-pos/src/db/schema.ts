@@ -211,7 +211,7 @@ export const tableSessions = mysqlTable("table_sessions", {
   tableId: bigint("table_id", {
     mode: "number",
     unsigned: true,
-  }).notNull(),
+  }),
 
   groupId: bigint("group_id", {
     mode: "number",
@@ -247,7 +247,15 @@ export const tableSessions = mysqlTable("table_sessions", {
   closedAt: datetime("closed_at"),
 
   note: varchar("note", { length: 500 }),
-});
+  sessionKind: mysqlEnum("session_kind", ["DINE_IN", "TAKEOUT_WALK_IN", "TAKEOUT_PHONE"]).notNull().default("DINE_IN"),
+  displayName: varchar("display_name", { length: 100 }),
+  takeoutLabelKey: varchar("takeout_label_key", { length: 40 }),
+  createRequestKey: varchar("create_request_key", { length: 36 }),
+  pickupName: varchar("pickup_name", { length: 100 }),
+  pickupPhone: varchar("pickup_phone", { length: 30 }),
+  pickupCustomerId: bigint("pickup_customer_id", { mode: "number", unsigned: true }).references(() => customers.customerId),
+  pickupAt: datetime("pickup_at"),
+}, (table) => [uniqueIndex("uq_table_sessions_takeout_label_key").on(table.takeoutLabelKey), uniqueIndex("uq_table_sessions_create_request_key").on(table.createRequestKey), index("idx_table_sessions_kind_status").on(table.sessionKind, table.status), index("idx_table_sessions_pickup_customer").on(table.pickupCustomerId)]);
 
 export const menuCategories = mysqlTable("menu_categories", {
   categoryId: bigint("category_id", {

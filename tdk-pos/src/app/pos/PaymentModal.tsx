@@ -89,6 +89,7 @@ const paymentInfoRowStyle = "flex justify-between leading-7";
 const paymentFooterButtonStyle = "min-h-[72px] w-full rounded-lg border border-slate-300 bg-white text-lg font-bold text-slate-900 transition-colors hover:bg-slate-50 active:bg-slate-100 disabled:opacity-40";
 export default function PaymentModal({
   tableId,
+  sessionId,
   tableNo,
   orderDetails,
   renderOrderDetails,
@@ -101,6 +102,7 @@ export default function PaymentModal({
   receiptPrinting,
 }: {
   tableId: number;
+  sessionId?: number;
   tableNo: string;
   orderDetails: SaleOrder[];
   renderOrderDetails: (sessionIds: number[]) => ReactNode;
@@ -146,7 +148,7 @@ export default function PaymentModal({
   const { ref: paymentMethodsRef, hints: scrollHints, handlers: paymentScrollHandlers } = useHorizontalScroll(state !== null);
   useEffect(() => {
     let active = true;
-    fetch(`/api/checkouts?tableId=${tableId}`)
+    fetch(sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`)
       .then(async (response) => ({ response, result: (await response.json()) as { success?: boolean; message?: string; settled?: boolean; checkoutIds?: number[] } & State }))
       .then(({ response, result }) => {
         if (!active) return;
@@ -163,7 +165,7 @@ export default function PaymentModal({
       })
       .catch(() => { if (active) setError("결제 정보를 불러올 수 없습니다."); });
     return () => { active = false; };
-  }, [tableId]);
+  }, [tableId, sessionId]);
   useEffect(() => {
     let active = true;
     fetch("/api/pos-settings/payment-auto-complete", { cache: "no-store" })
@@ -207,7 +209,7 @@ export default function PaymentModal({
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId, ...body }),
+        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), ...body }),
       });
       const result = (await response.json()) as {
         success?: boolean;
@@ -305,7 +307,7 @@ export default function PaymentModal({
       requestInFlight.current = false;
       setBusy(false);
     }
-  }, [tableId, transactionCompleted, onCashPaymentRegistered, printCompletedReceipts]);
+  }, [tableId, sessionId, transactionCompleted, onCashPaymentRegistered, printCompletedReceipts]);
   useEffect(() => {
     if (!stagedCustomerPayment || !state || transactionCompleted || busy || requestInFlight.current) return;
     if (stagedCustomerPayment.amount < state.remaining || autoCustomerPaymentRequested.current === stagedCustomerPayment.requestKey) return;
@@ -399,7 +401,7 @@ export default function PaymentModal({
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId, action: "COMPLETE" }),
+        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "COMPLETE" }),
       });
       const result = await response.json() as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "결제를 완료하지 못했습니다.");
@@ -459,7 +461,7 @@ export default function PaymentModal({
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId, action: "CANCEL_PAYMENT", paymentId: deletionTarget.payment.paymentId }),
+        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "CANCEL_PAYMENT", paymentId: deletionTarget.payment.paymentId }),
       });
       const result = (await response.json()) as { success?: boolean; message?: string; state?: State };
       if (!response.ok || !result.success || !result.state) {
@@ -494,7 +496,7 @@ export default function PaymentModal({
         const response = await fetch("/api/checkouts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tableId, action: "CANCEL_PAYMENT", paymentId }),
+          body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "CANCEL_PAYMENT", paymentId }),
         });
         const result = await response.json() as { success?: boolean; message?: string; state?: State };
         if (!response.ok || !result.success || !result.state) throw new Error(result.message ?? "결제를 초기화할 수 없습니다.");
@@ -514,7 +516,7 @@ export default function PaymentModal({
       setCancelError(resetError instanceof Error ? resetError.message : "결제 초기화 중 오류가 발생했습니다.");
       if (showDialogOnError) setResetPaymentsConfirm(true);
       try {
-        const response = await fetch(`/api/checkouts?tableId=${tableId}`);
+        const response = await fetch(sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`);
         const refreshed = await response.json() as { success?: boolean } & State;
         if (response.ok && refreshed.success) {
           setState(refreshed);
@@ -658,7 +660,7 @@ export default function PaymentModal({
               <div className={`mt-1.5 h-[3px] ${ORDER_INFO_STYLES[orderTab].bg}`} />
             </div>
             <div className="mx-2.5 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-b-xl border border-t-0 border-slate-200 px-2.5 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]" style={{ backgroundColor: ORDER_INFO_STYLES[orderTab].tint }}>
-              <div className="shrink-0 border-b border-slate-200 py-1 text-[27px] font-bold text-slate-900">{displayedTableNos.join(". ")}T</div>
+              <div className="shrink-0 border-b border-slate-200 py-1 text-[27px] font-bold text-slate-900">{displayedTableNos.join(". ")}{sessionId ? "" : "T"}</div>
               <div className="mt-3 grid grid-cols-[1fr_52px_76px_58px] border-b border-slate-200 pb-2 text-[11px] font-bold text-slate-500">
                 <span>메뉴명</span>
                 <span className="text-right">단가</span>

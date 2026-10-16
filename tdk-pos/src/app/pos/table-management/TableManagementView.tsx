@@ -31,17 +31,18 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   }).from(diningTables).where(eq(diningTables.isActive, 1)).orderBy(diningTables.sortOrder),
   db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, groupId: tableSessions.groupId, personCount: tableSessions.personCount, babyCount: tableSessions.babyCount, openedAtEpoch: sql<number>`UNIX_TIMESTAMP(${tableSessions.openedAt})` }).from(tableSessions).where(eq(tableSessions.status, "OPEN")),
   db.select({ mergeId: tableSessionMerges.mergeId, sourceSessionId: tableSessionMerges.sourceSessionId, sourceTableId: tableSessionMerges.sourceTableId, destinationSessionId: tableSessionMerges.destinationSessionId, destinationTableId: tableSessionMerges.destinationTableId }).from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE"))]);
-  const openSessionIds = new Set(openSessions.map(session => session.sessionId));
+  const floorSessions = openSessions.filter((session): session is typeof session & { tableId: number } => session.tableId !== null);
+  const openSessionIds = new Set(floorSessions.map(session => session.sessionId));
   const activeOpenMerges = activeMerges.filter(merge => openSessionIds.has(merge.sourceSessionId) && openSessionIds.has(merge.destinationSessionId));
   const mergedSourceSessionIds = new Set(activeOpenMerges.map(merge => merge.sourceSessionId));
-  const visibleSessionByTableId = new Map(openSessions.filter(session => !mergedSourceSessionIds.has(session.sessionId)).map(session => [session.tableId, session]));
+  const visibleSessionByTableId = new Map(floorSessions.filter(session => !mergedSourceSessionIds.has(session.sessionId)).map(session => [session.tableId, session]));
   const tableNoById = new Map(tableLayouts.map(table => [table.tableId, table.tableNo]));
   const mergedSourceNosByDestinationId = new Map<number, string[]>();
   const activeMergeSourcesByDestinationId = new Map<number, Array<{ mergeId: number; sourceTableNo: string }>>();
   activeOpenMerges.forEach(merge => mergedSourceNosByDestinationId.set(merge.destinationTableId, [...(mergedSourceNosByDestinationId.get(merge.destinationTableId) ?? []), tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId)]));
   activeOpenMerges.forEach(merge => activeMergeSourcesByDestinationId.set(merge.destinationTableId, [...(activeMergeSourcesByDestinationId.get(merge.destinationTableId) ?? []), { mergeId: merge.mergeId, sourceTableNo: tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId) }]));
   const tables = tableLayouts.map(table => ({ ...table, ...(visibleSessionByTableId.get(table.tableId) ?? { sessionId: null, groupId: null, personCount: 0, babyCount: 0, openedAtEpoch: null }), mergedSourceTableNos: (mergedSourceNosByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })), activeMergeSources: (activeMergeSourcesByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.sourceTableNo.localeCompare(b.sourceTableNo, "ko", { numeric: true })) }));
-  const sessionIds = openSessions.map(session => session.sessionId);
+  const sessionIds = floorSessions.map(session => session.sessionId);
   const sessionOrders = sessionIds.length ? await db.select({ orderId: orders.orderId, sessionId: orders.sessionId, status: orders.status }).from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
   const orderIds = sessionOrders.map(order => order.orderId);
   const items = orderIds.length ? await db.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, qty: orderItems.qty, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)) : [];

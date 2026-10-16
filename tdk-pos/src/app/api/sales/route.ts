@@ -25,6 +25,7 @@ import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
 import { buildCustomerConfirmationPrintDocument, buildSalePrintDocument } from "@/lib/print-document";
 import { isSaleLookupCode } from "@/lib/lookup-code";
+import { salePlaceLabel } from "@/lib/sale-place-label";
 import type { SaleDetail, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
 
 const finishedStatuses = new Set(["PAID", "CANCELLED", "REFUNDED"]);
@@ -204,7 +205,7 @@ export async function POST(request: Request) {
         lookupCode: sale.receiptLookupCode,
         isReprint: !customerPayment && generalPrintHistory.length > 0,
         statusLabel: partialCancellation ? "일부취소" : null,
-        tableLabel: sale.tableNos.map(tableNo => `${tableNo}T`).join("+"),
+        tableLabel: sale.tableNos.map(salePlaceLabel).join("+"),
         orderedAt: sale.orderedAt.slice(0, 16).replace("T", " "),
         transactionAt: sale.occurredAt.slice(0, 16).replace("T", " "),
         tableNos: sale.tableNos,
@@ -292,7 +293,7 @@ async function listResponse(startDate: string, endDate: string) {
     db.select({
       checkoutId: checkoutItems.checkoutId,
       checkoutItemId: checkoutItems.checkoutItemId,
-      tableNo: diningTables.tableNo,
+      tableNo: sql<string>`COALESCE(${tableSessions.displayName}, ${diningTables.tableNo})`,
       itemName: orderItems.itemName,
       itemType: orderItems.itemType,
       unitPrice: checkoutItems.unitPrice,
@@ -303,7 +304,7 @@ async function listResponse(startDate: string, endDate: string) {
       .innerJoin(orderItems, eq(orderItems.orderItemId, checkoutItems.orderItemId))
       .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
       .innerJoin(tableSessions, eq(tableSessions.sessionId, orders.sessionId))
-      .innerJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
+      .leftJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
       .where(inArray(checkoutItems.checkoutId, checkoutIds)),
     db.select({
       paymentId: payments.paymentId,
@@ -352,7 +353,7 @@ async function listResponse(startDate: string, endDate: string) {
       checkoutId: checkout.checkoutId,
       occurredAt: transactionAt,
       orderedAt: firstOrderedAt ?? checkout.createdAt,
-      tableLabel: tables.length ? tables.map((tableNo) => `${tableNo}T`).join("+") : "-",
+      tableLabel: tables.length ? tables.map(salePlaceLabel).join("+") : "-",
       tableNos: tables,
       menuSummary: menuNames.length ? `${menuNames[0]}${menuNames.length > 1 ? ` 외 ${menuNames.length - 1}건` : ""}` : "-",
       totalAmount: won(checkout.totalAmount),
@@ -401,13 +402,13 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     qty: checkoutItems.qty,
     amount: checkoutItems.amount,
     sessionId: orders.sessionId,
-    tableNo: diningTables.tableNo,
+    tableNo: sql<string>`COALESCE(${tableSessions.displayName}, ${diningTables.tableNo})`,
     orderedAt: sql<string>`CONCAT(DATE_FORMAT(${orders.orderedAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00')`,
   }).from(checkoutItems)
     .innerJoin(orderItems, eq(orderItems.orderItemId, checkoutItems.orderItemId))
     .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
     .innerJoin(tableSessions, eq(tableSessions.sessionId, orders.sessionId))
-    .innerJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
+    .leftJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
     .where(eq(checkoutItems.checkoutId, checkoutId));
   const sessionIds = [...new Set(itemRows.map((item) => item.sessionId))];
   const itemIds = [...new Set(itemRows.map((item) => item.orderItemId))];
@@ -479,7 +480,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     receiptLookupCode: checkout.receiptLookupCode,
     occurredAt: transactionAt,
     orderedAt: firstOrderedAt ?? checkout.createdAt,
-    tableLabel: tables.length ? `${tables.join("·")}T` : "-",
+    tableLabel: tables.length ? tables.map(salePlaceLabel).join("·") : "-",
     tableNos: tables,
     checkoutStatus: checkout.status,
     displayStatus: displayStatus(checkout.status, relevantPayments),

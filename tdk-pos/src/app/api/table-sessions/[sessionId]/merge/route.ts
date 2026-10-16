@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         .for("update")
         .limit(1);
 
-      if (!source) return { error: "합석할 테이블의 OPEN 세션을 찾을 수 없습니다.", status: 409 as const };
+      if (!source || source.tableId === null) return { error: "합석할 테이블의 OPEN 세션을 찾을 수 없습니다.", status: 409 as const };
       if (source.tableId === destinationTableId) return { error: "같은 테이블끼리는 합석할 수 없습니다.", status: 400 as const };
 
       const [destination] = await tx.select({
@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         .where(and(eq(tableSessions.tableId, destinationTableId), eq(tableSessions.status, "OPEN")))
         .for("update")
         .limit(1);
-      if (!destination) return { error: "사용 중인 테이블을 선택해 주세요.", status: 409 as const };
+      if (!destination || destination.tableId === null) return { error: "사용 중인 테이블을 선택해 주세요.", status: 409 as const };
 
       // A session may be a merge destination for several source tables, but a
       // source (or a nested destination) cannot start another merge.

@@ -1,5 +1,7 @@
 "use client";
 
+import { PIN_KEYPAD_GRID_CLASS_NAME, PIN_KEYPAD_LARGE_BUTTON_CLASS_NAME } from "./pin-keypad-style";
+
 const defaultKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0", "C"];
 
 type NumericInputKeypadProps = {
@@ -17,12 +19,13 @@ type NumericInputKeypadProps = {
   inputDivider?: boolean;
   inputEdgeToEdge?: boolean;
   scale?: number;
+  pinSized?: boolean;
 };
 
-export default function NumericInputKeypad({ value, onKey, disabled = false, disabledKeys = [], keys = defaultKeys, inputLabel = "입력", inputOffset = 2, inputAlign = "right", smallBackspace = false, className = "", inputHeight = 60, inputDivider = true, inputEdgeToEdge = false, scale = 1 }: NumericInputKeypadProps) {
+export default function NumericInputKeypad({ value, onKey, disabled = false, disabledKeys = [], keys = defaultKeys, inputLabel = "입력", inputOffset = 2, inputAlign = "right", smallBackspace = false, className = "", inputHeight = 60, inputDivider = true, inputEdgeToEdge = false, scale = 1, pinSized = false }: NumericInputKeypadProps) {
   const scaled = scale !== 1;
   const containerPadding = 8 * scale;
-  return <div className={`flex min-h-0 max-w-full flex-col self-center overflow-hidden border border-slate-300 ${scaled ? "flex-none rounded-[10px]" : "w-[337px] flex-1 rounded-xl p-2"} ${className}`} style={scaled ? { width: `${337 * scale}px`, padding: inputEdgeToEdge ? 0 : `${containerPadding}px` } : inputEdgeToEdge ? { padding: 0 } : undefined}>
+  return <div className={`flex min-h-0 max-w-full flex-col self-center overflow-hidden border border-slate-300 ${scaled ? "flex-none rounded-[10px]" : pinSized ? "w-[302px] flex-1 rounded-xl p-2" : "w-[337px] flex-1 rounded-xl p-2"} ${className}`} style={scaled ? { width: `${337 * scale}px`, padding: inputEdgeToEdge ? 0 : `${containerPadding}px` } : inputEdgeToEdge ? { padding: 0 } : undefined}>
     <div className={`grid shrink-0 grid-cols-3 items-center ${inputEdgeToEdge ? "" : "rounded-t-lg"} ${scaled ? "" : "gap-x-1"} ${inputDivider ? "border-b border-slate-300" : ""} bg-slate-50 text-slate-900`} style={{ height: inputHeight * scale + (inputEdgeToEdge ? containerPadding : 0), ...(scaled ? { columnGap: 4 * scale } : {}), ...(inputEdgeToEdge ? { paddingTop: containerPadding, paddingLeft: containerPadding, paddingRight: containerPadding } : {}) }}>
       <div className="col-start-3 flex justify-center">
         <div className={`relative font-bold ${scaled ? "" : "text-3xl"} ${inputAlign === "center" ? "w-full" : ""}`} style={scaled ? { fontSize: 30 * scale } : undefined}>
@@ -34,11 +37,11 @@ export default function NumericInputKeypad({ value, onKey, disabled = false, dis
         </div>
       </div>
     </div>
-    <div className={`grid min-h-0 flex-1 grid-cols-3 grid-rows-4 ${scaled ? "" : "mt-1 translate-y-[2px] gap-x-1 gap-y-0.5"}`} style={{ ...(scaled ? { marginTop: 4 * scale, transform: `translateY(${2 * scale}px)`, columnGap: 4 * scale, rowGap: 2 * scale } : {}), ...(inputEdgeToEdge ? { paddingLeft: containerPadding, paddingRight: containerPadding, paddingBottom: containerPadding } : {}) }}>
+    <div className={`${pinSized ? PIN_KEYPAD_GRID_CLASS_NAME : "grid min-h-0 flex-1 grid-cols-3 grid-rows-4"} ${pinSized ? "mt-3" : scaled ? "" : "mt-1 translate-y-[2px] gap-x-1 gap-y-0.5"}`} style={{ ...(scaled ? { marginTop: 4 * scale, transform: `translateY(${2 * scale}px)`, columnGap: 4 * scale, rowGap: 2 * scale } : {}), ...(inputEdgeToEdge ? { paddingLeft: containerPadding, paddingRight: containerPadding, paddingBottom: containerPadding } : {}) }}>
       {keys.map((key) => (
         <button
           aria-label={key === "BS" ? "마지막 숫자 삭제" : undefined}
-          className={`font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${scaled ? "" : key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "00" ? "text-2xl" : "text-3xl"}`}
+          className={`${pinSized ? PIN_KEYPAD_LARGE_BUTTON_CLASS_NAME : ""} font-bold text-slate-800 transition hover:bg-slate-100 active:bg-slate-200 disabled:opacity-40 ${pinSized ? "" : scaled ? "" : key === "BS" && smallBackspace ? "text-[28px]" : key === "C" || key === "BS" ? "text-[30px]" : key === "00" ? "text-2xl" : "text-3xl"}`}
           disabled={disabled || disabledKeys.includes(key)}
           key={key}
           onClick={() => onKey(key)}

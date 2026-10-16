@@ -72,14 +72,15 @@ async function actor() {
 }
 
 async function billScope(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], tableId: number) {
-  const [base] = await tx.select({ sessionId: tableSessions.sessionId, groupId: tableSessions.groupId, tableNo: diningTables.tableNo })
+  const isTakeout = tableId < 0;
+  const [base] = await tx.select({ sessionId: tableSessions.sessionId, groupId: tableSessions.groupId, tableNo: sql<string>`COALESCE(${tableSessions.displayName}, ${diningTables.tableNo})` })
     .from(tableSessions)
-    .innerJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
-    .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN")))
+    .leftJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
+    .where(and(isTakeout ? and(eq(tableSessions.sessionId, -tableId), sql`${tableSessions.sessionKind} <> 'DINE_IN'`) : and(eq(tableSessions.tableId, tableId), eq(tableSessions.sessionKind, "DINE_IN")), eq(tableSessions.status, "OPEN")))
     .for("update")
     .limit(1);
   if (!base) throw new CheckoutError("사용 중인 테이블을 선택해 주세요.", 404);
-  const groupedSessions = base.groupId === null
+  const groupedSessions = isTakeout || base.groupId === null
     ? [{ sessionId: base.sessionId, tableNo: base.tableNo }]
     : await tx.select({ sessionId: tableSessions.sessionId, tableNo: diningTables.tableNo })
       .from(tableSessions)
@@ -105,7 +106,8 @@ async function billScope(tx: Parameters<Parameters<typeof db.transaction>[0]>[0]
   return {
     baseSessionId: base.sessionId,
     sessionIds: [...new Set([...physicalSessionIds, ...merges.map((row) => row.sourceSessionId).filter(sessionId => openMergeSourceIds.has(sessionId))])],
-    isPartyBill: base.groupId !== null && groupedSessions.length > 1,
+    isPartyBill: !isTakeout && base.groupId !== null && groupedSessions.length > 1,
+    isTakeout,
     tableNos,
   };
 }
@@ -267,8 +269,10 @@ async function snapshot(tableId: number) {
 export async function GET(request: Request) {
   try {
     await actor();
-    const tableId = Number(new URL(request.url).searchParams.get("tableId"));
-    if (!Number.isInteger(tableId) || tableId <= 0) throw new CheckoutError("테이블을 확인해 주세요.", 400);
+    const url = new URL(request.url);
+    const sessionId = url.searchParams.get("sessionId");
+    const tableId = sessionId === null ? Number(url.searchParams.get("tableId")) : -Number(sessionId);
+    if (!Number.isSafeInteger(tableId) || tableId === 0 || (sessionId !== null && Number(sessionId) <= 0)) throw new CheckoutError("주문을 확인해 주세요.", 400);
     const state = await snapshot(tableId);
     const methods = await db.select({ code: paymentMethods.methodCode, name: paymentMethods.methodName, type: paymentMethods.methodType }).from(paymentMethods).where(eq(paymentMethods.isActive, 1));
     const history = state.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
@@ -281,9 +285,9 @@ export async function POST(request: Request) {
   try {
     const processedByStaffId = await actor();
     requestPhase = "request parsing";
-    const body = await request.json() as { tableId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; quantityMode?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
-    const tableId = Number(body.tableId);
-    if (!Number.isInteger(tableId) || tableId <= 0) throw new CheckoutError("테이블을 확인해 주세요.", 400);
+    const body = await request.json() as { tableId?: unknown; sessionId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; quantityMode?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
+    const tableId = body.sessionId === undefined ? Number(body.tableId) : -Number(body.sessionId);
+    if (!Number.isSafeInteger(tableId) || tableId === 0 || (body.sessionId !== undefined && Number(body.sessionId) <= 0)) throw new CheckoutError("주문을 확인해 주세요.", 400);
     const action = body.action;
     const result = await db.transaction(async tx => {
       requestPhase = `load bill (${String(action)})`;
@@ -417,7 +421,7 @@ export async function POST(request: Request) {
           const addedItems = bill.items.filter(item => !linkedIds.has(item.orderItemId));
           if (addedItems.length) await tx.insert(checkoutItems).values(addedItems.map(item => ({ checkoutId: checkoutId!, orderItemId: item.orderItemId, qty: item.effectiveQty, unitPrice: item.checkoutUnitPrice, discountAmount: "0.00", amount: decimal(item.effectiveQty * Number(item.checkoutUnitPrice)) })));
         }
-        const tableDescription = bill.tableNos.length === 1 ? `${bill.tableNos[0]}번 테이블 식사` : `${bill.tableNos.join(", ")}번 테이블 식사`;
+        const tableDescription = bill.isTakeout ? bill.tableNos[0] : bill.tableNos.length === 1 ? `${bill.tableNos[0]}번 테이블 식사` : `${bill.tableNos.join(", ")}번 테이블 식사`;
         requestPhase = "insert customer payment and ledger";
         const couponMemo = couponQuantity === null ? "" : ` · 정액쿠폰 ${couponQuantity}장`;
         const [createdPayment] = await tx.insert(payments).values({ checkoutId, paymentMethodId: method.id, amount: decimal(couponQuantity === null ? amount : couponTendered), appliedAmount: decimal(couponApplied), customerId, customerCouponCustomerNameSnapshot: couponQuantity === null ? null : customer.name, customerCouponQuantity: couponQuantity, customerCouponUnitAmountSnapshot: couponUnitAmount === null ? null : decimal(couponUnitAmount), status: "APPROVED", processedByStaffId, note: tableDescription }).$returningId();
