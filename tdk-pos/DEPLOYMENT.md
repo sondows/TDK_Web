@@ -17,6 +17,12 @@ This deployment runs only the Next.js app. It connects to the existing NAS Maria
 
 5. Production session/grant cookies use the `Secure` flag. Put an HTTPS reverse proxy in front of the app for browser use. Port 3000 remains the configured upstream and direct port mapping. Verify the NAS reverse proxy and firewall settings before opening access outside the LAN.
 
+## Public management-only host
+
+The Next.js Proxy treats `tdkon.myasustor.com` as the public management-only host: `/` redirects to `/admin/login`, management pages/assets and their current APIs are allowed, and POS/KDS/Device Agent paths and POS APIs are denied. The shop LAN hosts remain unrestricted by this host policy (`192.168.0.83`, localhost, and `192.168.0.54` for development). Add other trusted LAN hostnames to `POS_INTERNAL_HOSTS` as a comma-separated list if needed.
+
+Configure the ASUSTOR reverse proxy to preserve the original `Host` header (or explicitly set the upstream `Host` to `tdkon.myasustor.com`). The app intentionally does not make access decisions from `X-Forwarded-Host`. Restrict NAS port 3000 to the LAN and reverse proxy, and remove any router WAN port-forward for 3000; Host checks are not a substitute for that network boundary because HTTP Host headers can be forged on direct connections.
+
 ## Start and inspect
 
 ```sh
