@@ -43,8 +43,25 @@ test("payments applied separately to each party table remain independent after r
     discountBySessionId: new Map(),
     prepaidBySessionId: new Map(persistedAllocations.map(row => [row.sessionId, row.amount])),
   });
-  assert.deepEqual(financials.get(1), { gross: 20000, discount: 0, prepaid: 10000, total: 20000, remaining: 10000 });
-  assert.deepEqual(financials.get(3), { gross: 20000, discount: 0, prepaid: 5000, total: 20000, remaining: 15000 });
+  assert.deepEqual(financials.get(1), { gross: 20000, discount: 0, prepaid: 10000, total: 20000, remaining: 10000, receivable: 10000 });
+  assert.deepEqual(financials.get(3), { gross: 20000, discount: 0, prepaid: 5000, total: 20000, remaining: 15000, receivable: 15000 });
+});
+
+test("signed receivable follows the POS gross, discount, and approved payment totals", () => {
+  const summarize = (gross, approvedPaid) => calculateTableFinancials({
+    tableScopes: [{ tableId: 1, sessionIds: [101] }],
+    grossBySessionId: new Map([[101, gross]]),
+    discountBySessionId: new Map(),
+    prepaidBySessionId: new Map([[101, approvedPaid]]),
+  }).get(1);
+
+  assert.equal(summarize(20000, 0).receivable, 20000);
+  assert.equal(summarize(20000, 10000).receivable, 10000);
+  assert.equal(summarize(20000, 20000).receivable, 0);
+  assert.equal(summarize(0, 20000).receivable, -20000);
+  assert.equal(summarize(20000, 10000).receivable, 10000); // mixed/partial payment
+  assert.equal(summarize(20000, 0).receivable, 20000); // payment reversal removes the approved allocation
+  assert.equal(summarize(20000, 10000).remaining, 10000); // dine-in clamped balance remains unchanged
 });
 
 test("a discount on one party session does not reduce the companion table", () => {

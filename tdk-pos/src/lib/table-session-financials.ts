@@ -1,4 +1,4 @@
-export type TableFinancials = { gross: number; discount: number; prepaid: number; total: number; remaining: number };
+export type TableFinancials = { gross: number; discount: number; prepaid: number; total: number; remaining: number; receivable: number };
 
 export function summarizeSessionFinancials(input: {
   sessionIds: number[];
@@ -11,6 +11,7 @@ export function summarizeSessionFinancials(input: {
   let prepaid = 0;
   let total = 0;
   let remaining = 0;
+  let receivable = 0;
 
   for (const sessionId of new Set(input.sessionIds)) {
     const sessionGross = input.grossBySessionId.get(sessionId) ?? 0;
@@ -23,9 +24,10 @@ export function summarizeSessionFinancials(input: {
     prepaid += sessionPrepaid;
     total += sessionTotal;
     remaining += Math.max(0, sessionTotal - sessionPrepaid);
+    receivable += sessionTotal - sessionPrepaid;
   }
 
-  return { gross, discount, prepaid, total, remaining };
+  return { gross, discount, prepaid, total, remaining, receivable };
 }
 
 export function sumTableFinancials(financials: TableFinancials[]): TableFinancials {
@@ -35,7 +37,8 @@ export function sumTableFinancials(financials: TableFinancials[]): TableFinancia
     prepaid: sum.prepaid + item.prepaid,
     total: sum.total + item.total,
     remaining: sum.remaining + item.remaining,
-  }), { gross: 0, discount: 0, prepaid: 0, total: 0, remaining: 0 });
+    receivable: sum.receivable + item.receivable,
+  }), { gross: 0, discount: 0, prepaid: 0, total: 0, remaining: 0, receivable: 0 });
 }
 
 export function calculateTableFinancials(input: {

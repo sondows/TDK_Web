@@ -21,7 +21,7 @@ export type TakeoutSession = {
   pickupCustomerId?: number | null;
   pickupCustomerName?: string | null;
   prepStatus: "ORDER_RECEIVED" | "PREPARING" | "DONE";
-  totalAmount: number;
+  receivableAmount: number;
   items: Array<{ name: string; qty: number; detail?: string }>;
 };
 
@@ -119,7 +119,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         pickupCustomerId: result.session.pickupCustomerId,
         pickupCustomerName: result.session.pickupCustomerName,
         prepStatus: "ORDER_RECEIVED",
-        totalAmount: 0,
+        receivableAmount: 0,
         items: [],
       });
     } catch (cause) {
@@ -233,7 +233,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         {session.items.length ? session.items.slice(0, 3).map((item, index) => <div className="truncate" key={`${item.name}-${index}`}>{item.name} ×{item.qty}{item.detail && <span className="ml-1 text-[10px] font-normal text-slate-500">({item.detail})</span>}{index === 2 && session.items.length > 3 ? ` · 외 ${session.items.length - 3}건` : ""}</div>) : <div>메뉴 없음</div>}
       </div>
       <div className="mt-1.5 flex min-h-9 items-center justify-between gap-1 border-t border-slate-200/70 pt-1">
-        <span className="text-sm font-extrabold text-slate-800">합계 {Math.round(session.totalAmount).toLocaleString("ko-KR")}</span>
+        <span className="min-w-0 whitespace-nowrap text-sm font-extrabold text-slate-800">받을금액 {Math.round(session.receivableAmount).toLocaleString("ko-KR")}</span>
         <div className="flex shrink-0 items-center gap-0.5">
           <button aria-label={`포장 ${formatPosTime(orderStartedAt)} 취소`} className="pos-modal-action min-h-9 rounded-lg px-2 text-xs font-medium text-slate-500 hover:text-slate-700" disabled={busy} onClick={event => { event.stopPropagation(); setCancelTarget(session); }} onKeyDown={event => event.stopPropagation()} type="button">취소</button>
           <button aria-label={`포장 ${formatPosTime(orderStartedAt)} 수정`} className="pos-modal-action min-h-9 rounded-lg px-2 text-xs font-semibold text-slate-700 hover:bg-slate-100" disabled={busy} onClick={event => { event.stopPropagation(); openEdit(session); }} onKeyDown={event => event.stopPropagation()} type="button">수정</button>
