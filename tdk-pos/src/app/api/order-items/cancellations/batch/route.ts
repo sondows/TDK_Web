@@ -7,6 +7,7 @@ import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { canEditDisplayedOrderSession } from "@/lib/party-order-access";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
+import { assertNoCompletedTakeoutPayment } from "@/lib/takeout-order-cancellation-guard";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "이물질", "클레임", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
       }
 
       const targetSessionIds = [...new Set(rows.map(row => row.sessionId))];
+      if (normalized.length) await assertNoCompletedTakeoutPayment(tx, targetSessionIds);
       const sessionItems = await tx.select({ sessionId: orders.sessionId, orderItemId: orderItems.orderItemId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})` }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).where(and(inArray(orders.sessionId, targetSessionIds), ne(orders.status, "COMPLETED")));
       const sessionCancellationRows = sessionItems.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, sessionItems.map(item => item.orderItemId))) : [];
       const existingCancelledByItem = new Map<number, number>();

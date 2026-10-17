@@ -5,6 +5,7 @@ import { getCurrentStaff, verifyPin } from "@/lib/auth";
 import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
+import { assertNoCompletedTakeoutPayment } from "@/lib/takeout-order-cancellation-guard";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "이물질", "클레임", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -22,6 +23,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
       await tx.execute(sql`SELECT order_item_id FROM order_items WHERE order_item_id = ${orderItemId} FOR UPDATE`);
       const [item] = await tx.select({ id: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, sessionId: orders.sessionId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})`, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, status: orderItems.status, orderedAt: orderItems.orderedAt, orderStatus: orders.status, sessionStatus: tableSessions.status }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).innerJoin(tableSessions, eq(orders.sessionId, tableSessions.sessionId)).where(eq(orderItems.orderItemId, orderItemId)).limit(1);
       if (!item || item.sessionStatus !== "OPEN" || item.orderStatus === "COMPLETED") throw new Error("취소할 수 없는 주문입니다.");
+      await assertNoCompletedTakeoutPayment(tx, [item.sessionId]);
       const [cancelled] = await Promise.all([tx.select({ qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(eq(orderItemCancellations.orderItemId, orderItemId))]);
       const sessionItems = await tx.select({ orderItemId: orderItems.orderItemId, qty: sql<number>`COALESCE(${orderItems.actualComponentQty}, ${orderItems.qty})` }).from(orderItems).innerJoin(orders, eq(orderItems.orderId, orders.orderId)).where(and(eq(orders.sessionId, item.sessionId), ne(orders.status, "COMPLETED")));
       const sessionCancellationRows = sessionItems.length ? await tx.select({ orderItemId: orderItemCancellations.orderItemId, qty: orderItemCancellations.cancelledQty }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, sessionItems.map(row => row.orderItemId))) : [];

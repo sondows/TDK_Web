@@ -759,7 +759,7 @@ export default function OrderSummaryPanel({
           <div className="shrink-0 pb-2.5 pt-3">
             <button
               className="min-h-14 w-full rounded-xl bg-blue-600 font-bold text-white"
-              disabled={!selected?.sessionId || total <= 0}
+              disabled={!selected?.sessionId || (total <= 0 && selected.sessionKind !== "TAKEOUT_WALK_IN" && selected.sessionKind !== "TAKEOUT_PHONE")}
               onClick={() => {
                 onBlockingUiChange(true);
                 setPaymentOpen(true);

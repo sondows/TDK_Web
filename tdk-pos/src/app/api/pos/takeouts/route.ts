@@ -1,12 +1,13 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { checkoutItems, customers, orderItemCancellations, orderItems, orders, paymentSessionAllocations, payments, staff as staffTable, tableSessions } from "@/db/schema";
+import { checkoutItems, customerPrepaidLedger, customers, orderItemCancellations, orderItems, orders, paymentSessionAllocations, payments, staff as staffTable, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { takeoutLabel } from "@/lib/takeout-label";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { isValidPickupAt, pickupAtAfterMinutes } from "@/lib/phone-takeout-time";
 import { defaultTakeoutPreparationMinutes, getTakeoutPreparationMinutes } from "@/lib/takeout-preparation-setting";
+import { hasOutstandingTakeoutPayment } from "@/lib/takeout-cancellation-payment";
 
 export const dynamic = "force-dynamic";
 
@@ -189,20 +190,22 @@ export async function DELETE(request: Request) {
       const [session] = await tx.select({ kind: tableSessions.sessionKind }).from(tableSessions)
         .where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
       if (!session || session.kind === "DINE_IN") throw new Error("포장 주문이 이미 종료되었거나 없습니다.");
-      const [payment] = await tx.select({ paymentId: paymentSessionAllocations.paymentId }).from(paymentSessionAllocations)
+      const allocatedPayments = await tx.select({ paymentId: paymentSessionAllocations.paymentId, status: payments.status, appliedAmount: paymentSessionAllocations.appliedAmount }).from(paymentSessionAllocations)
         .innerJoin(payments, eq(paymentSessionAllocations.paymentId, payments.paymentId))
-        .where(and(eq(paymentSessionAllocations.sessionId, sessionId), eq(payments.status, "APPROVED"),
-          sql`(${paymentSessionAllocations.appliedAmount} > 0 OR ${payments.amount} > 0)`)).for("update").limit(1);
+        .where(eq(paymentSessionAllocations.sessionId, sessionId)).for("update");
       const orderRows = await tx.select({ orderId: orders.orderId, status: orders.status }).from(orders).where(eq(orders.sessionId, sessionId)).for("update");
-      const linkedPayment = orderRows.length ? await tx.select({ paymentId: payments.paymentId }).from(payments)
+      const linkedPayments = orderRows.length ? await tx.select({ paymentId: payments.paymentId, status: payments.status, appliedAmount: payments.appliedAmount }).from(payments)
         .innerJoin(checkoutItems, eq(checkoutItems.checkoutId, payments.checkoutId))
         .innerJoin(orderItems, eq(orderItems.orderItemId, checkoutItems.orderItemId))
         .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
-        .where(and(eq(orders.sessionId, sessionId), eq(payments.status, "APPROVED"),
-          sql`(${payments.appliedAmount} > 0 OR ${payments.amount} > 0)`,
-          sql`NOT EXISTS (SELECT 1 FROM payment_session_allocations AS existing_allocation WHERE existing_allocation.payment_id = ${payments.paymentId})`)).for("update").limit(1) : [];
-      if (payment || linkedPayment.length) throw new Error("이 포장에는 결제 내역이 있습니다. 기존 결제취소/환불 절차를 이용해 주세요.");
-      if (orderRows.some(order => order.status === "COMPLETED")) throw new Error("결제 완료된 포장은 기존 결제취소/환불 절차를 이용해 주세요.");
+        .where(and(eq(orders.sessionId, sessionId),
+          sql`NOT EXISTS (SELECT 1 FROM payment_session_allocations AS existing_allocation WHERE existing_allocation.payment_id = ${payments.paymentId})`)).for("update") : [];
+      const relevantPayments = [...allocatedPayments, ...linkedPayments];
+      const paymentIds = [...new Set(relevantPayments.map(row => row.paymentId))];
+      const ledgerRows = paymentIds.length ? await tx.select({ paymentId: customerPrepaidLedger.paymentId, amount: customerPrepaidLedger.amount })
+        .from(customerPrepaidLedger).where(inArray(customerPrepaidLedger.paymentId, paymentIds)).for("update") : [];
+      const hasEffectivePayment = hasOutstandingTakeoutPayment(allocatedPayments, linkedPayments, ledgerRows);
+      if (hasEffectivePayment) throw new Error("이 포장에는 취소할 유효 결제 또는 고객 잔액이 남아 있습니다. 결제창에서 해당 결제를 취소한 뒤 포장을 취소해 주세요.");
       const orderIds = orderRows.map(order => order.orderId);
       const itemRows = orderIds.length ? await tx.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, qty: orderItems.qty, actualComponentQty: orderItems.actualComponentQty, unitPrice: orderItems.unitPrice, itemType: orderItems.itemType, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).for("update") : [];
       const itemIds = itemRows.map(item => item.orderItemId);

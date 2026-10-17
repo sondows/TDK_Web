@@ -193,6 +193,20 @@ async function activeCheckoutIds(tx: Parameters<Parameters<typeof db.transaction
     .map((row) => row.checkoutId))];
 }
 
+async function checkoutIdsForTakeoutCancellation(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], bill: Awaited<ReturnType<typeof currentBill>>) {
+  if (!bill.isTakeout) return activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
+  const orderItemRows = await tx.select({ orderItemId: orderItems.orderItemId }).from(orderItems)
+    .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
+    .where(inArray(orders.sessionId, bill.sessionIds));
+  const linkedIds = await activeCheckoutIds(tx, orderItemRows.map(row => row.orderItemId));
+  const allocated = await tx.select({ checkoutId: payments.checkoutId, status: checkouts.status })
+    .from(paymentSessionAllocations)
+    .innerJoin(payments, eq(payments.paymentId, paymentSessionAllocations.paymentId))
+    .innerJoin(checkouts, eq(checkouts.checkoutId, payments.checkoutId))
+    .where(inArray(paymentSessionAllocations.sessionId, bill.sessionIds));
+  return [...new Set([...linkedIds, ...allocated.filter(row => row.status === "OPEN" || row.status === "PARTIALLY_PAID" || row.status === "PAID").map(row => row.checkoutId)])];
+}
+
 async function paymentStateForCheckouts(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], checkoutIds: number[]) {
   if (!checkoutIds.length) return [];
   const rows = await tx.select({ paymentId: payments.paymentId, amount: payments.amount, appliedAmount: payments.appliedAmount, customerId: payments.customerId, customerName: customers.name, customerAutoCompletePayment: customers.autoCompletePayment, customerCouponCustomerNameSnapshot: payments.customerCouponCustomerNameSnapshot, methodCode: paymentMethods.methodCode, methodName: paymentMethods.methodName, methodNameSnapshot: paymentOtherDetails.methodNameSnapshot, quantity: paymentOtherDetails.quantity, customerCouponQuantity: payments.customerCouponQuantity, customerCouponUnitAmountSnapshot: payments.customerCouponUnitAmountSnapshot, otherSubmittedAmount: paymentOtherDetails.submittedAmount, otherChangeAmount: paymentOtherDetails.cashChangeAmount, accountInfoEnabled: paymentMethodSettings.accountInfoEnabled, autoCompleteEnabled: paymentMethodSettings.autoCompleteEnabled, paidAt: payments.paidAt, approvalNo: payments.approvalNo, note: payments.note })
@@ -254,7 +268,7 @@ async function paymentState(tx: Parameters<Parameters<typeof db.transaction>[0]>
 async function snapshot(tableId: number) {
   return db.transaction(async tx => {
     const bill = await currentBill(tx, tableId);
-    const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
+    const checkoutIds = await checkoutIdsForTakeoutCancellation(tx, bill);
     const paid = await paidForBillSessions(tx, bill);
     const checkoutRows = checkoutIds.length
       ? await tx.select({ status: checkouts.status }).from(checkouts).where(inArray(checkouts.checkoutId, checkoutIds))
@@ -323,7 +337,7 @@ export async function POST(request: Request) {
       if (action === "CANCEL_PAYMENT") {
         const paymentId = Number(body.paymentId);
         if (!Number.isInteger(paymentId) || paymentId <= 0) throw new CheckoutError("취소할 결제 건을 확인해 주세요.", 400);
-        const checkoutIds = await activeCheckoutIds(tx, bill.items.map(item => item.orderItemId));
+        const checkoutIds = await checkoutIdsForTakeoutCancellation(tx, bill);
         if (!checkoutIds.length) throw new CheckoutError("결제 정보가 변경되었습니다. 다시 확인해 주세요.", 409);
         const [target] = await tx.select({ paymentId: payments.paymentId, checkoutId: payments.checkoutId, customerId: payments.customerId, status: payments.status })
           .from(payments)

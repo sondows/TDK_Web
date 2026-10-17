@@ -68,7 +68,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
     <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} />)}</div>
     {isCreateOpen && <CreateMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
-    {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} update={updateMenu} />}
+    {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} sourceMenus={menuRows.filter(row => row.menuId !== editingMenu.menuId)} update={updateMenu} />}
   </section>;
 }
 
@@ -105,8 +105,12 @@ function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus
   </Dialog>;
 }
 
-function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, close, menu, update }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
+function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, close, menu, sourceMenus, update }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; sourceMenus: Menu[]; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
   const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>(menu.optionConfig);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [pendingCopy, setPendingCopy] = useState<Menu | null>(null);
+  const applyCopiedOptions = (source: Menu) => { setOptionConfig({ ...source.optionConfig, buttons: [...source.optionConfig.buttons] }); setCopyOpen(false); setPendingCopy(null); };
+  const requestCopy = (source: Menu) => { if (optionConfig.enabled || optionConfig.title.trim() || optionConfig.buttons.some(button => button.trim())) setPendingCopy(source); else applyCopiedOptions(source); };
   const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [menuNumberInput, setMenuNumberInput] = useState(menu.menuNumber === null ? "" : String(menu.menuNumber)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [isActive, setIsActive] = useState(menu.isActive === 1); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
   const selectImage = (file: File | undefined) => { if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 10 * 1024 * 1024) { setError("JPG, PNG, WebP 형식의 10MB 이하 이미지를 선택하세요."); return; } setError(""); setCropSource(URL.createObjectURL(file)); setZoom(1); };
   const applyCrop = async () => { if (!cropSource || !cropPixels) return; try { const image = new Image(); image.src = cropSource; await image.decode(); const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 1200; const context = canvas.getContext("2d"); if (!context) throw new Error("이미지를 처리할 수 없습니다."); context.drawImage(image, cropPixels.x, cropPixels.y, cropPixels.width, cropPixels.height, 0, 0, 1200, 1200); const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error("이미지를 처리할 수 없습니다.")), "image/webp", 0.92)); setCroppedImage(new File([blob], "menu-crop.webp", { type: "image/webp" })); setPreviewUrl(URL.createObjectURL(blob)); setRemoveImage(false); setCropSource(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "이미지를 자를 수 없습니다."); } };
@@ -123,23 +127,49 @@ function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, 
     </div>
     <ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} />
     <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
-    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} />
+    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} onCopy={() => setCopyOpen(true)} />
     {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
     <DialogFooter cancel={close} saving={saving} submit={submit} submitText="저장" />
-  </Dialog>{cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}</>;
+  </Dialog>
+    {copyOpen && <OptionCopyDialog categories={categories} close={() => setCopyOpen(false)} menus={sourceMenus} onApply={requestCopy} />}
+    {pendingCopy && <Dialog close={() => setPendingCopy(null)} compact layer="confirm" saving={false} title="옵션 덮어쓰기 확인">
+      <p className="text-sm text-slate-700">현재 옵션 설정을 {pendingCopy.name}의 옵션으로 변경하시겠습니까?</p>
+      <p className="mt-2 text-xs text-slate-500">변경한 내용은 메뉴 수정창에서 저장할 때 반영됩니다.</p>
+      <DialogFooter cancel={() => setPendingCopy(null)} saving={false} submit={() => applyCopiedOptions(pendingCopy)} submitText="변경" />
+    </Dialog>}
+    {cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}
+  </>;
 }
 
 
-function MenuChoiceEditor({ value, onChange }: { value: MenuChoiceConfig; onChange: (value: MenuChoiceConfig) => void }) {
+function MenuChoiceEditor({ value, onChange, onCopy }: { value: MenuChoiceConfig; onChange: (value: MenuChoiceConfig) => void; onCopy?: () => void }) {
   const changeCount = (count: number) => onChange({ ...value, buttons: Array.from({ length: count }, (_, index) => value.buttons[index] ?? ""), defaultIndex: value.defaultIndex < count ? value.defaultIndex : 0 });
   return <section className="mt-3 rounded-xl border border-slate-200 p-3 text-sm">
-    <div className="flex items-center justify-between gap-3"><h3 className="font-bold">옵션 설정</h3><label className="flex items-center gap-2 font-semibold">옵션 사용<input checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked, buttons: value.buttons.length >= 2 ? value.buttons : ["", ""] })} type="checkbox" /></label></div>
+    <div className="flex items-center justify-between gap-3"><h3 className="font-bold">옵션 설정</h3><div className="flex items-center gap-3">{onCopy && <button className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50" onClick={onCopy} type="button">옵션 복사</button>}<label className="flex items-center gap-2 font-semibold">옵션 사용<input checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked, buttons: value.buttons.length >= 2 ? value.buttons : ["", ""] })} type="checkbox" /></label></div></div>
     {value.enabled && <div className="mt-3 space-y-3">
       <label className="grid grid-cols-[78px_minmax(0,1fr)] items-center gap-2 font-semibold">옵션 제목<input className={inputClass} maxLength={150} onChange={event => onChange({ ...value, title: event.target.value })} value={value.title} /></label>
       <div className="flex items-center gap-3"><span className="font-semibold">버튼 수량</span>{[2,3,4].map(count => <button aria-pressed={value.buttons.length === count} className={value.buttons.length === count ? activeClass : idleClass} key={count} onClick={() => changeCount(count)} type="button">{count}개</button>)}</div>
       <div className="space-y-2">{value.buttons.map((button, index) => <div className="grid grid-cols-[68px_minmax(0,1fr)_78px] items-center gap-2" key={index}><label className="font-semibold" htmlFor={"choice-" + index}>버튼 {index + 1}</label><input className={inputClass} id={"choice-" + index} maxLength={150} onChange={event => onChange({ ...value, buttons: value.buttons.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} value={button} /><label className="flex items-center gap-1 whitespace-nowrap"><input checked={value.defaultIndex === index} name="menu-choice-default" onChange={() => onChange({ ...value, defaultIndex: index })} type="radio" />기본값</label></div>)}</div>
     </div>}
   </section>;
+}
+
+function OptionCopyDialog({ categories, menus, close, onApply }: { categories: Category[]; menus: Menu[]; close: () => void; onApply: (menu: Menu) => void }) {
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [selectedMenuId, setSelectedMenuId] = useState<number | null>(null);
+  const visibleMenus = menus.filter(menu => categoryId === null || menu.categoryId === categoryId);
+  const selectedMenu = menus.find(menu => menu.menuId === selectedMenuId && menu.optionConfig.enabled);
+  return <Dialog close={close} compact layer="above" saving={false} title="옵션 복사">
+    <p className="text-sm text-slate-700">옵션을 가져올 메뉴를 선택하세요.</p>
+    <select aria-label="원본 메뉴 카테고리" className={`${inputClass} mt-3 text-sm`} onChange={event => { setCategoryId(event.target.value ? Number(event.target.value) : null); setSelectedMenuId(null); }} value={categoryId ?? ""}>
+      <option value="">전체 카테고리</option>
+      {categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}
+    </select>
+    <div className="mt-3 max-h-64 space-y-1 overflow-y-auto" role="radiogroup" aria-label="복사할 원본 메뉴">
+      {visibleMenus.length ? visibleMenus.map(menu => <button aria-checked={selectedMenuId === menu.menuId} className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm ${selectedMenuId === menu.menuId ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"} ${menu.optionConfig.enabled ? "text-slate-800" : "cursor-not-allowed text-slate-400"}`} disabled={!menu.optionConfig.enabled} key={menu.menuId} onClick={() => setSelectedMenuId(menu.menuId)} role="radio" type="button"><span className="min-w-0 truncate font-semibold">{menu.name}</span><span className="shrink-0 text-xs">{menu.optionConfig.enabled ? menu.optionConfig.title : "옵션 없음"}</span></button>) : <p className="py-6 text-center text-sm text-slate-500">선택할 메뉴가 없습니다.</p>}
+    </div>
+    <footer className="mt-4 grid grid-cols-2 gap-3"><button className="min-h-11 rounded-xl border border-slate-300 bg-white font-bold" onClick={close} type="button">취소</button><button className="min-h-11 rounded-xl bg-blue-600 font-bold text-white disabled:bg-slate-300" disabled={!selectedMenu} onClick={() => selectedMenu && onApply(selectedMenu)} type="button">적용</button></footer>
+  </Dialog>;
 }
 
 const inputClass = "min-h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3";
@@ -184,9 +214,9 @@ function MenuComponentsEditor({ componentMenus, components, setComponents }: { c
     </div>
   </section>;
 }
-function Dialog({ close, saving, title, children }: { close: () => void; saving: boolean; title: string; children: React.ReactNode }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onClick={() => !saving && close()}>
-    <section aria-modal="true" className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
+function Dialog({ close, saving, title, children, compact = false, layer = "base" }: { close: () => void; saving: boolean; title: string; children: React.ReactNode; compact?: boolean; layer?: "base" | "above" | "confirm" }) {
+  return <div className={`fixed inset-0 flex items-center justify-center bg-slate-950/40 p-4 ${layer === "confirm" ? "z-[70]" : layer === "above" ? "z-[60]" : "z-50"}`} onClick={() => !saving && close()}>
+    <section aria-modal="true" className={`flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-xl ${compact ? "max-w-sm" : "max-w-lg"}`} onClick={event => event.stopPropagation()} role="dialog">
       <div className="shrink-0"><PosSubHeader disabled={saving} onBack={close} title={title} /></div>
       <div className="min-h-0 overflow-y-auto p-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">{children}</div>
     </section>
