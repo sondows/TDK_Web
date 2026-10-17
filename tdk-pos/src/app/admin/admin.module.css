@@ -20,6 +20,10 @@
   padding: 0 32px;
 }
 
+.mobileMenuButton,
+.mobileOverlay,
+.mobileDrawer { display: none; }
+
 .brand {
   color: #455a64;
   font-size: 20px;
@@ -108,6 +112,10 @@
 }
 
 .sidebar {
+  min-height: 0;
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid #dce3e7;
   background: #fff;
   padding: 24px 12px;
@@ -117,10 +125,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .navLink {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 40px;
   align-items: center;
   border-radius: 5px;
@@ -148,10 +160,24 @@
 }
 
 .navLinkChild { padding-left: 30px; }
-.navLinkParentActive { background: #f2f5f6; }
-.navSectionHeading { color: #344e5a; font-weight: 700; cursor: default; }
-.navSectionHeading:hover { color: #344e5a; background: transparent; }
-.navSectionHeading.navLinkParentActive:hover { background: #f2f5f6; }
+.navGroup { min-width: 0; }
+.navGroupToggle {
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.navGroupToggle:hover { background: #f2f5f6; color: #344b56; }
+.navGroupToggle:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+.navChevron { width: 16px; height: 16px; flex: 0 0 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; transition: transform 180ms ease; }
+.navChevronExpanded { transform: rotate(90deg); }
+.navChildren { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 180ms ease, opacity 180ms ease; }
+.navChildrenOpen { grid-template-rows: 1fr; opacity: 1; }
+.navChildrenInner { min-height: 0; overflow: hidden; margin: 2px 0 4px 17px; border-left: 1px solid #dce3e7; padding-left: 8px; }
+.navLinkChild { min-height: 38px; padding-left: 12px; font-size: 13px; }
 
 .main {
   min-width: 0;
@@ -790,8 +816,8 @@
   line-height: 1.6;
 }
 
-.dashboardSummary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
-.dashboardStat { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #dce3e7; background: #fff; padding: 10px 16px; }
+.dashboardSummary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.dashboardStat { display: flex; min-width: 0; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #dce3e7; background: #fff; padding: 10px 16px; }
 .dashboardStat span { color: #60717a; font-size: 13px; }
 .dashboardStat strong { color: #344e5a; font-size: 16px; font-weight: 700; text-align: right; }
 .dashboardSales { border: 1px solid #dce3e7; background: #fff; }
@@ -818,6 +844,8 @@
 .dashboardSalesTable td:nth-child(6) { width: 15%; text-align: center; white-space: nowrap; }
 .dashboardSaleRow { cursor: pointer; }
 .dashboardSaleRow:hover, .dashboardSaleRow:focus-visible { background: #f2f5f6; outline: 2px solid #b7cbd4; outline-offset: -2px; }
+.dashboardSalesTableWrap { min-width: 0; }
+.dashboardMobileSales { display: none; }
 .dashboardError { padding: 12px 20px; color: #bc3535; font-size: 13px; }
 .dashboardDetail { width: min(546px, calc(100vw - 32px)); border-radius: 16px; }
 .dashboardDetailDeleteButton { border: 0; border-radius: 6px; background: transparent; padding: 6px 8px; color: #fecaca; font-size: 14px; font-weight: 700; }
@@ -884,4 +912,102 @@
   .welcome {
     padding: 22px 20px;
   }
+}
+
+@media (max-width: 767px) {
+  .header {
+    box-sizing: border-box;
+    height: auto;
+    min-height: calc(56px + env(safe-area-inset-top, 0px));
+    flex-basis: auto;
+    gap: 8px;
+    padding: env(safe-area-inset-top, 0px) 12px 0;
+  }
+
+  .mobileMenuButton {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #344e5a;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobileMenuButton svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 2; }
+  .mobileMenuButton:hover { background: #f2f5f6; }
+  .mobileMenuButton:focus-visible, .mobileDrawerClose:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+  .brand { font-size: 18px; }
+  .userArea { min-width: 0; gap: 8px; }
+  .logoutButton { min-height: 40px; padding: 6px 9px; }
+
+  .workspace { display: block; min-height: 0; width: 100%; }
+  .workspace > .sidebar { display: none; }
+  .main { box-sizing: border-box; width: 100%; min-width: 0; padding: 22px 12px calc(36px + env(safe-area-inset-bottom, 0px)); }
+  .content { min-width: 0; }
+
+  .mobileOverlay {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: rgb(19 31 38 / 38%);
+  }
+
+  .mobileDrawer {
+    position: fixed;
+    z-index: 101;
+    inset: 0 auto 0 0;
+    display: flex;
+    width: min(320px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    flex-direction: column;
+    overflow: hidden;
+    background: #fff;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 8px 0 24px rgb(22 37 45 / 14%);
+  }
+
+  .mobileDrawerHeader { display: flex; min-height: 56px; flex: 0 0 56px; align-items: center; justify-content: space-between; border-bottom: 1px solid #dce3e7; padding: 0 12px 0 20px; color: #344e5a; }
+  .mobileDrawerHeader strong { font-size: 16px; }
+  .mobileDrawerClose { width: 44px; height: 44px; border: 0; border-radius: 6px; background: transparent; color: #52636c; font-size: 28px; line-height: 1; cursor: pointer; }
+  .mobileDrawerClose:hover { background: #f2f5f6; }
+  .mobileDrawerSidebar { min-height: 0; max-height: none; flex: 1; overflow-y: auto; overscroll-behavior: contain; border: 0; padding: 12px; }
+  .mobileDrawerSidebar .navLink { min-height: 48px; }
+
+  .dashboardSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .dashboardStat { min-height: 70px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px; padding: 10px 11px; user-select: none; -webkit-user-select: none; }
+  .dashboardStat span { max-width: 100%; overflow-wrap: anywhere; font-size: 12px; line-height: 1.3; }
+  .dashboardStat strong { max-width: 100%; align-self: stretch; overflow-wrap: anywhere; font-size: clamp(12px, 3.6vw, 15px); line-height: 1.2; text-align: left; }
+  .dashboardSalesHeading { align-items: flex-start; flex-direction: column; gap: 5px; padding: 14px 14px 12px; }
+  .dashboardSalesHeading h2 { font-size: 17px; }
+  .dashboardSalesHeading span { font-size: 12px; }
+  .dashboardSalesTableWrap { display: none; }
+  .dashboardMobileSales { display: grid; min-width: 0; gap: 8px; padding: 0 10px 12px; }
+  .dashboardSaleCard { display: flex; width: 100%; min-width: 0; min-height: 112px; flex-direction: column; align-items: stretch; gap: 5px; border: 1px solid #dce3e7; border-radius: 6px; background: #fff; padding: 11px 12px; color: #25343b; font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .dashboardSaleCard:hover, .dashboardSaleCard:active { background: #f5f8f9; }
+  .dashboardSaleCard:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+  .dashboardSaleCardTop, .dashboardSaleCardBottom { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; }
+  .dashboardSaleCardTop { color: #60717a; font-size: 12px; }
+  .dashboardSaleCardTop time { font-weight: 700; }
+  .dashboardSalePlace { overflow: hidden; color: #344e5a; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+  .dashboardSaleMenu { display: -webkit-box; min-width: 0; overflow: hidden; color: #52636c; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .dashboardSaleCardBottom { margin-top: auto; color: #60717a; font-size: 12px; }
+  .dashboardSaleCardBottom > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dashboardSaleCardBottom strong { flex: 0 0 auto; color: #344e5a; font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .dashboardMobileEmpty { padding: 20px 8px; color: #60717a; font-size: 14px; text-align: center; }
+}
+
+@media (max-width: 480px) {
+  .userArea > span { display: none; }
 }

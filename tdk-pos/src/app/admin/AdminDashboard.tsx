@@ -6,7 +6,7 @@ import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import PosSubHeader from "@/app/pos/PosSubHeader";
 import styles from "./admin.module.css";
 
-type Summary = { total: number; totalCount: number; card: number; cardCount: number; cash: number; cashCount: number; other: number; otherCount: number; discount: number; discountCount: number; completedCount: number; cancelledCount: number };
+type Summary = { total: number; totalCount: number; pending: number; salesIncludingPending: number; card: number; cardCount: number; cash: number; cashCount: number; other: number; otherCount: number; discount: number; discountCount: number; completedCount: number; cancelledCount: number };
 type PaymentMethodOption = { paymentMethodId: number; methodName: string; methodCode: string; methodType: string };
 type CorrectionCustomer = { customerId: number; displayName: string };
 type DashboardResponse = { success: boolean; date?: string; summary?: Summary; sales?: SaleListItem[]; availableMethods?: PaymentMethodOption[]; customerPaymentMethodId?: number | null; correctionCustomers?: CorrectionCustomer[]; message?: string };
@@ -126,22 +126,32 @@ export default function AdminDashboard() {
     <div className={styles.pageHeading}><h1>오늘 매출</h1><p className={styles.pageDescription}>오늘의 결제와 판매내역을 확인합니다.</p></div>
     {error && <p className={styles.dashboardError} role="alert">{error}</p>}
     <section className={styles.dashboardSummary} aria-label="오늘 매출 요약">
+      <div className={styles.dashboardStat}><span>미결포함 총매출</span><strong>{loading ? "—" : money(summary?.salesIncludingPending ?? 0)}</strong></div>
+      <div className={styles.dashboardStat}><span>총매출</span><strong>{loading ? "—" : `${money(summary?.total ?? 0)} (${summary?.totalCount ?? 0})`}</strong></div>
+      <div className={styles.dashboardStat}><span>미결제</span><strong>{loading ? "—" : money(summary?.pending ?? 0)}</strong></div>
+      <div className={styles.dashboardStat}><span>결제완료 / 취소</span><strong>{loading ? "—" : `${summary?.completedCount ?? 0} / ${summary?.cancelledCount ?? 0}`}</strong></div>
       {([
-        { label: "오늘 총매출", amount: summary?.total, count: summary?.totalCount },
         { label: "카드", amount: summary?.card, count: summary?.cardCount },
         { label: "현금", amount: summary?.cash, count: summary?.cashCount },
         { label: "기타결제", amount: summary?.other, count: summary?.otherCount },
         { label: "할인", amount: summary?.discount, count: summary?.discountCount },
       ]).map(({ label, amount, count }) => <div className={styles.dashboardStat} key={label}><span>{label}</span><strong>{loading ? "—" : `${money(amount ?? 0)} (${count ?? 0})`}</strong></div>)}
-      <div className={styles.dashboardStat}><span>결제완료 / 취소</span><strong>{loading ? "—" : `${summary?.completedCount ?? 0} / ${summary?.cancelledCount ?? 0}`}</strong></div>
     </section>
     <section className={styles.dashboardSales} aria-labelledby="today-sales-title">
       <div className={styles.dashboardSalesHeading}><h2 id="today-sales-title">오늘 판매내역</h2><span>{data?.date ?? ""}</span></div>
-      <div className={styles.customerTableScroll}><table className={`${styles.customerTable} ${styles.dashboardSalesTable}`}><thead><tr><th>시간</th><th>테이블</th><th>메뉴</th><th>결제금액</th><th>결제수단</th><th>거래상태</th></tr></thead>
+      <div className={`${styles.customerTableScroll} ${styles.dashboardSalesTableWrap}`}><table className={`${styles.customerTable} ${styles.dashboardSalesTable}`}><thead><tr><th>시간</th><th>테이블</th><th>메뉴</th><th>결제금액</th><th>결제수단</th><th>거래상태</th></tr></thead>
         <tbody>{!loading && !data?.sales?.length ? <tr><td colSpan={6} className={styles.customerEmpty}>오늘 판매내역이 없습니다.</td></tr> : data?.sales?.map(sale =>
           <tr key={sale.checkoutId} className={styles.dashboardSaleRow} onClick={() => void openDetail(sale.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(sale.checkoutId); } }} role="button" tabIndex={0} aria-label={`${sale.tableLabel} ${sale.menuSummary} 거래 상세 보기`}>
             <td>{clockTime(sale.occurredAt)}</td><td>{sale.tableLabel}</td><td>{sale.menuSummary.replace(/ 외 (\d+)건$/, " 외 $1")}</td><td>{money(sale.totalAmount)}</td><td>{sale.paymentMethods}</td><td>{labels[sale.status]}</td>
           </tr>)}</tbody></table></div>
+      <div className={styles.dashboardMobileSales} aria-label="오늘 판매내역 목록">
+        {!loading && !data?.sales?.length ? <p className={styles.dashboardMobileEmpty}>오늘 판매내역이 없습니다.</p> : data?.sales?.map(sale => <button type="button" key={sale.checkoutId} className={styles.dashboardSaleCard} onClick={() => void openDetail(sale.checkoutId)} aria-label={`${sale.tableLabel}, ${sale.menuSummary}, ${labels[sale.status]} 거래 상세 보기`}>
+          <span className={styles.dashboardSaleCardTop}><time>{clockTime(sale.occurredAt)}</time><span>{labels[sale.status]}</span></span>
+          <strong className={styles.dashboardSalePlace}>{sale.tableLabel}</strong>
+          <span className={styles.dashboardSaleMenu}>{sale.menuSummary.replace(/ 외 (\d+)건$/, " 외 $1")}</span>
+          <span className={styles.dashboardSaleCardBottom}><span>{sale.paymentMethods}</span><strong>{money(sale.totalAmount)}</strong></span>
+        </button>)}
+      </div>
     </section>
     <dialog ref={detailDialog} className={`${styles.customerModal} ${styles.dashboardDetail}`} onClose={() => setDetail(null)}>
       {detail && <><PosSubHeader backIconSize={19} backLabel="판매내역으로 돌아가기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={<button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />

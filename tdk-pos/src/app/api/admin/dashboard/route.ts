@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { checkouts, customers, paymentMethods, payments } from "@/db/schema";
 import { GET as getSales } from "@/app/api/sales/route";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
 import type { SaleDetailResponse, SalesListResponse } from "@/lib/sales-types";
 
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", {
@@ -51,8 +52,10 @@ export async function GET(request: Request) {
     const correctionCustomers = await db.select({ customerId: customers.customerId, name: customers.name, phone: customers.phone })
       .from(customers).where(and(eq(customers.isActive, 1), eq(customers.isPaymentManaged, 1))).orderBy(asc(customers.name), asc(customers.customerId));
     const ids = sales.map(sale => sale.checkoutId);
+    const pending = await loadCurrentPendingSales();
     const summary = { total: 0, totalCount: 0, card: 0, cardCount: 0, cash: 0, cashCount: 0, other: 0, otherCount: 0,
-      discount: 0, discountCount: 0, completedCount: 0, cancelledCount: 0 };
+      discount: 0, discountCount: 0, completedCount: 0, cancelledCount: 0,
+      pending: pending.amount, salesIncludingPending: pending.amount };
     if (ids.length) {
       const [checkoutRows, paymentRows] = await Promise.all([
         db.select({ checkoutId: checkouts.checkoutId, discountAmount: checkouts.discountAmount })
@@ -77,6 +80,7 @@ export async function GET(request: Request) {
     }
     summary.completedCount = sales.filter(sale => sale.status === "COMPLETED" || sale.status === "PARTIALLY_CANCELLED").length;
     summary.cancelledCount = sales.filter(sale => sale.status === "CANCELLED" || sale.status === "PARTIALLY_CANCELLED").length;
+    summary.salesIncludingPending = summary.total + pending.amount;
     return Response.json({ success: true, date: today, summary, sales, availableMethods,
       customerPaymentMethodId: customerPaymentMethod?.paymentMethodId ?? null,
       correctionCustomers: correctionCustomers.map(customer => ({ customerId: customer.customerId, displayName: customer.name?.trim() || customer.phone?.trim() || "—" })) });
