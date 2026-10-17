@@ -1,12 +1,13 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { formatMoney as formatPosMoney } from "@/lib/format-money";
 import { initialAdultCountFromStewOrder } from "@/lib/initial-table-person-count";
 import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
 import { partyPeerTableNos } from "@/lib/pos-party-peers";
 import { formatSessionElapsed } from "@/lib/session-time";
+import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { openCashDrawer } from "@/lib/cash-drawer";
 import { printReceipt } from "@/lib/receipt-print";
 import { requestSystemShutdown } from "@/lib/system-shutdown";
@@ -32,7 +33,7 @@ type Menu = { menuId: number; categoryId: number | null; menuNumber: number | nu
 type MenuComponent = { menuComponentId: number; menuId: number; componentMenuId: number; itemName: string; price: string; quantity: number; printOnKitchen: number; printOnReceipt: number; sortOrder: number };
 type SelectedMenuComponent = { menuComponentId: number; qty: number };
 type Category = { categoryId: number; name: string };
-type MenuModifier = { menuId: number; modifierGroupId: number; groupName: string; groupSortOrder: number; modifierOptionId: number; optionName: string; priceDelta: string; optionSortOrder: number };
+type MenuModifier = { menuId: number; modifierGroupId: number; groupName: string; groupSortOrder: number; modifierOptionId: number; optionName: string; priceDelta: string; optionSortOrder: number; choiceDefaultOptionId: number | null };
 type MenuCatalog = { menus: Menu[]; categories: Category[]; modifiers: MenuModifier[]; components: MenuComponent[] };
 type MenuCatalogResponse = { success: boolean; changed?: boolean; version?: string; message?: string } & Partial<MenuCatalog>;
 type Order = { sessionId: number; orderId: number; orderedAt: Date; status: string };
@@ -260,11 +261,8 @@ export default function PosShell({ staffName, staffRole, tables, takeouts, menus
   setSubmittingOrder(false);
  };
  const defaultCartOptions = (menu: Menu): PendingCartItem["options"] => {
-  const modifiers = menuModifiers.filter(modifier => modifier.menuId === menu.menuId);
-  const spiceGroup = modifiers.find(modifier => modifier.groupName === "매운맛");
-  const spiceOptions = modifiers.filter(modifier => modifier.modifierGroupId === spiceGroup?.modifierGroupId).sort((a, b) => a.optionSortOrder - b.optionSortOrder);
-  const selectedSpice = spiceOptions.find(option => option.optionName === "약간매운맛") ?? spiceOptions[0];
-  return selectedSpice ? [{ modifierGroupId: selectedSpice.modifierGroupId, modifierOptionId: selectedSpice.modifierOptionId, optionName: selectedSpice.optionName, priceDelta: Number(selectedSpice.priceDelta), qty: 1 }] : [];
+  const { selected } = getMenuChoice(menuModifiers.filter(modifier => modifier.menuId === menu.menuId));
+  return selected ? [{ modifierGroupId: selected.modifierGroupId, modifierOptionId: selected.modifierOptionId, optionName: selected.optionName, priceDelta: Number(selected.priceDelta), qty: 1 }] : [];
  };
  const quickAddToCart = (menu: Menu) => { if (!canOrderMenu) return; addToCart(menu, Number(menu.price), 1, defaultCartOptions(menu)); };
  const openQuantityModal = (menu: Menu) => { if (canOrderMenu) { setQuantityMenuConfig({ components: componentsForMenu(menu.menuId), modifiers: menuModifiers.filter(modifier => modifier.menuId === menu.menuId) }); setQuantityMenu(menu); } };
@@ -539,7 +537,7 @@ export default function PosShell({ staffName, staffRole, tables, takeouts, menus
   setOrderError("");
  }
  function takeoutCreated(session: TakeoutSession) {
-  setNewTakeouts(current => [...current, { ...session, tableName: null, capacity: 0, positionX: 0, positionY: 0, layoutWidth: 0, layoutHeight: 0, rotation: 0, amountDue: 0, prepaidAmount: 0, paymentTotal: 0, groupId: null, personCount: 0, babyCount: 0, openedAt: new Date().toISOString(), mergedSourceTableNos: [], mergedSourceSessionIds: [] }]);
+  setNewTakeouts(current => [...current, { ...session, tableName: null, capacity: 0, positionX: 0, positionY: 0, layoutWidth: 0, layoutHeight: 0, rotation: 0, amountDue: 0, prepaidAmount: 0, paymentTotal: 0, groupId: null, personCount: 0, babyCount: 0, mergedSourceTableNos: [], mergedSourceSessionIds: [] }]);
   selectTakeout(session);
   router.refresh();
  }
@@ -590,14 +588,85 @@ function TableVisual({ table, tables, selected, selectedGroupId, choose }: { tab
  const grouped = selectedGroupId !== null && table.groupId === selectedGroupId && !selected;
  return <TableShape {...table} fixedPosition={posMainFixedTablePosition(table)} grouped={grouped} partyRelationHighlight={grouped && !selected} partyTableNos={partyPeerTableNos(table, tables)} posMainTable guestCount={guestCount} hasOpenSession={table.sessionId !== null} sageOccupied hasQrOrder={table.hasQrOrder} qrLanguageCode={table.qrLanguageCode} onClick={choose} partyHighlight={selected && selectedGroupId !== null} selected={selected} thickSelection={selected} startedAt={table.openedAt} tableNumber={table.tableNo} />;
 }
+function ProvisionSegmentedToggle({ label, enabled, onChange }: { label: string; enabled: boolean; onChange: (enabled: boolean) => void }) {
+ const gestureRef = useRef<{ pointerId: number; startX: number; startOffset: number; segmentWidth: number; dragged: boolean; offset: number } | null>(null);
+ const clickSuppressionRef = useRef(false);
+ const clickTimerRef = useRef<number | null>(null);
+ const snapTimerRef = useRef<number | null>(null);
+ const snapFrameRef = useRef<number | null>(null);
+ const [dragOffset, setDragOffset] = useState<number | null>(null);
+ const [dragging, setDragging] = useState(false);
+ useEffect(() => () => { if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current); if (snapTimerRef.current !== null) window.clearTimeout(snapTimerRef.current); if (snapFrameRef.current !== null) window.cancelAnimationFrame(snapFrameRef.current); }, []);
+ const snapTo = (from: number, to: number) => {
+  setDragging(false);
+  setDragOffset(from);
+  if (snapTimerRef.current !== null) window.clearTimeout(snapTimerRef.current);
+  if (snapFrameRef.current !== null) window.cancelAnimationFrame(snapFrameRef.current);
+  snapFrameRef.current = window.requestAnimationFrame(() => {
+   setDragOffset(to);
+   snapFrameRef.current = null;
+   snapTimerRef.current = window.setTimeout(() => { setDragOffset(null); snapTimerRef.current = null; }, 200);
+  });
+ };
+ const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+  if (snapTimerRef.current !== null) window.clearTimeout(snapTimerRef.current);
+  if (snapFrameRef.current !== null) window.cancelAnimationFrame(snapFrameRef.current);
+  const segmentWidth = event.currentTarget.querySelector("button")?.getBoundingClientRect().width ?? 64;
+  const startOffset = enabled ? segmentWidth : 0;
+  gestureRef.current = { pointerId: event.pointerId, startX: event.clientX, startOffset, segmentWidth, dragged: false, offset: startOffset };
+  event.currentTarget.setPointerCapture(event.pointerId);
+ };
+ const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const gesture = gestureRef.current;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  const delta = event.clientX - gesture.startX;
+  if (!gesture.dragged && Math.abs(delta) < 6) return;
+  gesture.dragged = true;
+  gesture.offset = Math.min(gesture.segmentWidth, Math.max(0, gesture.startOffset + delta));
+  setDragging(true);
+  setDragOffset(gesture.offset);
+ };
+ const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const gesture = gestureRef.current;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  gestureRef.current = null;
+  const offset = Math.min(gesture.segmentWidth, Math.max(0, gesture.startOffset + event.clientX - gesture.startX));
+  const next = gesture.dragged ? offset >= gesture.segmentWidth / 2 : event.clientX >= event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2;
+  if (gesture.dragged) snapTo(offset, next ? gesture.segmentWidth : 0);
+  else { setDragging(false); setDragOffset(null); }
+  onChange(next);
+  clickSuppressionRef.current = true;
+  if (clickTimerRef.current !== null) window.clearTimeout(clickTimerRef.current);
+  clickTimerRef.current = window.setTimeout(() => { clickSuppressionRef.current = false; clickTimerRef.current = null; }, 0);
+  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+ };
+ const handlePointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const gesture = gestureRef.current;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  gestureRef.current = null;
+  if (gesture.dragged) snapTo(gesture.offset, gesture.startOffset);
+  else { setDragging(false); setDragOffset(null); }
+  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+ };
+ return <div className="flex min-h-11 items-center justify-center gap-2 px-2">
+  <span className="whitespace-nowrap text-sm font-semibold text-slate-800">{label}</span>
+  <div aria-label={`${label} 제공 여부`} className="relative inline-grid shrink-0 grid-cols-2 rounded-full bg-slate-100 p-1 touch-pan-y" onClickCapture={event => { if (clickSuppressionRef.current && event.detail > 0) { event.preventDefault(); event.stopPropagation(); clickSuppressionRef.current = false; } }} onLostPointerCapture={handlePointerCancel} onPointerCancel={handlePointerCancel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} role="group">
+   <div aria-hidden="true" className="pointer-events-none absolute inset-1 grid grid-cols-2"><span className={`col-start-1 rounded-full ${dragging ? "transition-none" : "transition-[transform,background-color] duration-200 ease-out motion-reduce:transition-none"} ${enabled ? "bg-blue-600" : "bg-slate-300"}`} style={{ transform: dragOffset === null ? `translateX(${enabled ? "100%" : "0%"})` : `translateX(${dragOffset}px)` }} /></div>
+   <button aria-pressed={!enabled} className={`relative z-10 h-10 w-16 rounded-full text-xs font-extrabold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${enabled ? "text-slate-500" : "text-slate-800"}`} onClick={() => onChange(false)} type="button">미제공</button>
+   <button aria-pressed={enabled} className={`relative z-10 h-10 w-16 rounded-full text-xs font-extrabold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${enabled ? "text-white" : "text-slate-500"}`} onClick={() => onChange(true)} type="button">제공</button>
+  </div>
+ </div>;
+}
 function QuantityModal({ menu, modifiers, components, stale, close, add }: { menu: Menu; modifiers: MenuModifier[]; components: MenuComponent[]; stale: boolean; close: () => void; add: (unitPrice: number, qty: number, options: PendingCartItem["options"], components: SelectedMenuComponent[], isComplimentary: boolean) => void }) {
  const [unitPrice, setUnitPrice] = useState(() => Number(menu.price)); const [qty, setQty] = useState(1); const [quickQty, setQuickQty] = useState<number | null>(null); const [expanded, setExpanded] = useState(false); const [buffer, setBuffer] = useState(""); const [validationMessage, setValidationMessage] = useState("");
  const [activeInputField, setActiveInputField] = useState<"price" | "qty" | null>(null);
  const addInProgressRef = useRef(false);
  const [isComplimentary, setIsComplimentary] = useState(false);
  const [componentEnabled, setComponentEnabled] = useState<Record<number, boolean>>(() => Object.fromEntries(components.map(component => [component.menuComponentId, true])) as Record<number, boolean>);
- const spiceGroup = modifiers.find(modifier => modifier.groupName === "매운맛"); const spiceOptions = modifiers.filter(modifier => modifier.modifierGroupId === spiceGroup?.modifierGroupId).sort((a, b) => a.optionSortOrder - b.optionSortOrder); const defaultSpice = spiceOptions.find(option => option.optionName === "약간매운맛") ?? spiceOptions[0]; const [selectedSpiceId, setSelectedSpiceId] = useState<number | null>(() => defaultSpice?.modifierOptionId ?? null);
- const formatMoney = (value: number) => formatPosMoney(value); const quickLabel = (value: number) => components.length ? `${value}` : `${value}개`; const selectedSpice = spiceOptions.find(option => option.modifierOptionId === selectedSpiceId); const options = selectedSpice ? [{ modifierGroupId: selectedSpice.modifierGroupId, modifierOptionId: selectedSpice.modifierOptionId, optionName: selectedSpice.optionName, priceDelta: Number(selectedSpice.priceDelta), qty: 1 }] : [];
+ const { title: choiceTitle, options: choiceOptions, selected: defaultChoice } = getMenuChoice(modifiers);
+ const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(() => defaultChoice?.modifierOptionId ?? null);
+ const formatMoney = (value: number) => formatPosMoney(value); const quickLabel = (value: number) => components.length ? `${value}` : `${value}개`; const selectedChoice = choiceOptions.find(option => option.modifierOptionId === selectedChoiceId); const options = selectedChoice ? [{ modifierGroupId: selectedChoice.modifierGroupId, modifierOptionId: selectedChoice.modifierOptionId, optionName: selectedChoice.optionName, priceDelta: Number(selectedChoice.priceDelta), qty: 1 }] : [];
  const selectedComponentsForQty = (parentQty: number) => components.map(component => ({ menuComponentId: component.menuComponentId, qty: (componentEnabled[component.menuComponentId] ?? true) ? component.quantity * parentQty : 0 }));
  const confirmAdd = (selectedQty: number) => { if (addInProgressRef.current) return; if (stale) { setValidationMessage("메뉴 정보가 변경되었습니다. 창을 닫고 메뉴를 다시 선택해 주세요."); return; } if (!Number.isSafeInteger(selectedQty) || selectedQty < 1 || !Number.isFinite(unitPrice) || unitPrice < 0) { setValidationMessage("수량과 금액을 확인하세요."); return; } addInProgressRef.current = true; setValidationMessage(""); try { add(unitPrice, selectedQty, options, selectedComponentsForQty(selectedQty), isComplimentary); } catch { addInProgressRef.current = false; setValidationMessage("주문 추가에 실패했습니다. 다시 시도하세요."); } };
  const addToCart = () => confirmAdd(qty);
@@ -606,7 +675,7 @@ function QuantityModal({ menu, modifiers, components, stale, close, add }: { men
  const handleKeypad = (key: string) => { if (key === "C") { setBuffer(""); return; } if (key === "00") { setBuffer(value => value ? `${value}00` : ""); return; } setBuffer(value => `${value}${key}`.replace(/^0+(?=\d)/, "")); };
  useEffect(() => { const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); }, [close]);
  return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-4" onClick={close}>
-  <section aria-labelledby="quantity-modal-title" aria-modal="true" className={`flex h-auto flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-xl transition-[width,max-width] duration-200 ease-out ${expanded ? "min-h-[28.5rem] w-full max-w-[calc(100vw-2rem)] md:max-w-2xl" : "min-h-[24.5rem] w-[520px] max-w-[calc(100vw-4rem)]"}`} data-expanded={expanded} onClick={event => event.stopPropagation()} role="dialog">
+  <section aria-labelledby="quantity-modal-title" aria-modal="true" className={`flex h-auto flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-xl transition-[width,max-width] duration-200 ease-out ${expanded ? "min-h-[28.5rem] w-full max-w-[calc(100vw-2rem)] md:max-w-2xl" : `${choiceOptions.length ? "min-h-[24.5rem]" : ""} w-[520px] max-w-[calc(100vw-4rem)]`}`} data-expanded={expanded} onClick={event => event.stopPropagation()} role="dialog">
    <header className="-mx-5 -mt-5 mb-5 flex min-h-[70px] shrink-0 items-center justify-between gap-4 bg-[#455A64] px-5 py-3 text-white">
     <div className="flex min-w-0 flex-1 items-center gap-3">
      <AdminBackLink ariaLabel="메뉴 선택 닫기" onNavigate={close} size={46} title="메뉴 선택 닫기" tone="dark" />
@@ -617,20 +686,14 @@ function QuantityModal({ menu, modifiers, components, stale, close, add }: { men
    </header>
    <div className={`grid min-h-0 flex-1 ${expanded ? "grid-cols-[minmax(0,1fr)_13.5rem]" : "grid-cols-1"}`}>
     <div className={`${expanded ? "pr-4" : ""} pt-1.5`}>
-     <div className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 shadow-[2px_3px_6px_rgba(15,23,42,0.08)]">
+     <div className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3">
       <div className="grid w-full grid-cols-[108px_108px] justify-evenly gap-y-5">{[1,2,3,4].map(value => <button aria-pressed={quickQty === value} className="h-[84px] w-[108px] rounded-lg border border-slate-300 bg-slate-50 text-xl font-extrabold text-slate-800 shadow-none transition hover:bg-slate-100 active:bg-slate-200 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" key={value} onClick={() => chooseQuick(value)} type="button">{quickLabel(value)}</button>)}</div>
      </div>
-     {spiceOptions.length > 0 && <div className="mt-4 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-[2px_3px_6px_rgba(15,23,42,0.08)]"><div className="grid grid-cols-4 gap-1.5">{spiceOptions.map((option, index) => <button className={`min-h-[52px] whitespace-nowrap rounded-lg px-2 text-[11px] font-bold ${selectedSpiceId === option.modifierOptionId ? "border border-red-600 bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}`} key={option.modifierOptionId} onClick={() => setSelectedSpiceId(option.modifierOptionId)} type="button">{index} {option.optionName}</button>)}</div></div>}
-     <div className="mt-4 grid w-full grid-cols-2 rounded-xl border border-slate-200 bg-white p-3 shadow-[2px_3px_6px_rgba(15,23,42,0.08)]">
-      <div className="grid min-h-11 grid-cols-[minmax(0,1fr)_60px_minmax(0,1fr)] items-center gap-2 px-4">
-       <span className="truncate text-right text-sm font-semibold text-slate-800">무료</span>
-       <button aria-checked={isComplimentary} aria-label="무료제공" className={`min-h-10 min-w-[60px] shrink-0 rounded-full px-2 text-xs font-extrabold shadow-none transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${isComplimentary ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`} onClick={() => setIsComplimentary(value => !value)} role="switch" type="button">{isComplimentary ? "ON" : "OFF"}</button>
-       <span className="whitespace-nowrap text-left text-xs font-semibold text-slate-500">{isComplimentary ? "제공" : "미제공"}</span>
-      </div>
+     {choiceOptions.length > 0 && <div className="mt-4 w-full rounded-xl border border-slate-200 bg-white p-2"><p className="mb-2 text-xs font-bold text-slate-600 select-none">{choiceTitle}</p><div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${choiceOptions.length}, minmax(0, 1fr))` }}>{choiceOptions.map((option, index) => <button className={`min-h-[52px] rounded-lg px-2 text-[11px] font-bold ${selectedChoiceId === option.modifierOptionId ? "border border-red-600 bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}`} key={option.modifierOptionId} onClick={() => setSelectedChoiceId(option.modifierOptionId)} type="button">{index} {option.optionName}</button>)}</div></div>}
+     <div className="mt-4 grid w-full grid-cols-2 rounded-xl border border-slate-200 bg-white p-3 select-none">
+      <ProvisionSegmentedToggle enabled={isComplimentary} label="무료" onChange={setIsComplimentary} />
       <div className="min-w-0 space-y-1 border-l border-slate-200 px-2">
-       <div className="translate-x-5 space-y-1">
-        {components.map(component => { const enabled = componentEnabled[component.menuComponentId] ?? true; return <div className="grid min-h-11 grid-cols-[max-content_60px_max-content] items-center justify-start gap-1" key={component.menuComponentId}><span className="whitespace-nowrap text-right text-sm font-semibold text-slate-800">{component.itemName}</span><button aria-checked={enabled} aria-label={`${component.itemName} 제공`} className={`min-h-10 min-w-[60px] rounded-full px-2 text-xs font-extrabold shadow-none transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${enabled ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`} onClick={() => setComponentEnabled(current => ({ ...current, [component.menuComponentId]: !enabled }))} role="switch" type="button">{enabled ? "ON" : "OFF"}</button><span className="whitespace-nowrap text-left text-xs font-semibold text-slate-500">{enabled ? "제공" : "미제공"}</span></div>; })}
-       </div>
+       {components.map(component => <ProvisionSegmentedToggle enabled={componentEnabled[component.menuComponentId] ?? true} key={component.menuComponentId} label={component.itemName} onChange={enabled => setComponentEnabled(current => ({ ...current, [component.menuComponentId]: enabled }))} />)}
       </div>
      </div>
     </div>

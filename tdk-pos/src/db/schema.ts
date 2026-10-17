@@ -369,6 +369,7 @@ export const menuModifierGroups = mysqlTable("menu_modifier_groups", {
   menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),
   modifierGroupId: bigint("modifier_group_id", { mode: "number", unsigned: true }).notNull().references(() => modifierGroups.modifierGroupId, { onDelete: "cascade" }),
   sortOrder: int("sort_order").notNull().default(0),
+  posChoiceDefaultOptionId: bigint("pos_choice_default_option_id", { mode: "number", unsigned: true }),
 }, (table) => [primaryKey({ columns: [table.menuId, table.modifierGroupId] }), index("fk_menu_modifier_groups_group").on(table.modifierGroupId)]);
 
 export const menuComponents = mysqlTable("menu_components", {

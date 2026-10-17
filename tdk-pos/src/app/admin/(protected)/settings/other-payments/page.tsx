@@ -20,5 +20,7 @@ export default async function AdminOtherPaymentSettingsPage() {
     console.error("account transfer notice preview logo load failed", error);
     logoLoadError = error instanceof Error ? error.message : String(error);
   }
-  return <OtherPaymentSettingsClient logoDataUrl={logoDataUrl} logoLoadError={logoLoadError} receiptLogo={receiptLogo} storeName={storeInfo.storeName} />;
+  return <div className="mx-auto max-w-5xl">
+    <OtherPaymentSettingsClient logoDataUrl={logoDataUrl} logoLoadError={logoLoadError} receiptLogo={receiptLogo} storeName={storeInfo.storeName} />
+  </div>;
 }

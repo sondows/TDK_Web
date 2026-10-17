@@ -27,7 +27,7 @@ const formatPhone = (value: string | null) => {
 };
 
 export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
-  selected: SelectedCustomer | null;
+  selected: Pick<SelectedCustomer, "customerId" | "name"> | null;
   onSelect: (customer: SelectedCustomer | null) => void;
   onClose: () => void;
 }) {

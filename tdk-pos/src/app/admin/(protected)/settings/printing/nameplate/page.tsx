@@ -10,10 +10,12 @@ export default async function AdminNameplateSettingsPage() {
   const [storeInfo, logoFileName] = await Promise.all([getStoreInfo(), getReceiptLogoFileName()]);
 
   return <div className={styles.content}>
-    <div className={styles.pageHeading}>
-      <h1>매장 명판 설정</h1>
-      <p className={styles.pageDescription}>영수증에 출력되는 매장 정보와 로고를 설정합니다.</p>
+    <div className="mx-auto max-w-3xl">
+      <div className={styles.pageHeading}>
+        <h1>매장 명판 설정</h1>
+        <p className={styles.pageDescription}>영수증에 출력되는 매장 정보와 로고를 설정합니다.</p>
+      </div>
+      <StoreInfoForm initialStoreInfo={storeInfo} initialLogoFileName={logoFileName} />
     </div>
-    <StoreInfoForm initialStoreInfo={storeInfo} initialLogoFileName={logoFileName} />
   </div>;
 }

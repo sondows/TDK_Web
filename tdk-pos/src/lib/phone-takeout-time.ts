@@ -24,6 +24,15 @@ export function seoulClock(value: Date) {
   return `${parts.hour}:${parts.minute}`;
 }
 
+export function formatTakeoutElapsed(startedAt: string | Date, now: number) {
+  const elapsedMinutes = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 60_000));
+  if (elapsedMinutes === 0) return "방금전";
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  if (hours === 0) return `${minutes}분전`;
+  return minutes === 0 ? `${hours}시간전` : `${hours}시간 ${minutes}분전`;
+}
+
 export function pickupAtAfterMinutes(orderTime: Date, minutes: number) {
   const parts = partsInSeoul(orderTime);
   const base = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));

@@ -18,10 +18,12 @@ export default async function AdminPosSettingsPage() {
   const seconds = Math.max(0, Number(setting[0]?.value ?? 60));
 
   return <div className={styles.content}>
-    <div className={styles.pageHeading}>
-      <h1>POS 설정</h1>
-      <p className={styles.pageDescription}>POS 사용 및 동작 방식을 설정합니다.</p>
+    <div className="mx-auto max-w-xl">
+      <div className={styles.pageHeading}>
+        <h1>POS 설정</h1>
+        <p className={styles.pageDescription}>POS 사용 및 동작 방식을 설정합니다.</p>
+      </div>
+      <IdleResetSettingsForm initialLoginMode={loginMode} initialSeconds={Number.isInteger(seconds) ? seconds : 60} initialPaymentAutoCompleteSeconds={paymentAutoCompleteSeconds} />
     </div>
-    <IdleResetSettingsForm initialLoginMode={loginMode} initialSeconds={Number.isInteger(seconds) ? seconds : 60} initialPaymentAutoCompleteSeconds={paymentAutoCompleteSeconds} />
   </div>;
 }

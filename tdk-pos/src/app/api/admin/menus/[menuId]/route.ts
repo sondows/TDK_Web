@@ -6,10 +6,11 @@ import { getMenuManager } from "@/lib/management-auth";
 import { generateMenuImages, removeStoredMenuImages } from "@/lib/menu-image-storage";
 import { parseMenuComponentInputs, type MenuComponentInput } from "@/lib/menu-components";
 import { parseMenuNumber } from "@/lib/menu-number";
+import { parseMenuChoiceConfig, saveMenuChoiceConfig, type MenuChoiceConfig } from "@/lib/menu-choice-options";
 
 export const runtime = "nodejs";
 
-type UpdateValues = { name: string; price: number; categoryId: number; menuNumber: number | null; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[] };
+type UpdateValues = { name: string; price: number; categoryId: number; menuNumber: number | null; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[]; optionConfig?: MenuChoiceConfig };
 
 async function requireOwner() {
   const actor = await getMenuManager();
@@ -34,15 +35,22 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
     const removeImage = parseBoolean(form.get("removeImage"));
     let components: MenuComponentInput[] | null = null;
     try { components = parseMenuComponentInputs(JSON.parse(String(form.get("components") ?? "[]"))); } catch { return null; }
+    let optionConfig: MenuChoiceConfig | undefined;
+    if (form.has("optionConfig")) {
+      try { optionConfig = parseMenuChoiceConfig(JSON.parse(String(form.get("optionConfig")))) ?? undefined; } catch { return null; }
+      if (!optionConfig) return null;
+    }
     const nameValue = form.get("name");
     const name = typeof nameValue === "string" ? nameValue.trim() : "";
     const price = Number(form.get("price"));
     const categoryId = Number(form.get("categoryId"));
     const menuNumber = parseMenuNumber(form.get("menuNumber"));
     if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || removeImage === null || !components || (rawImage !== null && !(rawImage instanceof File))) return null;
-    return { name, price, categoryId, menuNumber, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components };
+    return { name, price, categoryId, menuNumber, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components, optionConfig };
   }
-  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown };
+  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown };
+  const optionConfig = body.optionConfig === undefined ? undefined : parseMenuChoiceConfig(body.optionConfig);
+  if (body.optionConfig !== undefined && !optionConfig) return null;
   const isActive = parseBoolean(body.isActive);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const price = Number(body.price);
@@ -50,7 +58,7 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
   const menuNumber = parseMenuNumber(body.menuNumber);
   const components = parseMenuComponentInputs(body.components);
   if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || !components) return null;
-  return { name, price, categoryId, menuNumber, isActive, image: null, removeImage: false, components };
+  return { name, price, categoryId, menuNumber, isActive, image: null, removeImage: false, components, optionConfig: optionConfig ?? undefined };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ menuId: string }> }) {
@@ -114,6 +122,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
           await tx.insert(menuComponents).values({ parentMenuId: menuId, componentMenuId: component.componentMenuId, ...componentValues });
         }
       }
+      if (values.optionConfig) await saveMenuChoiceConfig(tx, menuId, values.optionConfig);
 
       const replaceImage = generatedImages !== null || values.removeImage;
       const oldImageRows = replaceImage ? await tx.select({ imageUrl: menuImages.imageUrl }).from(menuImages).where(and(eq(menuImages.menuId, menuId), eq(menuImages.isActive, 1), inArray(menuImages.imageType, ["POS", "QR_THUMBNAIL", "QR_LARGE"]))) : [];
@@ -121,7 +130,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
       if (generatedImages) await tx.insert(menuImages).values(generatedImages.map(image => ({ menuId, imageType: image.imageType, imageUrl: image.imageUrl, sortOrder: 0, isActive: 1 })));
       const posImageUrl = generatedImages?.find(image => image.imageType === "POS")?.imageUrl ?? (values.removeImage ? null : (await tx.select({ imageUrl: menuImages.imageUrl }).from(menuImages).where(and(eq(menuImages.menuId, menuId), eq(menuImages.imageType, "POS"), eq(menuImages.isActive, 1))).limit(1))[0]?.imageUrl ?? null);
       const linkedComponents = values.components.length ? await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menus.menuId, itemName: menus.posName, price: menus.price, qtyPerUnit: menuComponents.qtyPerUnit, printOnKitchen: menuComponents.printOnKitchen, printOnReceipt: menuComponents.printOnReceipt, sortOrder: menuComponents.sortOrder }).from(menuComponents).innerJoin(menus, eq(menus.menuId, menuComponents.componentMenuId)).where(eq(menuComponents.parentMenuId, menuId)) : [];
-      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents } };
+      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents, optionConfig: values.optionConfig } };
     });
 
     if (result.status === "missing") return Response.json({ success: false, message: "메뉴를 찾을 수 없습니다." }, { status: 404 });

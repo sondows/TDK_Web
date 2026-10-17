@@ -19,6 +19,7 @@ const navigation: NavigationItem[] = [
   { label: "ㄴ 메뉴 관리", href: "/admin/menus", child: true },
   { label: "ㄴ 할인 설정", href: "/admin/settings/discounts", child: true },
   { label: "ㄴ 기타결제 설정", href: "/admin/settings/other-payments", child: true },
+  { label: "ㄴ 포장 설정", href: "/admin/settings/takeout", child: true },
   { label: "인쇄 설정", href: "/admin/settings/printing" },
   { label: "ㄴ 매장 명판 설정", href: "/admin/settings/printing/nameplate", child: true },
 ];
@@ -30,7 +31,7 @@ export default function AdminSidebar({ menuOnly = false }: { menuOnly?: boolean 
   return <aside className={styles.sidebar}><nav aria-label="관리센터 메뉴" className={styles.navigation}>
     {(menuOnly ? navigation.filter(item => "href" in item && item.href === "/admin/menus") : navigation).map(item => {
       if ("section" in item) return <div className={`${styles.navLink} ${styles.navSectionHeading}${salesChildActive ? ` ${styles.navLinkParentActive}` : ""}`} key={item.label}>{item.label}</div>;
-      const posChildActive = ["/admin/tables", "/admin/menus", "/admin/settings/discounts", "/admin/settings/other-payments"]
+      const posChildActive = ["/admin/tables", "/admin/menus", "/admin/settings/discounts", "/admin/settings/other-payments", "/admin/settings/takeout"]
         .some(href => pathname === href || pathname.startsWith(`${href}/`));
       const parentActive = (item.href === "/admin/settings/pos" && posChildActive)
         || (item.href === "/admin/settings/printing" && pathname.startsWith("/admin/settings/printing/"));

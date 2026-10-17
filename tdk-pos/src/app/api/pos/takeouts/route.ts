@@ -5,7 +5,8 @@ import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { takeoutLabel } from "@/lib/takeout-label";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
-import { isValidPickupAt } from "@/lib/phone-takeout-time";
+import { isValidPickupAt, pickupAtAfterMinutes } from "@/lib/phone-takeout-time";
+import { defaultTakeoutPreparationMinutes, getTakeoutPreparationMinutes } from "@/lib/takeout-preparation-setting";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,13 @@ export async function POST(request: Request) {
   let pickupCustomer: { customerId: number; name: string } | null = null;
   let pickupPhone: string | null = null;
   let pickupAt: string | null = null;
+  const useDefaultPickupTime = body.pickupAt === undefined;
+  const preparationMinutes = useDefaultPickupTime
+    ? await getTakeoutPreparationMinutes().catch(error => {
+      console.error("Takeout preparation setting lookup failed", error);
+      return defaultTakeoutPreparationMinutes;
+    })
+    : defaultTakeoutPreparationMinutes;
   if (body.pickupAt !== undefined && body.pickupAt !== null) {
     if (!isValidPickupAt(body.pickupAt))
       return Response.json({ success: false, message: "찾는시간을 올바르게 지정해 주세요." }, { status: 400 });
@@ -91,6 +99,9 @@ export async function POST(request: Request) {
         });
         const sessionId = Number(inserted.insertId);
         const [stamp] = await tx.select({ date: sql<string>`DATE_FORMAT(${tableSessions.openedAt}, '%Y%m%d')`, time: sql<string>`DATE_FORMAT(${tableSessions.openedAt}, '%H%i')`, openedAt: tableSessions.openedAt }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId));
+        const effectivePickupAt = useDefaultPickupTime
+          ? pickupAtAfterMinutes(stamp.openedAt, preparationMinutes)
+          : pickupAt;
         const prefix = `${stamp.date}:T:${stamp.time}`;
         const [existing] = await tx.select({ count: sql<number>`COUNT(*)` }).from(tableSessions).where(sql`${tableSessions.takeoutLabelKey} LIKE ${`${prefix}:%`}`);
         const sequence = Number(existing.count) + 1;
@@ -98,9 +109,9 @@ export async function POST(request: Request) {
         await tx.update(tableSessions).set({
           displayName,
           takeoutLabelKey: `${prefix}:${sequence}`,
-          ...(pickupAt ? { pickupAt: sql`${pickupAt}` } : {}),
+          ...(effectivePickupAt ? { pickupAt: sql`${effectivePickupAt}` } : {}),
         }).where(eq(tableSessions.sessionId, sessionId));
-        return { sessionId, kind: body.kind, displayName, openedAt: stamp.openedAt.toISOString(), pickupAt, pickupPhone, pickupCustomerId: pickupCustomer?.customerId ?? null, pickupCustomerName: pickupCustomer?.name ?? null };
+        return { sessionId, kind: body.kind, displayName, openedAt: stamp.openedAt.toISOString(), pickupAt: effectivePickupAt, pickupPhone, pickupCustomerId: pickupCustomer?.customerId ?? null, pickupCustomerName: pickupCustomer?.name ?? null };
       });
       return Response.json({ success: true, session: created }, { status: 201 });
     } catch (error) {
@@ -119,6 +130,52 @@ export async function POST(request: Request) {
   return Response.json({ success: false, message: "포장 주문 생성이 지연되었습니다. 다시 시도해 주세요." }, { status: 409 });
 }
 
+export async function PATCH(request: Request) {
+  const staff = await actor();
+  if (!staff && await getPosLoginMode() !== "SHARED")
+    return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
+  const body = await request.json().catch(() => ({})) as { sessionId?: unknown; pickupAt?: unknown; pickupPhone?: unknown; pickupCustomerId?: unknown };
+  const sessionId = Number(body.sessionId);
+  if (!Number.isSafeInteger(sessionId) || sessionId <= 0)
+    return Response.json({ success: false, message: "포장 주문을 확인해 주세요." }, { status: 400 });
+  if (body.pickupAt !== null && !isValidPickupAt(body.pickupAt))
+    return Response.json({ success: false, message: "찾는시간을 올바르게 지정해 주세요." }, { status: 400 });
+  if (body.pickupPhone !== null && (typeof body.pickupPhone !== "string" || !/^\d{1,15}$/.test(body.pickupPhone)))
+    return Response.json({ success: false, message: "전화번호를 확인해 주세요." }, { status: 400 });
+  const customerId = body.pickupCustomerId === null ? null : Number(body.pickupCustomerId);
+  if (customerId !== null && (!Number.isSafeInteger(customerId) || customerId <= 0))
+    return Response.json({ success: false, message: "선택한 고객을 확인해 주세요." }, { status: 400 });
+
+  try {
+    const updated = await db.transaction(async tx => {
+      const [session] = await tx.select({ kind: tableSessions.sessionKind }).from(tableSessions)
+        .where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
+      if (!session || session.kind === "DINE_IN") return null;
+      const [customer] = customerId === null ? [] : await tx.select({ customerId: customers.customerId, name: customers.name })
+        .from(customers).where(and(eq(customers.customerId, customerId), eq(customers.isActive, 1))).limit(1);
+      if (customerId !== null && !customer) throw new Error("선택한 고객을 찾을 수 없습니다.");
+      await tx.update(tableSessions).set({
+        pickupAt: body.pickupAt === null ? null : sql`${body.pickupAt}`,
+        pickupPhone: body.pickupPhone as string | null,
+        pickupCustomerId: customer?.customerId ?? null,
+        pickupName: customer?.name ?? null,
+      }).where(eq(tableSessions.sessionId, sessionId));
+      return {
+        sessionId,
+        pickupAt: body.pickupAt as string | null,
+        pickupPhone: body.pickupPhone as string | null,
+        pickupCustomerId: customer?.customerId ?? null,
+        pickupCustomerName: customer?.name ?? null,
+      };
+    });
+    if (!updated) return Response.json({ success: false, message: "활성 포장 주문을 찾을 수 없습니다." }, { status: 409 });
+    return Response.json({ success: true, session: updated });
+  } catch (error) {
+    console.error("Takeout update failed", error);
+    return Response.json({ success: false, message: error instanceof Error && error.message === "선택한 고객을 찾을 수 없습니다." ? error.message : "포장 정보를 저장하지 못했습니다." }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   const staff = await actor();
   if (!staff && await getPosLoginMode() !== "SHARED")
@@ -132,13 +189,18 @@ export async function DELETE(request: Request) {
       const [session] = await tx.select({ kind: tableSessions.sessionKind }).from(tableSessions)
         .where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
       if (!session || session.kind === "DINE_IN") throw new Error("포장 주문이 이미 종료되었거나 없습니다.");
-      const [payment] = await tx.select({ paymentId: paymentSessionAllocations.paymentId }).from(paymentSessionAllocations).where(eq(paymentSessionAllocations.sessionId, sessionId)).for("update").limit(1);
+      const [payment] = await tx.select({ paymentId: paymentSessionAllocations.paymentId }).from(paymentSessionAllocations)
+        .innerJoin(payments, eq(paymentSessionAllocations.paymentId, payments.paymentId))
+        .where(and(eq(paymentSessionAllocations.sessionId, sessionId), eq(payments.status, "APPROVED"),
+          sql`(${paymentSessionAllocations.appliedAmount} > 0 OR ${payments.amount} > 0)`)).for("update").limit(1);
       const orderRows = await tx.select({ orderId: orders.orderId, status: orders.status }).from(orders).where(eq(orders.sessionId, sessionId)).for("update");
       const linkedPayment = orderRows.length ? await tx.select({ paymentId: payments.paymentId }).from(payments)
         .innerJoin(checkoutItems, eq(checkoutItems.checkoutId, payments.checkoutId))
         .innerJoin(orderItems, eq(orderItems.orderItemId, checkoutItems.orderItemId))
         .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
-        .where(eq(orders.sessionId, sessionId)).for("update").limit(1) : [];
+        .where(and(eq(orders.sessionId, sessionId), eq(payments.status, "APPROVED"),
+          sql`(${payments.appliedAmount} > 0 OR ${payments.amount} > 0)`,
+          sql`NOT EXISTS (SELECT 1 FROM payment_session_allocations AS existing_allocation WHERE existing_allocation.payment_id = ${payments.paymentId})`)).for("update").limit(1) : [];
       if (payment || linkedPayment.length) throw new Error("이 포장에는 결제 내역이 있습니다. 기존 결제취소/환불 절차를 이용해 주세요.");
       if (orderRows.some(order => order.status === "COMPLETED")) throw new Error("결제 완료된 포장은 기존 결제취소/환불 절차를 이용해 주세요.");
       const orderIds = orderRows.map(order => order.orderId);
