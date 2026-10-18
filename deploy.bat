@@ -60,8 +60,8 @@ git push origin main
 if errorlevel 1 goto failed
 
 echo [INFO] Deploying origin/main on NAS...
-set "FAILED_STAGE=NAS SSH / deployment"
-ssh -tt sondows@192.168.0.83 "export PATH=/opt/bin:/opt/sbin:$PATH || { echo [FAIL] NAS Entware PATH; exit 20; }; cd /volume1/TDK-POS || { echo [FAIL] NAS repository directory; exit 21; }; git fetch origin || { echo [FAIL] NAS git fetch; exit 22; }; git checkout main || { echo [FAIL] NAS git checkout; exit 23; }; git reset --hard origin/main || { echo [FAIL] NAS git reset; exit 24; }; cd /volume1/TDK-POS/tdk-pos || { echo [FAIL] NAS compose directory; exit 25; }; sudo docker compose up -d --build || { echo [FAIL] Docker compose build/start; exit 26; }; sudo docker compose ps || { echo [FAIL] Docker compose ps; exit 27; }"
+set "FAILED_STAGE=NAS SSH connection or remote deployment"
+ssh -tt sondows@192.168.0.83 "echo [OK] SSH connected; export PATH=/opt/bin:/opt/sbin:$PATH || { echo [FAIL] NAS Entware PATH; exit 20; }; echo [OK] NAS command path; cd /volume1/TDK-POS || { echo [FAIL] NAS repository directory; exit 21; }; echo [OK] NAS repository directory; git fetch origin || { echo [FAIL] git fetch origin; exit 22; }; echo [OK] git fetch origin; git checkout main || { echo [FAIL] git checkout main; exit 23; }; echo [OK] git checkout main; git reset --hard origin/main || { echo [FAIL] reset origin/main; exit 24; }; echo [OK] reset origin/main; cd /volume1/TDK-POS/tdk-pos || { echo [FAIL] compose directory; exit 25; }; echo [OK] compose directory; command -v sudo >/dev/null 2>&1 || { echo [FAIL] sudo command unavailable; exit 30; }; sudo -v || { echo [FAIL] sudo authentication or permission; exit 31; }; echo [OK] sudo authentication; sudo docker compose up -d --build || { echo [FAIL] docker compose build/start; exit 32; }; echo [OK] docker compose up -d --build; sudo docker compose ps || { echo [FAIL] docker compose ps; exit 33; }; echo [OK] containers started"
 if errorlevel 1 goto failed
 
 echo [OK] Deployment finished. Check the tdk-pos status above.
