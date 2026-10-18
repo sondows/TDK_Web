@@ -7,7 +7,9 @@ import type { CurrentStaff } from "@/lib/auth";
 /** OWNER identity accepted by Management Center APIs and reused POS settings. */
 export async function getManagementOwner(): Promise<CurrentStaff | null> {
   const admin = await getCurrentAdminStaff();
-  if (admin) return admin;
+  // Management Center authority is independent of the employee's POS role.
+  // Callers still use the legacy OWNER check for POS sessions.
+  if (admin) return { ...admin, role: "OWNER" };
   const posStaff = await getPrivilegedStaff();
   return posStaff?.role === "OWNER" && posStaff.staffCode !== "000" ? posStaff : null;
 }

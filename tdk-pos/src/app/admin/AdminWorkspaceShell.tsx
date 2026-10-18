@@ -4,9 +4,11 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import AdminLogoutButton from "./AdminLogoutButton";
 import AdminSidebar from "./AdminSidebar";
+import { AdminAccessProvider } from "./AdminAccessContext";
+import type { AdminPermission } from "@/lib/staff-management";
 import styles from "./admin.module.css";
 
-export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean }) {
+export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, permission = "READ_WRITE" }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; permission?: AdminPermission }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -28,13 +30,13 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
     };
   }, [drawerOpen]);
 
-  return <div className={styles.shell}>
+  return <AdminAccessProvider permission={permission}><div className={styles.shell}>
     <header className={styles.header}>
       <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="메뉴 열기" aria-expanded={drawerOpen} aria-controls="admin-mobile-drawer" onClick={() => setDrawerOpen(true)}>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
       <div className={styles.brand}>TDK <span>관리센터</span></div>
-      <div className={styles.userArea}><span>{userName}</span>{showLogout && <AdminLogoutButton />}</div>
+      <div className={styles.userArea}>{permission === "READ_ONLY" && <span className={styles.readOnlyBadge}>조회 전용</span>}<span>{userName}</span>{showLogout && <AdminLogoutButton />}</div>
     </header>
     <div className={styles.workspace}>
       <AdminSidebar menuOnly={menuOnly} />
@@ -55,5 +57,5 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
         <AdminSidebar menuOnly={menuOnly} mobileDrawer onNavigate={() => setDrawerOpen(false)} />
       </aside>
     </>}
-  </div>;
+  </div></AdminAccessProvider>;
 }

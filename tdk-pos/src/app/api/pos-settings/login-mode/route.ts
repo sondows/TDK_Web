@@ -1,3 +1,4 @@
+import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
@@ -8,6 +9,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   try {
     const body = (await request.json()) as {
       mode?: unknown;

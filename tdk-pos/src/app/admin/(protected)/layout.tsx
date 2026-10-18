@@ -9,5 +9,5 @@ export const viewport: Viewport = { themeColor: "#2563EB", viewportFit: "cover" 
 export default async function ProtectedAdminLayout({ children }: { children: ReactNode }) {
   const member = await getCurrentAdminStaff();
   if (!member) redirect("/admin/login");
-  return <AdminWorkspaceShell userName={`${member.name} · OWNER`}>{children}</AdminWorkspaceShell>;
+  return <AdminWorkspaceShell permission={member.adminPermission} userName={member.name}>{children}</AdminWorkspaceShell>;
 }

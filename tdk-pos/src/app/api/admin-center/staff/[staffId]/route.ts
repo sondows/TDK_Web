@@ -1,14 +1,15 @@
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 import { hashAdminPin, hashPin } from "@/lib/auth";
 import { isDuplicateAdminLoginId, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
 import { isValidPin } from "@/lib/pin";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ staffId: string }> }) {
+  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
   const actor = await getCurrentAdminStaff();
-  if (!actor) return Response.json({ success: false, message: "OWNER 로그인이 필요합니다." }, { status: 401 });
+  if (!actor) return Response.json({ success: false, message: "관리센터 로그인이 필요합니다." }, { status: 401 });
   const id = Number((await params).staffId);
   if (!Number.isSafeInteger(id) || id <= 0) return Response.json({ success: false, message: "직원을 찾을 수 없습니다." }, { status: 404 });
   let input: unknown;
@@ -28,7 +29,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ st
       }
       if (input && typeof input === "object" && !Array.isArray(input) &&
           Object.keys(input).length === 1 && (input as Record<string, unknown>).isActive === false) {
-        if (id === actor.staffId) return { status: 409, body: { success: false, message: "현재 로그인한 OWNER 본인은 사용중지할 수 없습니다." } };
+        if (id === actor.staffId) return { status: 409, body: { success: false, message: "현재 로그인한 관리자 본인은 사용중지할 수 없습니다." } };
+        if (target.adminPermission === "READ_WRITE" && target.isActive === 1) {
+          const others = await tx.select({ id: staff.staffId }).from(staff).where(and(
+            eq(staff.adminPermission, "READ_WRITE"), eq(staff.isActive, 1), ne(staff.staffId, id),
+            isNotNull(staff.adminLoginId), isNotNull(staff.adminPinHash),
+          ));
+          if (!others.length) return { status: 409, body: { success: false, message: "마지막 읽기·쓰기 계정은 사용중지할 수 없습니다." } };
+        }
         await tx.update(staff).set({ isActive: 0, updatedAt: new Date() }).where(eq(staff.staffId, id));
         return { status: 200, body: { success: true } };
       }
@@ -36,16 +44,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ st
       if (!parsed) return { status: 400, body: { success: false, message: "요청 형식을 확인해 주세요." } };
       if (!parsed.valid) return { status: 400, body: { success: false, errors: parsed.errors, message: "입력 내용을 확인해 주세요." } };
       const { draft } = parsed;
-      if (id === actor.staffId && (draft.role !== "OWNER" || !draft.isActive || !draft.adminEnabled)) {
-        return { status: 409, body: { success: false, message: "현재 로그인한 OWNER 본인의 사용이나 관리센터 권한을 해제할 수 없습니다." } };
+      if (id === actor.staffId && (!draft.isActive || !draft.adminEnabled || draft.adminPermission !== "READ_WRITE")) {
+        return { status: 409, body: { success: false, message: "현재 로그인한 관리자 본인의 사용이나 관리센터 권한을 해제할 수 없습니다." } };
       }
-      const removesOwner = target.role === "OWNER" && target.isActive === 1 && (draft.role !== "OWNER" || !draft.isActive || !draft.adminEnabled);
-      if (removesOwner) {
+      const removesWriter = target.adminPermission === "READ_WRITE" && target.isActive === 1 && (!draft.isActive || !draft.adminEnabled || draft.adminPermission !== "READ_WRITE");
+      if (removesWriter) {
         const otherOwners = await tx.select({ id: staff.staffId }).from(staff).where(and(
-          eq(staff.role, "OWNER"), eq(staff.isActive, 1), ne(staff.staffId, id),
+          eq(staff.adminPermission, "READ_WRITE"), eq(staff.isActive, 1), ne(staff.staffId, id),
           isNotNull(staff.adminLoginId), isNotNull(staff.adminPinHash),
         ));
-        if (!otherOwners.length) return { status: 409, body: { success: false, message: "마지막 사용 중인 OWNER는 비활성화할 수 없습니다." } };
+        if (!otherOwners.length) return { status: 409, body: { success: false, message: "마지막 읽기·쓰기 계정은 비활성화할 수 없습니다." } };
       }
       if (draft.adminEnabled && draft.adminLoginId !== target.adminLoginId) {
         const [duplicate] = await tx.select({ id: staff.staffId }).from(staff).where(eq(staff.adminLoginId, draft.adminLoginId)).limit(1);
@@ -56,6 +64,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ st
         pinHash: draft.posEnabled ? (draft.posPin ? await hashPin(draft.posPin) : target.pinHash) : null,
         adminLoginId: draft.adminEnabled ? draft.adminLoginId : null,
         adminPinHash: draft.adminEnabled ? (draft.adminPin ? await hashAdminPin(draft.adminPin) : target.adminPinHash) : null,
+        adminPermission: draft.adminPermission,
         updatedAt: new Date(),
       }).where(eq(staff.staffId, id));
       return { status: 200, body: { success: true } };

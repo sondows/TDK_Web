@@ -6,6 +6,7 @@ import {
 } from "@/lib/takeout-preparation-setting";
 import styles from "../../../admin.module.css";
 import TakeoutPreparationSettingsForm from "./TakeoutPreparationSettingsForm";
+import AdminReadOnlyFields from "@/app/admin/AdminReadOnlyFields";
 
 export default async function AdminTakeoutSettingsPage() {
   if (!await getCurrentAdminStaff()) redirect("/admin/login");
@@ -16,7 +17,7 @@ export default async function AdminTakeoutSettingsPage() {
       <div className={styles.pageHeading}>
         <h1 className="select-none">포장 설정</h1>
       </div>
-      <TakeoutPreparationSettingsForm initialMinutes={minutes} maxMinutes={maxTakeoutPreparationMinutes} />
+      <AdminReadOnlyFields><TakeoutPreparationSettingsForm initialMinutes={minutes} maxMinutes={maxTakeoutPreparationMinutes} /></AdminReadOnlyFields>
     </div>
   </div>;
 }

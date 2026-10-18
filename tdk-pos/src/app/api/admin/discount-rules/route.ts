@@ -4,7 +4,7 @@ import { discountRules } from "@/db/schema";
 import { canManageSettings } from "@/lib/permissions";
 import { getManagementOwner } from "@/lib/management-auth";
 import { getCurrentStaff } from "@/lib/auth";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 
 type PresetInput = { slot?: unknown; title?: unknown; type?: unknown; value?: unknown; isActive?: unknown };
@@ -26,6 +26,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   if (!await requireOwner()) return Response.json({ success: false, message: "할인 설정 권한이 필요합니다." }, { status: 403 });
   let body: { presets?: PresetInput[] };
   try { body = await request.json() as { presets?: PresetInput[] }; } catch { return Response.json({ success: false, message: "할인 설정 요청을 확인하세요." }, { status: 400 }); }

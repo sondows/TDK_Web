@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { StaffSummary } from "@/lib/staff-management";
+import { adminPermissionLabel, type StaffSummary } from "@/lib/staff-management";
 import StaffModal from "./StaffModal";
 import SharedPosPinModal from "./SharedPosPinModal";
 import StaffToggle from "./StaffToggle";
+import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 export default function StaffManagement() {
+  const readOnly = useAdminReadOnly();
   const router = useRouter();
   const [rows, setRows] = useState<StaffSummary[]>([]);
   const [search, setSearch] = useState("");
@@ -55,7 +57,7 @@ export default function StaffManagement() {
           <input aria-label="직원 검색" className={styles.customerSearch} onChange={event => setSearch(event.target.value)} placeholder="이름 또는 관리센터 아이디 검색" type="search" value={search} />
           <StaffToggle checked={showInactive} label="사용중지 직원 보기" onChange={setShowInactive} />
         </div>
-        <button className={styles.customerAddButton} onClick={() => setEditing(null)} ref={addButtonRef} type="button">+ 직원등록</button>
+        {!readOnly && <button className={styles.customerAddButton} onClick={() => setEditing(null)} ref={addButtonRef} type="button">+ 직원등록</button>}
       </div>
       <div className={styles.customerTableScroll}>
         <table className={styles.customerTable}>
@@ -68,9 +70,9 @@ export default function StaffManagement() {
                 <td className={styles.customerName}>{row.name}</td>
                 <td>{row.role}</td>
                 <td>{row.posEnabled ? "사용" : "미사용"}</td>
-                <td>{row.adminEnabled ? row.adminLoginId : "-"}</td>
+                <td>{adminPermissionLabel[row.adminPermission]}{row.adminEnabled && row.adminLoginId ? ` · ${row.adminLoginId}` : ""}</td>
                 <td><span className={row.isActive ? styles.staffStatusActive : styles.staffStatusInactive}>{row.isActive ? "사용" : "사용중지"}</span></td>
-                <td><button className={styles.staffEditButton} onClick={() => setEditing(row)} type="button">{row.isShared ? row.posEnabled ? "POS PIN 변경" : "POS PIN 설정" : "수정"}</button></td>
+                <td>{!readOnly && <button className={styles.staffEditButton} onClick={() => setEditing(row)} type="button">{row.isShared ? row.posEnabled ? "POS PIN 변경" : "POS PIN 설정" : "수정"}</button>}</td>
               </tr>)}
           </tbody>
         </table>

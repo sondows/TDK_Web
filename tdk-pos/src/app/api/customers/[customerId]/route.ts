@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
 import { validateCustomerCreate } from "@/lib/customer";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
   status,
@@ -10,6 +10,7 @@ const json = (body: unknown, status = 200) => Response.json(body, {
 });
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ customerId: string }> }) {
+  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
   try {
     if (!await getCurrentAdminStaff()) return json({ success: false, message: "로그인이 필요합니다." }, 401);
 

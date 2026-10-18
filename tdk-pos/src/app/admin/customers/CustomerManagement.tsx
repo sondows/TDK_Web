@@ -6,9 +6,11 @@ import type { CustomerSummary } from "@/lib/customer";
 import CustomerCreateModal from "./CustomerCreateModal";
 import CustomerList from "./CustomerList";
 import CustomerTradeModal from "./CustomerTradeModal";
+import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 export default function CustomerManagement() {
+  const readOnly = useAdminReadOnly();
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null);
@@ -115,16 +117,16 @@ export default function CustomerManagement() {
           미사용 포함
         </label>
         </div>
-        <button
+        {!readOnly && <button
           className={styles.customerAddButton}
           onClick={() => setCreateOpen(true)}
           ref={addButtonRef}
           type="button"
         >
           + 고객등록
-        </button>
+        </button>}
       </div>
-      <CustomerList canReorder={!loading && !search.trim()} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
+      <CustomerList canReorder={!readOnly && !loading && !search.trim()} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
       {createOpen && <CustomerCreateModal customer={null} onClose={closeCreate} onSaved={created} />}
       {editingCustomer && <CustomerCreateModal customer={editingCustomer} onClose={() => setEditingCustomer(null)} onSaved={updated} />}
       {tradingCustomer && <CustomerTradeModal customer={tradingCustomer} onChanged={() => setRefreshKey(value => value + 1)} onClose={() => setTradingCustomer(null)} />}

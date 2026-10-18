@@ -1,3 +1,4 @@
+import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables, tableSessions } from "@/db/schema";
@@ -11,6 +12,7 @@ async function requireOwner() {
 }
 
 export async function POST(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner(); if (auth.error) return auth.error;
   try {
     const body = await request.json() as { tableNo?: string; capacity?: number; sourceTableId?: number };
@@ -30,6 +32,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner(); if (auth.error) return auth.error;
   try {
     const { tableId } = await request.json() as { tableId?: number };

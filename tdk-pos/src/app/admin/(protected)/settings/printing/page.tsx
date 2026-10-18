@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { getReceiptAutoPrintAfterPayment } from "@/lib/receipt-auto-print-setting";
 import ReceiptAutoPrintSettingsForm from "@/app/pos/admin/settings/ReceiptAutoPrintSettingsForm";
+import AdminReadOnlyFields from "@/app/admin/AdminReadOnlyFields";
 import styles from "../../../admin.module.css";
 
 export default async function AdminPrintingSettingsPage() {
@@ -17,7 +18,7 @@ export default async function AdminPrintingSettingsPage() {
           <h1>인쇄 설정</h1>
         </div>
       </div>
-      <ReceiptAutoPrintSettingsForm initialEnabled={receiptAutoPrint} />
+      <AdminReadOnlyFields><ReceiptAutoPrintSettingsForm initialEnabled={receiptAutoPrint} /></AdminReadOnlyFields>
     </div>
   </div>;
 }

@@ -1,3 +1,4 @@
+import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
@@ -7,6 +8,7 @@ import { isValidPin } from "@/lib/pin";
 
 const roles = new Set(["OWNER", "MANAGER", "STAFF"]);
 export async function PATCH(request: Request, { params }: { params: Promise<{ staffId: string }> }) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const actor = await getPrivilegedStaff();
   if (!actor || !canManageStaff(actor.role)) return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });
   try {

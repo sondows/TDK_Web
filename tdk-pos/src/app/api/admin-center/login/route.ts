@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const [candidate] = await db.select({ staffId: staff.staffId, adminPinHash: staff.adminPinHash }).from(staff).where(and(
       eq(staff.adminLoginId, loginId),
       eq(staff.isActive, 1),
-      eq(staff.role, "OWNER"),
+      ne(staff.adminPermission, "NONE"),
       ne(staff.staffCode, "000"),
     )).limit(1);
     if (!candidate || !(await verifyAdminPin(pin, candidate.adminPinHash))) return failure();

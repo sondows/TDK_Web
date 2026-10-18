@@ -1,12 +1,12 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 import { hashAdminPin, hashPin } from "@/lib/auth";
 import { isDuplicateAdminLoginId, newInternalStaffCode, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
 
 export async function GET() {
-  if (!await getCurrentAdminStaff()) return Response.json({ success: false, message: "OWNER 로그인이 필요합니다." }, { status: 401 });
+  if (!await getCurrentAdminStaff()) return Response.json({ success: false, message: "관리센터 로그인이 필요합니다." }, { status: 401 });
   try {
     const rows = await db.select(staffColumns).from(staff).orderBy(asc(staff.staffCode));
     return Response.json({ success: true, staff: rows.map(toStaffSummary) });
@@ -17,7 +17,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!await getCurrentAdminStaff()) return Response.json({ success: false, message: "OWNER 로그인이 필요합니다." }, { status: 401 });
+  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  if (!await getCurrentAdminStaff()) return Response.json({ success: false, message: "관리센터 로그인이 필요합니다." }, { status: 401 });
   let parsed: ReturnType<typeof parseStaffDraft>;
   try { parsed = parseStaffDraft(await request.json()); }
   catch { return Response.json({ success: false, message: "요청 형식을 확인해 주세요." }, { status: 400 }); }
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
         staffCode: newInternalStaffCode(), name: draft.name, role: draft.role,
         isActive: draft.isActive ? 1 : 0, pinHash,
         adminLoginId: draft.adminEnabled ? draft.adminLoginId : null, adminPinHash,
+        adminPermission: draft.adminPermission,
       });
       return Number(result[0].insertId);
     });

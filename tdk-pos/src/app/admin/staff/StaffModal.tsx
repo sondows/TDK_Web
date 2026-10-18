@@ -13,7 +13,7 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
   const [draft, setDraft] = useState<StaffDraft>({
     name: original?.name ?? "", role: original?.role ?? "STAFF", isActive: original?.isActive ?? true,
     posEnabled: original?.posEnabled ?? true, posPin: "", posPinConfirm: "",
-    adminEnabled: original?.adminEnabled ?? false, adminLoginId: original?.adminLoginId ?? "", adminPin: "", adminPinConfirm: "",
+    adminEnabled: original?.adminEnabled ?? false, adminPermission: original?.adminPermission ?? "NONE", adminLoginId: original?.adminLoginId ?? "", adminPin: "", adminPinConfirm: "",
   });
   const [changePosPin, setChangePosPin] = useState(!original?.posEnabled);
   const [changeAdminPin, setChangeAdminPin] = useState(!original?.adminEnabled);
@@ -69,7 +69,7 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
       <div className={styles.customerModalFields}>
         <section className={styles.staffFormSection}><h3>기본 정보</h3>
           <div className={styles.customerField}><label htmlFor="staff-name">이름 <span aria-hidden="true">*</span></label><input aria-invalid={Boolean(errors.name)} className={styles.customerFieldInput} disabled={busy} id="staff-name" maxLength={100} onChange={event => update("name", event.target.value)} ref={nameRef} value={draft.name} />{errors.name && <p className={styles.customerFieldError} role="alert">{errors.name}</p>}</div>
-          <div className={styles.customerField}><label htmlFor="staff-role">권한 <span aria-hidden="true">*</span></label><select className={styles.customerFieldInput} disabled={busy} id="staff-role" onChange={event => { const role = event.target.value as StaffDraft["role"]; setDraft(current => ({ ...current, role, adminEnabled: role === "OWNER" && current.adminEnabled })); setErrors({}); }} value={draft.role}><option value="STAFF">STAFF</option><option value="MANAGER">MANAGER</option><option value="OWNER">OWNER</option></select></div>
+          <div className={styles.customerField}><label htmlFor="staff-role">POS 권한 <span aria-hidden="true">*</span></label><select className={styles.customerFieldInput} disabled={busy} id="staff-role" onChange={event => update("role", event.target.value as StaffDraft["role"])} value={draft.role}><option value="STAFF">STAFF</option><option value="MANAGER">MANAGER</option><option value="OWNER">OWNER</option></select></div>
           <StaffToggle checked={draft.isActive} disabled={busy} label="상태" onChange={value => update("isActive", value)} />
         </section>
         <section className={styles.staffFormSection}><h3>POS 로그인</h3>
@@ -77,8 +77,8 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
           {draft.posEnabled && <>{original?.posEnabled && !changePosPin ? <button className={styles.staffChangeButton} onClick={() => setChangePosPin(true)} type="button">POS PIN 변경</button> : <>{input("staff-pos-pin", original ? "새 POS PIN" : "POS PIN *", "posPin", 4)}{input("staff-pos-confirm", "PIN 확인 *", "posPinConfirm", 4)}</>}</>}
         </section>
         <section className={styles.staffFormSection}><h3>관리센터 로그인</h3>
-          <StaffToggle checked={draft.adminEnabled} disabled={busy || draft.role !== "OWNER"} label="관리센터 사용" onChange={value => { update("adminEnabled", value); if (value && !original?.adminEnabled) setChangeAdminPin(true); }} />
-          {draft.role !== "OWNER" && <p className={styles.staffHint}>현재 관리센터 로그인은 OWNER만 사용할 수 있습니다.</p>}
+          <StaffToggle checked={draft.adminEnabled} disabled={busy} label="관리센터 로그인" onChange={value => { setDraft(current => ({ ...current, adminEnabled: value, adminPermission: value ? current.adminPermission : "NONE" })); if (value && !original?.adminEnabled) setChangeAdminPin(true); }} />
+          <div className={styles.customerField}><label htmlFor="staff-admin-permission">관리센터 권한</label><select className={styles.customerFieldInput} disabled={busy || !draft.adminEnabled} id="staff-admin-permission" onChange={event => update("adminPermission", event.target.value as StaffDraft["adminPermission"])} value={draft.adminPermission}><option value="NONE">접근 불가</option><option value="READ_ONLY">조회 전용</option><option value="READ_WRITE">읽기·쓰기</option></select>{errors.adminPermission && <p className={styles.customerFieldError} role="alert">{errors.adminPermission}</p>}</div>
           {errors.adminEnabled && <p className={styles.customerFieldError} role="alert">{errors.adminEnabled}</p>}
           {draft.adminEnabled && <><div className={styles.customerField}><label htmlFor="staff-admin-id">관리센터 아이디 *</label><input aria-invalid={Boolean(errors.adminLoginId)} autoCapitalize="none" autoComplete="off" className={styles.customerFieldInput} disabled={busy} id="staff-admin-id" maxLength={32} onChange={event => update("adminLoginId", event.target.value)} value={draft.adminLoginId} />{errors.adminLoginId && <p className={styles.customerFieldError} role="alert">{errors.adminLoginId}</p>}</div>
             {original?.adminEnabled && !changeAdminPin ? <button className={styles.staffChangeButton} onClick={() => setChangeAdminPin(true)} type="button">관리센터 PIN 변경</button> : <>{input("staff-admin-pin", original ? "새 관리센터 PIN" : "관리센터 PIN *", "adminPin", 6)}{input("staff-admin-confirm", "PIN 확인 *", "adminPinConfirm", 6)}</>}</>}

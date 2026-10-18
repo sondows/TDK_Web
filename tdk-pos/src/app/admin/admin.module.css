@@ -247,6 +247,7 @@
 }
 
 .staffToolbar { flex-wrap: wrap; }
+.readOnlyBadge { border: 1px solid #b8d2f8; border-radius: 999px; background: #eff6ff; padding: 4px 8px; color: #1d4ed8; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .staffFilters { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 12px 20px; min-width: 0; }
 .staffFilters .customerSearch { flex: 0 1 340px; }
 

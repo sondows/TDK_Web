@@ -13,11 +13,13 @@ export const staffColumns = {
   pinHash: staff.pinHash,
   adminLoginId: staff.adminLoginId,
   adminPinHash: staff.adminPinHash,
+  adminPermission: staff.adminPermission,
 };
 
 export type StaffRow = {
   staffId: number; staffCode: string; name: string; role: "OWNER" | "MANAGER" | "STAFF";
   isActive: number; pinHash: string | null; adminLoginId: string | null; adminPinHash: string | null;
+  adminPermission: "NONE" | "READ_ONLY" | "READ_WRITE";
 };
 
 export function toStaffSummary(row: StaffRow): StaffSummary {
@@ -28,6 +30,7 @@ export function toStaffSummary(row: StaffRow): StaffSummary {
     isActive: row.isActive === 1,
     posEnabled: Boolean(row.pinHash),
     adminEnabled: Boolean(row.adminLoginId && row.adminPinHash),
+    adminPermission: row.adminPermission,
     adminLoginId: row.adminLoginId,
     isShared: row.staffCode === "000",
   };
@@ -38,13 +41,13 @@ export function parseStaffDraft(input: unknown, original?: StaffSummary) {
   const body = input as Record<string, unknown>;
   if (typeof body.name !== "string" || typeof body.role !== "string" ||
       typeof body.isActive !== "boolean" || typeof body.posEnabled !== "boolean" ||
-      typeof body.adminEnabled !== "boolean" || typeof body.adminLoginId !== "string" ||
+      typeof body.adminEnabled !== "boolean" || typeof body.adminPermission !== "string" || typeof body.adminLoginId !== "string" ||
       typeof body.posPin !== "string" || typeof body.posPinConfirm !== "string" ||
       typeof body.adminPin !== "string" || typeof body.adminPinConfirm !== "string") return null;
   const draft: StaffDraft = {
     name: body.name.trim(), role: body.role as StaffDraft["role"], isActive: body.isActive,
     posEnabled: body.posEnabled, posPin: body.posPin, posPinConfirm: body.posPinConfirm,
-    adminEnabled: body.adminEnabled, adminLoginId: body.adminLoginId.trim().toLowerCase(),
+    adminEnabled: body.adminEnabled, adminPermission: body.adminPermission as StaffDraft["adminPermission"], adminLoginId: body.adminLoginId.trim().toLowerCase(),
     adminPin: body.adminPin, adminPinConfirm: body.adminPinConfirm,
   };
   const errors = validateStaffDraft(draft, original);

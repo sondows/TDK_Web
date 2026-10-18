@@ -3,7 +3,7 @@ import { and, asc, eq, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, paymentMethods, paymentMethodSettings } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 
 function canEdit(staff: Awaited<ReturnType<typeof getCurrentAdminStaff>>) {
@@ -60,6 +60,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const staff = await getCurrentAdminStaff();
   if (!canEdit(staff)) return Response.json({ success: false, message: "OWNER만 결제 설정을 변경할 수 있습니다." }, { status: 403 });
   try {
@@ -173,6 +174,7 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const staff = await getCurrentAdminStaff();
   if (!canEdit(staff)) return Response.json({ success: false, message: "OWNER만 결제 설정을 변경할 수 있습니다." }, { status: 403 });
   try {

@@ -1,3 +1,4 @@
+import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { canManageSettings } from "@/lib/permissions";
@@ -28,6 +29,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await authorizedStaff();
   if (auth.error) return auth.error;
   let stagedLogoFileName: string | null = null;

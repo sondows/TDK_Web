@@ -1,6 +1,6 @@
 import type { RowDataPacket } from "mysql2";
 import { pool } from "@/db";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 
 type PaymentRow = RowDataPacket & {
   payment_method_id: number;
@@ -18,6 +18,7 @@ type DetailRow = RowDataPacket & { input_type_snapshot: string; quantity: number
 class CorrectionError extends Error { constructor(message: string, public statusCode: number) { super(message); } }
 
 export async function PATCH(request: Request, context: { params: Promise<{ checkoutId: string; paymentId: string }> }) {
+  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
   const admin = await getCurrentAdminStaff();
   if (!admin) return Response.json({ success: false, message: "관리자 권한이 필요합니다." }, { status: 403 });
   const { checkoutId: checkoutParam, paymentId: paymentParam } = await context.params;

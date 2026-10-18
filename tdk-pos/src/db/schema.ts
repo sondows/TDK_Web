@@ -66,6 +66,9 @@ export const staff = mysqlTable(
     pinHash: varchar("pin_hash", { length: 255 }),
     adminLoginId: varchar("admin_login_id", { length: 32 }),
     adminPinHash: varchar("admin_pin_hash", { length: 255 }),
+    adminPermission: mysqlEnum("admin_permission", ["NONE", "READ_ONLY", "READ_WRITE"])
+      .notNull()
+      .default("NONE"),
     role: mysqlEnum("role", ["OWNER", "MANAGER", "STAFF"])
       .notNull()
       .default("STAFF"),

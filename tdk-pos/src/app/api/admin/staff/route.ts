@@ -1,3 +1,4 @@
+import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
@@ -29,6 +30,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   if (!await requireOwner()) return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });
   try {
     const values = parse(await request.json() as Record<string, unknown>);

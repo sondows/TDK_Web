@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { customerPrepaidLedger, customers } from "@/db/schema";
 import { validateCustomerCreate } from "@/lib/customer";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
   status,
@@ -81,6 +81,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
   try {
     const auth = await authorize();
     if (auth.error) return auth.error;

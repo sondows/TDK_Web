@@ -2,10 +2,11 @@ import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
 import { hashAdminPin, isValidAdminPin } from "@/lib/auth";
-import { isValidAdminLoginId, normalizeAdminLoginId } from "@/lib/admin-auth";
+import { isValidAdminLoginId, normalizeAdminLoginId, requireAdminWriteForAdminSession } from "@/lib/admin-auth";
 import { getPrivilegedStaff } from "@/lib/permissions";
 
 export async function PUT(request: Request, { params }: { params: Promise<{ staffId: string }> }) {
+  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const actor = await getPrivilegedStaff();
   if (!actor || actor.role !== "OWNER" || actor.staffCode === "000") return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });
   const staffId = Number((await params).staffId);

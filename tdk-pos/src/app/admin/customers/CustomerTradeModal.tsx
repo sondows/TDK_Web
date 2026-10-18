@@ -6,6 +6,7 @@ import { formatTradeBalance, tradeDescription, type CustomerTradeResponse, type 
 import CustomerTradeDetailModal from "./CustomerTradeDetailModal";
 import CustomerTradeEntryModal, { type TradeAction } from "./CustomerTradeEntryModal";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
+import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 function customerLabel(customer: CustomerSummary) {
@@ -22,6 +23,7 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
   onChanged: () => void;
   onClose: () => void;
 }) {
+  const readOnly = useAdminReadOnly();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [balance, setBalance] = useState(customer.tradeBalance);
   const [entries, setEntries] = useState<CustomerTradeRow[]>([]);
@@ -90,11 +92,11 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
           <span>현재 거래잔액</span>
           <strong className={balance > 0 ? styles.customerPositiveBalance : balance < 0 ? styles.customerNegativeBalance : styles.customerZeroBalance}>{formatTradeBalance(balance)}</strong>
         </div>
-        <div className={styles.customerTradeActions}>
+        {!readOnly && <div className={styles.customerTradeActions}>
           <button onClick={() => setAction("DEPOSIT")} type="button">입금</button>
           <button disabled={balance <= 0} onClick={() => setAction("REFUND")} type="button">환불</button>
           <button onClick={() => setAction("ADJUSTMENT")} type="button">잔액조정</button>
-        </div>
+        </div>}
         <div className={styles.customerTradeFilters}>
           <span>기간</span>
           <input aria-label="시작일" onChange={event => setStartDate(event.target.value)} type="date" value={startDate} />

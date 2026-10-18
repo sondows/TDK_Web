@@ -26,7 +26,7 @@ const navigation: NavigationItem[] = [
   { label: "직원 관리", href: "/admin/staff" },
   {
     id: "pos-settings",
-    label: "POS 설정",
+    label: "POS",
     href: "/admin/settings/pos",
     children: [
       { label: "테이블 설정", href: "/admin/tables" },
@@ -34,6 +34,7 @@ const navigation: NavigationItem[] = [
       { label: "할인 설정", href: "/admin/settings/discounts" },
       { label: "기타결제 설정", href: "/admin/settings/other-payments" },
       { label: "포장 설정", href: "/admin/settings/takeout" },
+      { label: "영업마감", href: "/admin/settings/pos/business-closing" },
     ],
   },
   {
