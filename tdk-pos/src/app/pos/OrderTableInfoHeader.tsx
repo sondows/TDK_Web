@@ -28,7 +28,7 @@ export default function OrderTableInfoHeader({ selected, selectedCustomer, party
   partyTableNos: string[];
   partyTotals: { adult: number; baby: number } | null;
   now: number;
-  onSelectCustomer: () => void;
+  onSelectCustomer?: () => void;
 }) {
   if (!selected) return null;
   const displayName = selected.sessionKind && selected.sessionKind !== "DINE_IN" ? "포장" : selected.tableNo;
@@ -47,7 +47,7 @@ export default function OrderTableInfoHeader({ selected, selectedCustomer, party
                   ? `${formatSessionElapsed(selected.openedAt, now)} (${formatTime(selected.openedAt)})`
                   : "-"}
               </p>
-              <button aria-label={selectedCustomer ? `${selectedCustomer.name} 고객 변경` : "고객 선택"} className="ml-auto h-5 max-w-[45%] shrink-0 truncate rounded-md border border-slate-300 bg-white px-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={onSelectCustomer} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ?? "고객"}</button>
+              {onSelectCustomer && <button aria-label={selectedCustomer ? `${selectedCustomer.name} 고객 변경` : "고객 선택"} className="ml-auto h-5 max-w-[45%] shrink-0 truncate rounded-md border border-slate-300 bg-white px-2 text-center text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={onSelectCustomer} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ?? "고객"}</button>}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-3">
               <p className="min-w-0 truncate text-xs text-slate-500">{partyTableNos.map((no) => `+${no}T`).join(" ")}</p>

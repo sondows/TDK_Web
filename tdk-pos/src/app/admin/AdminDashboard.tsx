@@ -154,7 +154,7 @@ export default function AdminDashboard() {
       </div>
     </section>
     <dialog ref={detailDialog} className={`${styles.customerModal} ${styles.dashboardDetail}`} onClose={() => setDetail(null)}>
-      {detail && <><PosSubHeader backIconSize={19} backLabel="판매내역으로 돌아가기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={<button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
+      {detail && <><PosSubHeader backLabel="판매내역으로 돌아가기" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={<button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
         <div className={styles.dashboardDetailBody}>
           <dl className={styles.dashboardFacts}><div><dt>테이블</dt><dd>{detail.tableLabel}</dd></div><div><dt>주문시간</dt><dd>{dateTime(detail.orderedAt)}</dd></div><div><dt>결제상태</dt><dd>{labels[detail.displayStatus]}</dd></div></dl>
           <h3>메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>수량</th><th>금액</th></tr></thead><tbody>{detail.items.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
@@ -169,7 +169,7 @@ export default function AdminDashboard() {
       <div className={styles.customerModalFooter}><button type="button" className={styles.customerCancelButton} disabled={busy} onClick={() => confirmDialog.current?.close()}>취소</button><button type="button" className={styles.staffDeleteConfirmButton} disabled={busy} onClick={() => void deleteSale()}>{busy ? "삭제 중..." : "삭제"}</button></div>
     </dialog>
     <dialog ref={methodDialog} className={`${styles.customerModal} ${styles.staffDeleteConfirm}`} onClose={() => { setEditingPaymentId(null); setSelectedMethodId(null); setSelectedCustomerId(null); setCorrectionError(""); }}>
-      <div className={styles.customerModalHeader}><div className={styles.dashboardDetailTitle}><AdminBackLink ariaLabel="판매 상세로 돌아가기" title="판매 상세로 돌아가기" onNavigate={() => methodDialog.current?.close()} size={38} iconSize={20} /><h2>결제수단 변경</h2></div></div>
+      <div className={`${styles.customerModalHeader} ${styles.customerBackHeader}`}><div className={styles.dashboardDetailTitle}><AdminBackLink ariaLabel="판매 상세로 돌아가기" title="판매 상세로 돌아가기" onNavigate={() => methodDialog.current?.close()} size={44} iconSize={28} tone="lightPlain" /><h2>결제수단 변경</h2></div></div>
       <div className={styles.paymentMethodChoices}>
         <p>현재: {editingPayment?.method ?? ""}</p>
         <div className={styles.paymentMethodGroup}>

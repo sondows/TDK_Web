@@ -27,13 +27,14 @@ export type TakeoutSession = {
 
 const packageBorder = "#16A34A";
 
-export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated, onCancelled, onBlockingUiChange }: {
+export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated, onCancelled, onBlockingUiChange, onBusinessOpeningRequired }: {
   sessions: TakeoutSession[];
   selectedId: number | null;
   onSelect: (session: TakeoutSession) => void;
   onCreated: (session: TakeoutSession) => void;
   onCancelled: (sessionId: number) => void;
   onBlockingUiChange?: (open: boolean) => void;
+  onBusinessOpeningRequired: (retry: () => void) => void;
 }) {
   const pending = useRef(false);
   const createRequest = useRef<{ kind: TakeoutSession["sessionKind"]; key: string } | null>(null);
@@ -101,7 +102,8 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "TAKEOUT_WALK_IN", requestKey: createRequest.current.key }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
+      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
+      if (response.status === 428 && result.openingRequired) { onBusinessOpeningRequired(() => void createTakeout()); return; }
       if (!response.ok || !result.success || !result.session) {
         failureMessage = result.message ?? failureMessage;
         throw new Error(failureMessage);
@@ -254,10 +256,10 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
       <div aria-label="예약주문 준비중" className="flex h-full min-h-0 min-w-0 items-center justify-center overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1"><span aria-hidden="true" className="pos-display-copy select-none text-xl font-extrabold tracking-wide text-blue-700">TDK-POS</span></div>
       <div aria-label="배달 준비중 목록" className="flex h-full min-h-0 min-w-0 items-center justify-center overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1"><span aria-hidden="true" className="pos-display-copy select-none text-xl font-extrabold tracking-wide text-blue-700">TDK-POS</span></div>
     </div>
-    {cancelTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4"><section aria-describedby="takeout-cancel-description" aria-labelledby="takeout-cancel-title" aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog"><PosSubHeader backLabel="포장취소 확인 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={closeCancelDialog} title="포장취소 확인" titleId="takeout-cancel-title" /><div className="px-7 py-7"><p className="pos-modal-copy text-center text-lg font-bold text-slate-800" id="takeout-cancel-description">포장 {formatPosTime(cancelTarget.orderCreatedAt ?? cancelTarget.openedAt)}를 취소하시겠습니까?<br />주문된 메뉴도 함께 취소됩니다.</p><div className="mt-8 grid grid-cols-2 gap-3"><button className="pos-modal-action min-h-14 rounded-xl border border-slate-300 text-lg font-bold text-slate-700 disabled:opacity-40" disabled={busy} onClick={closeCancelDialog} type="button">닫기</button><button className="pos-modal-action min-h-14 rounded-xl bg-red-600 text-lg font-extrabold text-white disabled:opacity-40" disabled={busy} onClick={() => void cancel()} type="button">{busy ? "취소 중..." : "포장취소"}</button></div></div></section></div>}
+    {cancelTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4"><section aria-describedby="takeout-cancel-description" aria-labelledby="takeout-cancel-title" aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog"><PosSubHeader backLabel="포장취소 확인 닫기" disabled={busy} level={1} onBack={closeCancelDialog} title="포장취소 확인" titleId="takeout-cancel-title" /><div className="px-7 py-7"><p className="pos-modal-copy text-center text-lg font-bold text-slate-800" id="takeout-cancel-description">포장 {formatPosTime(cancelTarget.orderCreatedAt ?? cancelTarget.openedAt)}를 취소하시겠습니까?<br />주문된 메뉴도 함께 취소됩니다.</p><div className="mt-8 grid grid-cols-2 gap-3"><button className="pos-modal-action min-h-14 rounded-xl border border-slate-300 text-lg font-bold text-slate-700 disabled:opacity-40" disabled={busy} onClick={closeCancelDialog} type="button">닫기</button><button className="pos-modal-action min-h-14 rounded-xl bg-red-600 text-lg font-extrabold text-white disabled:opacity-40" disabled={busy} onClick={() => void cancel()} type="button">{busy ? "취소 중..." : "포장취소"}</button></div></div></section></div>}
     {phoneOrderOpen && phoneOrderTime && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4">
       <section aria-modal="true" aria-labelledby="phone-takeout-title" className="flex max-h-[min(640px,calc(100dvh-2rem))] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl" role="dialog">
-        <PosSubHeader backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={closePhoneOrder} title="포장 수정" titleId="phone-takeout-title" trailing={<button aria-expanded={phoneCustomerSelectOpen} aria-haspopup="dialog" aria-label={phoneCustomer ? `${phoneCustomer.name} 고객 변경` : "고객 선택"} className={`${POS_HEADER_ACTION_CLASS_NAME} inline-flex min-h-10 min-w-10 max-w-[210px] items-center justify-center gap-1.5 overflow-hidden rounded-lg px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white`} disabled={busy} onClick={() => setPhoneCustomerSelectOpen(true)} title={phoneCustomer?.name ?? "고객 선택"} type="button"><span className="truncate">{phoneCustomer?.name ?? "고객"}</span><svg aria-hidden="true" className="size-4 shrink-0" fill="currentColor" viewBox="0 0 4 16"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="8" r="1.5" /><circle cx="2" cy="14" r="1.5" /></svg></button>} />
+        <PosSubHeader disabled={busy} level={1} onBack={closePhoneOrder} title="포장 수정" titleId="phone-takeout-title" trailing={<button aria-expanded={phoneCustomerSelectOpen} aria-haspopup="dialog" aria-label={phoneCustomer ? `${phoneCustomer.name} 고객 변경` : "고객 선택"} className={`${POS_HEADER_ACTION_CLASS_NAME} inline-flex min-h-10 min-w-10 max-w-[210px] items-center justify-center gap-1.5 overflow-hidden rounded-lg px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white`} disabled={busy} onClick={() => setPhoneCustomerSelectOpen(true)} title={phoneCustomer?.name ?? "고객 선택"} type="button"><span className="truncate">{phoneCustomer?.name ?? "고객"}</span><svg aria-hidden="true" className="size-4 shrink-0" fill="currentColor" viewBox="0 0 4 16"><circle cx="2" cy="2" r="1.5" /><circle cx="2" cy="8" r="1.5" /><circle cx="2" cy="14" r="1.5" /></svg></button>} />
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-white p-4">
             <div><p className="text-sm font-semibold text-slate-500">주문시간</p><p className="pos-display-copy mt-1 text-2xl font-extrabold text-slate-800">{formatPosTime(phoneOrderTime)}</p></div>
@@ -286,7 +288,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
     </div>}
     {keypadTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4">
       <section aria-modal="true" aria-labelledby="takeout-keypad-title" className="flex w-full max-w-[390px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
-        <PosSubHeader backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => setKeypadTarget(null)} title={keypadTarget === "pickup" ? "찾는시간 입력" : "전화번호 입력"} titleId="takeout-keypad-title" />
+        <PosSubHeader onBack={() => setKeypadTarget(null)} title={keypadTarget === "pickup" ? "찾는시간 입력" : "전화번호 입력"} titleId="takeout-keypad-title" />
         <div className="flex min-h-[390px] flex-col p-4"><NumericInputKeypad className="min-h-[330px]" inputAlign={keypadTarget === "phone" ? "right" : "center"} inputHeight={keypadTarget === "phone" ? 52 : 60} inputLabel={keypadTarget === "pickup" ? "찾는시간 HHmm" : ""} keys={["1", "2", "3", "4", "5", "6", "7", "8", "9", "BS", "0", "확인"]} onKey={handleKeypad} pinSized={keypadTarget === "phone"} smallBackspace value={keypadTarget === "pickup" && keypadInput.length === 4 && Number(keypadInput.slice(0, 2)) < 24 && Number(keypadInput.slice(2)) < 60 ? `${keypadInput.slice(0, 2)}:${keypadInput.slice(2)}` : keypadTarget === "phone" ? formatTakeoutPhone(keypadInput) : keypadInput} />{keypadError && <p className="mt-3 text-center text-sm font-semibold text-red-600" role="alert">{keypadError}</p>}</div>
       </section>
     </div>}

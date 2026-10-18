@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CustomerSummary } from "@/lib/customer";
 import { formatTradeBalance, tradeDescription, type CustomerTradeResponse, type CustomerTradeRow } from "@/lib/customer-trade";
+import CustomerTradeDetailModal from "./CustomerTradeDetailModal";
 import CustomerTradeEntryModal, { type TradeAction } from "./CustomerTradeEntryModal";
+import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import styles from "../admin.module.css";
 
 function customerLabel(customer: CustomerSummary) {
@@ -28,6 +30,7 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
   const [appliedStart, setAppliedStart] = useState("");
   const [appliedEnd, setAppliedEnd] = useState("");
   const [action, setAction] = useState<TradeAction | null>(null);
+  const [selectedLedgerId, setSelectedLedgerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -76,9 +79,9 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
 
   return (
     <dialog aria-labelledby="customer-trade-title" className={styles.customerTradeModal}
-      onCancel={event => { if (action) { event.preventDefault(); return; } onClose(); }} ref={dialogRef}>
+      onCancel={event => { if (action || selectedLedgerId !== null) { event.preventDefault(); return; } onClose(); }} ref={dialogRef}>
       <div className={styles.customerTradeHeader}>
-        <button aria-label="거래관리 닫기" className={styles.customerTradeBack} onClick={onClose} type="button">←</button>
+        <AdminBackLink ariaLabel="거래관리 닫기" iconSize={28} onNavigate={onClose} size={44} title="거래관리 닫기" tone="lightPlain" />
         <h2 id="customer-trade-title">거래관리</h2>
         <span className={styles.customerTradeCustomer}>{customerLabel(customer)}</span>
       </div>
@@ -106,13 +109,13 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
             <thead><tr><th>날짜/시간</th><th>내용</th><th>입금</th><th>출금</th><th>잔액</th></tr></thead>
             <tbody>
               {loading || error || !entries.length ? <tr><td className={styles.customerTradeEmpty} colSpan={5}>{loading ? "거래내역을 불러오는 중입니다." : error || "거래내역이 없습니다."}</td></tr> : entries.map(entry => (
-                <tr key={entry.ledgerId}>
+                <tr aria-label={`${tradeTime(entry.transactionAt)} ${tradeDescription(entry)} 거래 상세 보기`}
+                  className={styles.customerTradeRow} key={entry.ledgerId}
+                  onClick={() => setSelectedLedgerId(entry.ledgerId)}
+                  onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedLedgerId(entry.ledgerId); } }}
+                  role="button" tabIndex={0}>
                   <td>{tradeTime(entry.transactionAt)}</td>
-                  <td>
-                    <span>{tradeDescription(entry)}</span>
-                    {entry.memo && <small className={styles.customerTradeMemo}>{entry.memo}</small>}
-                    {entry.paymentId && <small className={styles.customerTradeMemo}>결제 #{entry.paymentId}{entry.checkoutId ? ` · 거래 #${entry.checkoutId}` : ""}</small>}
-                  </td>
+                  <td>{tradeDescription(entry)}</td>
                   <td>{entry.amount > 0 ? entry.amount.toLocaleString("ko-KR") : ""}</td>
                   <td>{entry.amount < 0 ? Math.abs(entry.amount).toLocaleString("ko-KR") : ""}</td>
                   <td className={entry.balance > 0 ? styles.customerPositiveBalance : entry.balance < 0 ? styles.customerNegativeBalance : styles.customerZeroBalance}>{formatTradeBalance(entry.balance)}</td>
@@ -123,6 +126,7 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
         </div>
       </div>
       {action && <CustomerTradeEntryModal action={action} balance={balance} customer={customer} onClose={() => setAction(null)} onSaved={() => { setAction(null); setRefreshKey(key => key + 1); onChanged(); }} />}
+      {selectedLedgerId !== null && <CustomerTradeDetailModal customerId={customer.customerId} ledgerId={selectedLedgerId} onClose={() => setSelectedLedgerId(null)} />}
     </dialog>
   );
 }

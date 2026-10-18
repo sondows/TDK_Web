@@ -88,7 +88,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
       onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
       ref={dialogRef}
     >
-      <PosSubHeader backLabel={customer ? "고객관리로 돌아가기" : "고객 등록 닫기"} backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} onBack={onClose} title={customer ? "고객 수정" : "고객 등록"} titleId="customer-create-title" trailing={<StaffToggle checked={isActive} disabled={busy} label="사용" onChange={setIsActive} variant="customer" />} trailingClassName={styles.customerHeaderStatus} />
+      <PosSubHeader backLabel={customer ? "고객관리로 돌아가기" : "고객 등록 닫기"} disabled={busy} onBack={onClose} title={customer ? "고객 수정" : "고객 등록"} titleId="customer-create-title" trailing={<StaffToggle checked={isActive} disabled={busy} label="사용" onChange={setIsActive} variant="customer" />} trailingClassName={styles.customerHeaderStatus} />
       <form noValidate onSubmit={submit}>
         <div className={styles.customerModalFields}>
           <div className={styles.customerField}>

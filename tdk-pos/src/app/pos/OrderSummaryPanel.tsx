@@ -13,6 +13,7 @@ import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDia
 import PosSubHeader from "./PosSubHeader";
 import OrderTableInfoHeader from "./OrderTableInfoHeader";
 import OrderSummaryRows from "./OrderSummaryRows";
+import OrderSummaryColumnHeader from "./OrderSummaryColumnHeader";
 import { ORDER_INFO_STYLES } from "./order-info-styles";
 type SessionDiscount = {
   sessionId: number;
@@ -674,12 +675,7 @@ export default function OrderSummaryPanel({
         style={{ backgroundColor: styles[tab].tint }}
       >
         <OrderTableInfoHeader selected={selected} selectedCustomer={selectedCustomer} partyTableNos={partyTableNos} partyTotals={partyTotals} now={now} onSelectCustomer={() => setCustomerSelectOpen(true)} />
-        <div className="mt-3 grid grid-cols-[1fr_52px_76px_58px] border-b border-slate-200 pb-2 text-[11px] font-bold text-slate-500">
-          <span>메뉴명</span>
-          <span className="text-right">단가</span>
-          <span className="text-center">수량</span>
-          <span className="text-right">금액</span>
-        </div>
+        <OrderSummaryColumnHeader className="mt-3" />
         <div className="min-h-0 flex flex-1 flex-col">
           {tab === "summary" ? (
             renderOrderContent("summary")

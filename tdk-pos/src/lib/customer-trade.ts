@@ -32,6 +32,39 @@ export type CustomerTradeResponse = {
   message?: string;
 };
 
+export type CustomerTradeDetail = {
+  entry: CustomerTradeRow;
+  balanceBefore: number;
+  customerName: string;
+  payment: {
+    paymentId: number;
+    methodName: string;
+    status: string;
+    amount: number;
+    appliedAmount: number;
+  } | null;
+  checkout: {
+    checkoutId: number;
+    status: string;
+    place: string | null;
+    subtotalAmount: number;
+    discountAmount: number;
+    totalAmount: number;
+    items: Array<{
+      checkoutItemId: number;
+      name: string;
+      qty: number;
+      unitPrice: number;
+      amount: number;
+      options: string[];
+      note: string | null;
+    }>;
+  } | null;
+  original: { ledgerId: number; paymentId: number | null } | null;
+};
+
+export type CustomerTradeDetailResponse = { success: boolean; detail?: CustomerTradeDetail; message?: string };
+
 export const tradeMethods = [
   { value: "CASH", label: "현금" },
   { value: "TRANSFER", label: "계좌이체" },
@@ -63,5 +96,19 @@ export function tradeDescription(entry: CustomerTradeRow) {
       return entry.memo ?? "식사 고객결제";
     case "CUSTOMER_PAYMENT_REVERSAL":
       return entry.memo ? `${entry.memo} 결제취소` : "식사 고객결제 취소";
+  }
+}
+
+export function tradeTypeLabel(type: TradeEntryType) {
+  switch (type) {
+    case "CUSTOMER_PAYMENT": return "고객결제";
+    case "CUSTOMER_PAYMENT_REVERSAL": return "고객결제 취소";
+    case "CARD_OVERPAYMENT":
+    case "PAYMENT_OVERPAYMENT": return "초과결제 선불적립";
+    case "CARD_OVERPAYMENT_REVERSAL":
+    case "PAYMENT_OVERPAYMENT_REVERSAL": return "선불적립 취소";
+    case "DEPOSIT": return "선불 입금";
+    case "REFUND": return "환불";
+    case "ADJUSTMENT": return "잔액조정";
   }
 }

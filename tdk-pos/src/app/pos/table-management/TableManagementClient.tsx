@@ -521,7 +521,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
   };
   return <Root className={`table-management-screen h-dvh overflow-hidden text-slate-900 ${modal ? "fixed inset-0 z-[60] bg-slate-950/55" : "bg-slate-100"}`}>
     <section aria-label="테이블 관리" aria-modal={modal ? true : undefined} className="table-management-card flex min-h-0 flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl" role={modal ? "dialog" : undefined} style={{ "--table-management-width-factor": MANAGEMENT_WIDTH_FACTOR } as CSSProperties}>
-      <PosSubHeader backIconSize={19} backLabel="POS로 돌아가기" backVisualSize={39} level={1} onBack={close} splitRatio title="테이블 관리" trailing={<div className="flex w-full min-w-0 items-center gap-4 border-l border-white/30 pl-5 text-xl font-semibold leading-tight text-white"><span aria-hidden="true" className="shrink-0 text-2xl text-white">ⓘ</span><span>{message}</span></div>} />
+      <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={close} splitRatio title="테이블 관리" trailing={<div className="flex w-full min-w-0 items-center gap-4 border-l border-white/30 pl-5 text-xl font-semibold leading-tight text-white"><span aria-hidden="true" className="shrink-0 text-2xl text-white">ⓘ</span><span>{message}</span></div>} />
       <div className="table-management-panel grid min-h-0 overflow-hidden bg-white" style={{ height: scene.panelHeight ?? undefined }}>
       <TableLayoutCanvas ref={canvasRef} className="table-management-canvas bg-slate-50">
         <div className="absolute inset-0 flex items-center justify-center" style={{ transform: `translateY(${scene.offsetY}px)` }}>
@@ -648,7 +648,7 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4" onClick={() => !busy && close()}>
       <section aria-modal="true" className="table-cancellation-dialog flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
-        <PosSubHeader backButtonSize={40} backLabel="뒤로가기" disabled={busy} onBack={close} title="테이블 취소" titleTrailing={<span className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xl font-bold"><span aria-hidden="true">..</span><span>{preview.tableNos.map(tableNo => `${tableNo}T`).join(" · ")}</span></span>} />
+        <PosSubHeader backLabel="뒤로가기" disabled={busy} onBack={close} title="테이블 취소" titleTrailing={<span className="ml-1 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xl font-bold"><span aria-hidden="true">..</span><span>{preview.tableNos.map(tableNo => `${tableNo}T`).join(" · ")}</span></span>} />
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_min(336px,45%)] divide-x divide-slate-200">
           <div className="table-cancel-details min-h-0 overflow-y-auto p-6">
             <div className="table-cancel-amount-card rounded-xl border border-slate-200 bg-red-50 px-4 py-3" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" }}>

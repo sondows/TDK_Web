@@ -1,8 +1,7 @@
 "use client";
 
-import { Suspense, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
-import PosTouchDiagnostics from "./PosTouchDiagnostics";
 
 function interactiveElement(target: EventTarget | null, root: HTMLElement) {
   if (!(target instanceof Element)) return null;
@@ -44,5 +43,5 @@ export default function PosClickSoundProvider({ children }: { children: ReactNod
     };
   }, []);
 
-  return <><div className="contents" ref={rootRef}>{children}</div><Suspense fallback={null}><PosTouchDiagnostics /></Suspense></>;
+  return <div className="contents" ref={rootRef}>{children}</div>;
 }

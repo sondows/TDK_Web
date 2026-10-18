@@ -11,7 +11,6 @@ import PosSubHeader from "../PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "../pos-header-action";
 
 const salesGridColumns = "grid-cols-[minmax(0,10fr)_minmax(0,15fr)_minmax(0,35fr)_minmax(0,12fr)_minmax(0,15fr)_minmax(0,13fr)]";
-import AdminBackLink from "../admin/AdminBackLink";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
@@ -413,7 +412,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
             ["인원", `${summary.incompleteGuestCount > 0 ? "자료 불완전" : summary.guestAverage === null ? "—" : formatMoney(summary.guestAverage)} (${summary.knownGuestCount})`],
             ["테이블당인원", summary.tableGuestAverage === null ? "—" : `${Number(summary.tableGuestAverage.toFixed(1))}명`],
             ["테이블이용시간", summary.durationMinutes === null ? "—" : displayDuration(summary.durationMinutes)],
-          ] as const).map(([label, value]) => <div className="flex min-h-[64px] items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm" key={label}>
+          ] as const).map(([label, value]) => <div className="flex min-h-[64px] items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3" key={label}>
             <span className="text-sm font-bold text-slate-600">{label}</span>
             <strong className="whitespace-nowrap text-right text-base font-extrabold text-slate-900">{value}</strong>
           </div>)}
@@ -442,10 +441,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
       {customOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
           <section aria-labelledby="range-calendar-title" aria-modal="true" className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl" role="dialog">
-            <div className="flex items-center gap-3">
-              <AdminBackLink ariaLabel="판매내역으로 돌아가기" title="판매내역으로 돌아가기" onNavigate={() => setCustomOpen(false)} size={38} iconSize={20} />
-              <h2 className="text-left text-2xl font-extrabold" id="range-calendar-title">기간지정</h2>
-            </div>
+            <PosSubHeader backLabel="판매내역으로 돌아가기" className="-mx-6 -mt-6" onBack={() => setCustomOpen(false)} title="기간지정" titleId="range-calendar-title" />
             <div className="mt-5 flex items-center justify-between">
               <button aria-label="이전 달" className="min-h-14 min-w-14 rounded-xl border border-slate-200 text-2xl font-bold active:bg-blue-100" onClick={() => setCalendarMonth(month => shiftMonth(month, -1))} type="button">‹</button>
               <strong className="text-2xl">{calendarYear}년 {calendarMonthNumber}월</strong>

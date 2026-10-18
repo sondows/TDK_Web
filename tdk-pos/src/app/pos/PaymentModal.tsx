@@ -12,7 +12,7 @@ import OtherPaymentDialog from "./OtherPaymentDialog";
 import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
-import { ORDER_INFO_STYLES } from "./order-info-styles";
+import { ORDER_INFO_SCROLL_BOX_CLASS_NAME, ORDER_INFO_STYLES } from "./order-info-styles";
 import OrderSummaryRows from "./OrderSummaryRows";
 
 type Discount = { sessionId: number; label: string; amount: number; type: string };
@@ -634,7 +634,7 @@ export default function PaymentModal({
         className="flex max-h-[calc(100dvh-32px)] w-[988px] shrink-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         role="dialog"
       >
-        <PosSubHeader backLabel="결제창 닫기" backIconSize={19} backVisualSize={39} className="!min-h-[63px] !py-1.5" disabled={busy} level={1} onBack={requestClose} title="결제" trailing={<button className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy || transactionCompleted} onClick={() => setCustomerSelectOpen(true)} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ? `${selectedCustomer.name} ⋮` : "고객 ⋮"}</button>} />
+        <PosSubHeader backLabel="결제창 닫기" disabled={busy} level={1} onBack={requestClose} title="결제" trailing={<button className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy || transactionCompleted} onClick={() => setCustomerSelectOpen(true)} title={selectedCustomer?.name ?? "고객"} type="button">{selectedCustomer?.name ? `${selectedCustomer.name} ⋮` : "고객 ⋮"}</button>} />
         <div className="grid min-h-0 grid-cols-[350px_minmax(0,1fr)_320px]">
           <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-slate-200 bg-white [contain:size]">
             <div className="shrink-0 px-2.5 pt-4">
@@ -653,7 +653,7 @@ export default function PaymentModal({
               </nav>
               <div className={`mt-1.5 h-[3px] ${ORDER_INFO_STYLES[orderTab].bg}`} />
             </div>
-            <div className="mx-2.5 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-b-xl border border-t-0 border-slate-200 px-2.5 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [touch-action:pan-y]" style={{ backgroundColor: ORDER_INFO_STYLES[orderTab].tint }}>
+            <div className={`${ORDER_INFO_SCROLL_BOX_CLASS_NAME} mx-2.5 mb-3 rounded-b-xl border-t-0`} style={{ backgroundColor: ORDER_INFO_STYLES[orderTab].tint }}>
               <div className="shrink-0 border-b border-slate-200 py-1 text-[27px] font-bold text-slate-900">{displayedTableNos.join(". ")}{sessionId ? "" : "T"}</div>
               <div className="mt-3 grid grid-cols-[1fr_52px_76px_58px] border-b border-slate-200 pb-2 text-[11px] font-bold text-slate-500">
                 <span>메뉴명</span>
@@ -768,7 +768,7 @@ export default function PaymentModal({
           </section>
           {receiptChooserOpen && <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4" onClick={() => setReceiptChooserOpen(false)}>
             <section aria-labelledby="receipt-chooser-title" aria-modal="true" className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
-              <PosSubHeader backIconSize={19} backLabel="영수증 선택 닫기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={() => setReceiptChooserOpen(false)} title="출력 영수증 선택" titleId="receipt-chooser-title" />
+              <PosSubHeader backLabel="영수증 선택 닫기" onBack={() => setReceiptChooserOpen(false)} title="출력 영수증 선택" titleId="receipt-chooser-title" />
               <div className="grid grid-cols-2 gap-3 p-5">
                 {availableReceiptTypes.includes("GENERAL") && <button className={`${paymentFooterButtonStyle} h-full min-w-0 px-3`} onClick={() => { setReceiptChooserOpen(false); void printGeneralReceipt(); }} type="button">영수증</button>}
                 {availableReceiptTypes.includes("SIGN") && signReceiptPayments.map(payment => <button className={`${paymentFooterButtonStyle} h-full min-w-0 px-3`} key={payment.paymentId} onClick={() => void printSignReceipt(payment.paymentId)} type="button">증빙용 영수증{signReceiptPayments.length > 1 ? ` · ${payment.customerName ?? payment.paymentId}` : ""}</button>)}
@@ -926,7 +926,7 @@ function PaymentDeletionDialog({
 function PaymentResetDialog({ paymentCount, error, busy, close, submit }: { paymentCount: number; error: string; busy: boolean; close: () => void; submit: () => void }) {
   return <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-950/45 p-4">
     <section aria-modal="true" className="w-full max-w-[440px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
-      <PosSubHeader backIconSize={19} backLabel="결제 초기화 닫기" backVisualSize={39} className="!min-h-[63px] !py-1.5" onBack={close} title="결제 초기화" />
+      <PosSubHeader backLabel="결제 초기화 닫기" onBack={close} title="결제 초기화" />
       <div className="px-7 py-6">
         <p className="text-center text-lg font-bold text-slate-800">등록된 결제 {paymentCount}건을 취소하고<br />결제 입력을 초기화하시겠습니까?</p>
         {error && <p aria-live="polite" className="mt-4 text-center text-sm font-bold text-red-600">{error}</p>}

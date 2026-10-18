@@ -114,7 +114,7 @@ export default function OpeningFundModal({ close, onOpenCashDrawer, drawerOpenin
 
   return <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/45 p-4">
     <section aria-modal="true" aria-labelledby="opening-fund-title" className={`flex w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-[width,max-width] duration-200 ease-out ${detailed ? "max-w-[780px]" : "max-w-[27rem]"}`} role="dialog">
-      <PosSubHeader backIconSize={19} backVisualSize={39} backLabel="영업준비금 등록 닫기" disabled={busy} onBack={close} title="영업준비금 등록" titleId="opening-fund-title" trailing={<button aria-expanded={detailed} className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy} onClick={() => setDetailed(open => !open)} type="button">{detailed ? "간단 ‹" : "상세 ›"}</button>} />
+      <PosSubHeader backLabel="영업준비금 등록 닫기" disabled={busy} onBack={close} title="영업준비금 등록" titleId="opening-fund-title" trailing={<button aria-expanded={detailed} className={POS_HEADER_ACTION_CLASS_NAME} disabled={busy} onClick={() => setDetailed(open => !open)} type="button">{detailed ? "간단 ‹" : "상세 ›"}</button>} />
       <div className={`grid max-h-[calc(90dvh-5rem)] overflow-y-auto ${detailed ? "grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
         <div className={`flex min-w-0 flex-col p-5 ${detailed ? "border-r border-slate-200" : ""}`}>
           <div className="mb-4 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2">

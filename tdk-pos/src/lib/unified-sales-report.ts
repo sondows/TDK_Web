@@ -26,6 +26,12 @@ type PaymentRow = RowDataPacket & FinancialPayment & { businessDate: string };
 type SessionRow = RowDataPacket & { checkoutId: number; sessionId: number; groupId: number | null; adults: number; children: number; openedAt: Date; closedAt: Date | null };
 type GroupSessionRow = RowDataPacket & { sessionId: number; groupId: number | null; adults: number; children: number; openedAt: Date; closedAt: Date | null };
 type MergeRow = RowDataPacket & { sourceId: number; destinationId: number };
+const checkoutBusinessDate = `COALESCE((SELECT MIN(bs.business_date) FROM checkout_items ci
+  JOIN order_items oi ON oi.order_item_id = ci.order_item_id
+  JOIN orders o ON o.order_id = oi.order_id
+  JOIN table_sessions ts ON ts.session_id = o.session_id
+  JOIN business_sessions bs ON bs.business_session_id = ts.business_session_id
+  WHERE ci.checkout_id = c.checkout_id), DATE(c.completed_at))`;
 
 async function loadCheckoutSessions(connection: PoolConnection, checkoutIds: number[]) {
   const result = new Map<number, GroupSessionRow[]>();
@@ -71,11 +77,11 @@ export async function loadUnifiedDailySales(start: string, endExclusive: string)
       [start, endExclusive],
     );
     const [checkouts] = await connection.query<CheckoutRow[]>(
-      "SELECT checkout_id AS id, DATE_FORMAT(completed_at, '%Y-%m-%d') AS businessDate, total_amount AS total, discount_amount AS discount FROM checkouts WHERE completed_at >= ? AND completed_at < ?",
+      `SELECT c.checkout_id AS id, DATE_FORMAT(${checkoutBusinessDate}, '%Y-%m-%d') AS businessDate, c.total_amount AS total, c.discount_amount AS discount FROM checkouts c WHERE c.completed_at IS NOT NULL AND ${checkoutBusinessDate} >= ? AND ${checkoutBusinessDate} < ?`,
       [start, endExclusive],
     );
     const [payments] = await connection.query<PaymentRow[]>(
-      "SELECT p.checkout_id AS checkoutId, DATE_FORMAT(c.completed_at, '%Y-%m-%d') AS businessDate, p.applied_amount AS appliedAmount, pm.method_type AS methodType, p.status, DATE_FORMAT(p.cancelled_at, '%Y-%m-%d') AS cancelledAt FROM payments p INNER JOIN checkouts c ON c.checkout_id = p.checkout_id INNER JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE c.completed_at >= ? AND c.completed_at < ?",
+      `SELECT p.checkout_id AS checkoutId, DATE_FORMAT(${checkoutBusinessDate}, '%Y-%m-%d') AS businessDate, p.applied_amount AS appliedAmount, pm.method_type AS methodType, p.status, DATE_FORMAT(p.cancelled_at, '%Y-%m-%d') AS cancelledAt FROM payments p INNER JOIN checkouts c ON c.checkout_id = p.checkout_id INNER JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE c.completed_at IS NOT NULL AND ${checkoutBusinessDate} >= ? AND ${checkoutBusinessDate} < ?`,
       [start, endExclusive],
     );
     const sessionsByCheckout = await loadCheckoutSessions(connection, checkouts.map(row => row.id));

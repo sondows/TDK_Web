@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
 import { isExternalAdminHost } from "@/lib/host-access";
 import "./globals.css";
 
@@ -25,12 +24,10 @@ export async function generateMetadata(): Promise<Metadata> {
 export const viewport: Viewport = { themeColor: "#2563EB" };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  const externalAdmin = isExternalAdminHost((await headers()).get("host"));
   return (
     <html lang="ko" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         {children}
-        {!externalAdmin && <Script src="/pos-touch-probe.js" strategy="beforeInteractive" />}
       </body>
     </html>
   );

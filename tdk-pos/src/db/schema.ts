@@ -207,6 +207,7 @@ export const tableSessions = mysqlTable("table_sessions", {
   })
     .autoincrement()
     .primaryKey(),
+  businessSessionId: bigint("business_session_id", { mode: "number", unsigned: true }).references(() => businessSessions.businessSessionId),
 
   tableId: bigint("table_id", {
     mode: "number",
@@ -267,6 +268,28 @@ export const menuCategories = mysqlTable("menu_categories", {
   posName: varchar("pos_name", { length: 100 }).notNull(),
   sortOrder: int("sort_order").notNull().default(0),
   isActive: tinyint("is_active").notNull().default(1),
+});
+
+/** A dated business can contain several independently closed intervals. */
+export const businessSessions = mysqlTable("business_sessions", {
+  businessSessionId: bigint("business_session_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  businessDate: date("business_date", { mode: "string" }).notNull(),
+  status: mysqlEnum("status", ["OPEN", "CLOSED"]).notNull().default("OPEN"),
+  openGuard: tinyint("open_guard").unique(),
+  cutoffTime: varchar("cutoff_time", { length: 5 }).notNull(),
+  openingCashEnabled: tinyint("opening_cash_enabled").notNull().default(0),
+  openingCash: decimal("opening_cash", { precision: 14, scale: 2 }),
+  openedAt: datetime("opened_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  closedAt: datetime("closed_at"),
+  closedByStaffId: bigint("closed_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  expectedCash: decimal("expected_cash", { precision: 14, scale: 2 }),
+  actualCash: decimal("actual_cash", { precision: 14, scale: 2 }),
+  cashDifference: decimal("cash_difference", { precision: 14, scale: 2 }),
+  closingSnapshot: text("closing_snapshot"),
+}, table => [index("idx_business_sessions_date").on(table.businessDate, table.businessSessionId)]);
+
+export const businessSessionMutex = mysqlTable("business_session_mutex", {
+  mutexId: tinyint("mutex_id").primaryKey(),
 });
 
 export const menus = mysqlTable("menus", {

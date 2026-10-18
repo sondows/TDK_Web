@@ -7,6 +7,13 @@ export type SummarySourceItem = {
   itemName: string;
   unitPrice: string;
   effectiveQty: number;
+  qty?: number;
+  options?: Array<{
+    modifierOptionId: number | null;
+    optionName: string;
+    qty: number;
+    unitPrice: string;
+  }>;
 };
 
 export type SummaryRow = {
@@ -186,11 +193,16 @@ export function buildOrderSummaryRows(items: SummarySourceItem[]): SummaryRow[] 
       continue;
     }
     const unitPrice = Number(item.unitPrice);
+    const sortedOptions = (item.options ?? []).slice().sort((left, right) =>
+      (left.modifierOptionId ?? 0) - (right.modifierOptionId ?? 0) || left.optionName.localeCompare(right.optionName, "ko"),
+    );
+    const optionLabel = sortedOptions.map(option => option.optionName).join(", ");
+    const optionSignature = sortedOptions.map(option => [option.modifierOptionId, option.optionName, Number(option.unitPrice), option.qty / Math.max(1, item.qty ?? item.effectiveQty)]);
     const rowKey = parentsWithComponents.has(item.orderItemId)
       ? `parent:${item.orderItemId}`
-      : JSON.stringify([item.itemType, item.menuId, item.itemName, unitPrice]);
+      : JSON.stringify([item.itemType, item.menuId, item.itemName, unitPrice, optionSignature]);
     const sequence = { orderId: item.orderId, orderItemId: item.orderItemId };
-    const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, itemType: item.itemType, components: [] };
+    const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, itemType: item.itemType, components: [], optionLabel };
     if (compareOrderSequence(sequence, row.orderSequence) < 0) row.orderSequence = sequence;
     row.qty += item.effectiveQty;
     row.total += (item.itemType === "SERVICE" ? 0 : unitPrice) * item.effectiveQty;

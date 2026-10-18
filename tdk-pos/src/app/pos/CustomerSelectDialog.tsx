@@ -98,7 +98,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
 
   return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4">
     <section aria-modal="true" className={`flex ${expanded ? "h-[min(515px,calc(100dvh-77px))] w-[1027px]" : "h-[min(560px,calc(100dvh-2rem))] w-[690px]"} shrink-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl`} role="dialog">
-      <PosSubHeader backLabel="고객 선택 닫기" backIconSize={19} backVisualSize={39} onBack={onClose} title="고객 선택" trailing={<button aria-expanded={expanded} className={POS_HEADER_ACTION_CLASS_NAME} onClick={() => expanded ? closeSearch() : setExpanded(true)} type="button">{expanded ? "간단 ‹" : "전화검색 ⋮"}</button>} />
+      <PosSubHeader backLabel="고객 선택 닫기" onBack={onClose} title="고객 선택" trailing={<button aria-expanded={expanded} className={POS_HEADER_ACTION_CLASS_NAME} onClick={() => expanded ? closeSearch() : setExpanded(true)} type="button">{expanded ? "간단 ‹" : "전화검색 ⋮"}</button>} />
       <div className={`grid min-h-0 flex-1 ${expanded ? "grid-cols-[420px_270px_337px]" : "grid-cols-[420px_270px]"}`}>
         <div aria-label="고객 목록" className="min-h-0 overflow-y-auto p-5" role="listbox">
           {loading ? <p>불러오는 중...</p> : error ? <p className="text-red-600" role="alert">{error}</p> : visibleRows.map(customer => <button

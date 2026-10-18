@@ -686,7 +686,8 @@
 .customerPaymentBadge:hover { background: #dfecef; }
 
 .customerTradeModal,
-.customerTradeEntryModal {
+.customerTradeEntryModal,
+.customerTradeDetailModal {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -703,13 +704,18 @@
 
 .customerTradeModal { width: min(980px, calc(100vw - 32px)); }
 .customerTradeEntryModal { width: min(520px, calc(100vw - 32px)); }
+.customerTradeDetailModal { width: min(640px, calc(100vw - 32px)); }
 .customerTradeModal::backdrop,
-.customerTradeEntryModal::backdrop { background: rgb(15 23 42 / 42%); }
-.customerTradeHeader { display: flex; min-height: 58px; align-items: center; gap: 14px; border-bottom: 1px solid #e2e8eb; padding: 0 24px; }
-.customerTradeHeader h2 { font-size: 19px; font-weight: 700; white-space: nowrap; }
-.customerTradeBack { width: 32px; height: 32px; border-radius: 4px; color: #455a64; font-size: 23px; }
-.customerTradeBack:hover { background: #f2f5f6; }
-.customerTradeCustomer { margin-left: auto; color: #52636c; font-size: 15px; font-weight: 600; text-align: right; }
+.customerTradeEntryModal::backdrop,
+.customerTradeDetailModal::backdrop { background: rgb(15 23 42 / 42%); }
+.customerTradeHeader, .customerModalHeader { display: flex; height: 64px; align-items: center; gap: 12px; border-bottom: 1px solid #e2e8eb; padding: 0 20px; }
+.customerTradeHeader, .customerBackHeader { padding-left: 4px; gap: 15px; }
+.customerTradeHeader > button, .dashboardDetailTitle > button { margin-right: -13px; }
+.customerModalHeader { justify-content: space-between; }
+.customerTradeHeader h2, .customerModalHeader h2 { min-width: 0; overflow: hidden; font-size: 19px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.customerModalClose { display: flex; width: 44px; height: 44px; flex: 0 0 44px; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: #25343b; font-size: 28px; line-height: 1; }
+.customerModalClose:hover { background: #f2f5f6; }
+.customerTradeCustomer { min-width: 0; overflow: hidden; margin-left: auto; color: #52636c; font-size: 15px; font-weight: 600; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .customerTradeBody { padding: 24px; }
 .customerTradeSummary { display: flex; align-items: baseline; gap: 16px; font-size: 15px; }
 .customerTradeSummary strong { font-size: 25px; }
@@ -726,6 +732,10 @@
 .customerTradeTable { width: 100%; min-width: 680px; border-collapse: collapse; font-size: 13px; text-align: left; }
 .customerTradeTable th { position: sticky; top: 0; border-top: 1px solid #e2e8eb; border-bottom: 1px solid #e2e8eb; background: #f8fafb; padding: 12px; color: #52636c; font-weight: 600; white-space: nowrap; }
 .customerTradeTable td { border-bottom: 1px solid #edf0f2; padding: 12px; vertical-align: top; }
+.customerTradeRow { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.customerTradeRow td { height: 48px; }
+.customerTradeRow:hover { background: #f2f5f6; }
+.customerTradeRow:focus-visible { background: #f2f5f6; outline: 2px solid #455a64; outline-offset: -2px; }
 .customerTradeTable th:nth-child(3),
 .customerTradeTable th:nth-child(4),
 .customerTradeTable th:nth-child(5),
@@ -733,7 +743,25 @@
 .customerTradeTable td:nth-child(4),
 .customerTradeTable td:nth-child(5) { text-align: right; white-space: nowrap; }
 .customerTradeEmpty { height: 150px; color: #78878f; text-align: center !important; }
-.customerTradeMemo { display: block; margin-top: 3px; color: #78878f; font-size: 12px; }
+.customerTradeDetailBody { display: flex; flex-direction: column; gap: 22px; padding: 24px; user-select: none; -webkit-user-select: none; }
+.customerTradeDetailLoading { padding: 30px 24px; color: #60717a; font-size: 14px; }
+.customerTradeDetailModal > .customerTradeError { padding: 20px 24px; }
+.customerTradeDetailTime { color: #52636c; font-size: 14px; font-weight: 600; }
+.customerTradeDetailFacts { display: flex; flex-direction: column; gap: 10px; }
+.customerTradeDetailFacts > div { display: flex; justify-content: space-between; gap: 18px; font-size: 14px; line-height: 1.45; }
+.customerTradeDetailFacts dt { flex: 0 0 auto; color: #60717a; }
+.customerTradeDetailFacts dd { min-width: 0; overflow-wrap: anywhere; font-weight: 600; text-align: right; }
+.customerTradeDetailSection { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid #e2e8eb; padding-top: 18px; }
+.customerTradeDetailSection h3 { color: #344e5a; font-size: 15px; font-weight: 700; }
+.customerTradeDetailItems { display: flex; flex-direction: column; }
+.customerTradeDetailItem { display: grid; grid-template-columns: minmax(0, 1fr) 46px 100px; gap: 10px; border-bottom: 1px solid #edf0f2; padding: 10px 0; font-size: 14px; }
+.customerTradeDetailItemName { min-width: 0; overflow-wrap: anywhere; }
+.customerTradeDetailItemName strong { font-weight: 600; }
+.customerTradeDetailItemName small { display: block; margin-top: 4px; color: #78878f; font-size: 12px; }
+.customerTradeDetailItemQty, .customerTradeDetailItemAmount { text-align: right; }
+.customerTradeDetailEmpty { color: #78878f; font-size: 14px; }
+.customerTradeDetailBalanceAfter { border-top: 1px solid #e2e8eb; padding-top: 10px; }
+.customerTradeDetailBalanceAfter dd { color: #344e5a; font-weight: 700; }
 .customerTradeEntryInfo { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .customerTradeEntryInfo strong { text-align: right; }
 .customerTradeMethods { border: 0; }
@@ -744,6 +772,7 @@
 .customerTradeEntryModal .customerFieldTextarea { min-height: 80px; }
 .customerTradeModal button:focus-visible,
 .customerTradeEntryModal button:focus-visible,
+.customerTradeDetailModal button:focus-visible,
 .customerTradeEntryModal input:focus-visible,
 .customerTradeEntryModal select:focus-visible { outline: 2px solid #b7cbd4; outline-offset: 1px; }
 
@@ -851,6 +880,7 @@
 .dashboardDetailDeleteButton { border: 0; border-radius: 6px; background: transparent; padding: 6px 8px; color: #fecaca; font-size: 14px; font-weight: 700; }
 .dashboardDetailDeleteButton:hover { background: rgb(255 255 255 / 12%); color: #fff; }
 .dashboardDetailTitle { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.customerBackHeader .dashboardDetailTitle { gap: 15px; }
 .dashboardDetailTitle h2 { min-width: 0; }
 .dashboardHeaderActions { display: flex; align-items: center; gap: 12px; }
 .dashboardDetailBody { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
@@ -1010,4 +1040,19 @@
 
 @media (max-width: 480px) {
   .userArea > span { display: none; }
+}
+
+@media (max-width: 620px) {
+  .customerTradeDetailModal {
+    box-sizing: border-box;
+    top: calc(50% + (env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) / 2);
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+  }
+  .customerTradeDetailModal .customerTradeHeader { padding: 0 4px; }
+  .customerTradeDetailBody { gap: 18px; padding: 16px; }
+  .customerTradeDetailFacts > div { gap: 12px; font-size: 13px; }
+  .customerTradeDetailItem { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; }
+  .customerTradeDetailItemName { grid-column: 1 / -1; }
+  .customerTradeDetailItemQty { text-align: left; }
 }

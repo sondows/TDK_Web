@@ -18,6 +18,7 @@ const navigation: NavigationItem[] = [
     children: [
       { label: "매출조회", href: "/admin/sales-report" },
       { label: "품목별 매출", href: "/admin/item-sales" },
+      { label: "영업마감 내역", href: "/admin/business-closings" },
       { label: "구 POS 일별매출", href: "/admin/legacy-sales" },
     ],
   },
