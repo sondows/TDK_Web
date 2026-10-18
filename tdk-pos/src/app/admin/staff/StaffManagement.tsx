@@ -60,17 +60,18 @@ export default function StaffManagement() {
         {!readOnly && <button className={styles.customerAddButton} onClick={() => setEditing(null)} ref={addButtonRef} type="button">+ 직원등록</button>}
       </div>
       <div className={styles.customerTableScroll}>
-        <table className={styles.customerTable}>
-          <thead><tr><th>이름</th><th>권한</th><th>POS</th><th>관리센터</th><th>상태</th><th>수정</th></tr></thead>
+        <table className={`${styles.customerTable} ${styles.staffTable}`}>
+          <thead><tr><th>이름</th><th>직원권한</th><th>POS</th><th>관리센터 권한</th><th>관리센터 ID</th><th>상태</th><th>수정</th></tr></thead>
           <tbody>
-            {loading ? <tr><td className={styles.customerEmpty} colSpan={6}>직원 목록을 불러오는 중입니다.</td></tr> :
-              error ? <tr><td className={styles.customerEmpty} colSpan={6} role="alert">{error}</td></tr> :
-              visible.length === 0 ? <tr><td className={styles.customerEmpty} colSpan={6}>{search ? "검색 결과가 없습니다." : "등록된 직원이 없습니다."}</td></tr> :
+            {loading ? <tr><td className={styles.customerEmpty} colSpan={7}>직원 목록을 불러오는 중입니다.</td></tr> :
+              error ? <tr><td className={styles.customerEmpty} colSpan={7} role="alert">{error}</td></tr> :
+              visible.length === 0 ? <tr><td className={styles.customerEmpty} colSpan={7}>{search ? "검색 결과가 없습니다." : "등록된 직원이 없습니다."}</td></tr> :
               visible.map(row => <tr key={row.staffId}>
                 <td className={styles.customerName}>{row.name}</td>
                 <td>{row.role}</td>
                 <td>{row.posEnabled ? "사용" : "미사용"}</td>
-                <td>{adminPermissionLabel[row.adminPermission]}{row.adminEnabled && row.adminLoginId ? ` · ${row.adminLoginId}` : ""}</td>
+                <td>{adminPermissionLabel[row.adminPermission]}</td>
+                <td className={styles.staffAdminLoginId} title={row.adminEnabled && row.adminLoginId ? row.adminLoginId : undefined}>{row.adminEnabled && row.adminLoginId ? row.adminLoginId : "-"}</td>
                 <td><span className={row.isActive ? styles.staffStatusActive : styles.staffStatusInactive}>{row.isActive ? "사용" : "사용중지"}</span></td>
                 <td>{!readOnly && <button className={styles.staffEditButton} onClick={() => setEditing(row)} type="button">{row.isShared ? row.posEnabled ? "POS PIN 변경" : "POS PIN 설정" : "수정"}</button>}</td>
               </tr>)}

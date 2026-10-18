@@ -610,6 +610,23 @@
 .customerTable th:nth-child(6), .customerTable td:nth-child(6) { width: 100px; }
 .customerTable th:nth-child(7), .customerTable td:nth-child(7) { width: 72px; }
 
+.staffTable {
+  min-width: 900px;
+  table-layout: fixed;
+}
+
+.staffTable th:first-child, .staffTable td:first-child { width: 18%; padding-right: 12px; padding-left: 12px; }
+.staffTable th:nth-child(2), .staffTable td:nth-child(2) { width: 11%; }
+.staffTable th:nth-child(3), .staffTable td:nth-child(3) { width: 9%; }
+.staffTable th:nth-child(4), .staffTable td:nth-child(4) { width: 16%; }
+.staffTable th:nth-child(5), .staffTable td:nth-child(5) { width: 18%; }
+.staffTable th:nth-child(6), .staffTable td:nth-child(6) { width: 10%; }
+.staffTable th:nth-child(7), .staffTable td:nth-child(7) { width: 18%; }
+.staffTable td { white-space: nowrap; }
+.staffTable .customerName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staffAdminLoginId { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staffTable .staffEditButton { white-space: nowrap; }
+
 .customerTable th {
   height: 44px;
   border-top: 1px solid #e2e8eb;
