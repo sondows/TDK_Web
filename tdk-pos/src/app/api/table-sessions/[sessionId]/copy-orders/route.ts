@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
-import { lockBusinessMutex } from "@/lib/business-session";
+import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 
 const CENTS = BigInt(100);
@@ -59,10 +59,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
     }
 
     const result = await db.transaction(async tx => {
-      await lockBusinessMutex(tx);
+      await ensureDailyOpeningCash(tx);
       const [source] = await tx.select({
         sessionId: tableSessions.sessionId,
-        businessSessionId: tableSessions.businessSessionId,
         tableId: tableSessions.tableId,
         groupId: tableSessions.groupId,
         personCount: tableSessions.personCount,
@@ -71,7 +70,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       }).from(tableSessions).innerJoin(diningTables, eq(tableSessions.tableId, diningTables.tableId))
         .where(and(eq(tableSessions.sessionId, sourceSessionId), eq(tableSessions.status, "OPEN"))).limit(1);
       if (!source || source.tableId === null) throw new CopyValidationError("사용 중인 테이블을 선택해 주세요.");
-      if (!source.businessSessionId) throw new CopyValidationError("기존 영업세션의 주문은 복사할 수 없습니다. 기존 주문을 완료해 주세요.");
       if (destinations.includes(source.tableId)) throw new CopyValidationError("원본 테이블은 복사 대상으로 선택할 수 없습니다.");
 
       await tx.execute(sql`SELECT session_id FROM table_sessions WHERE session_id = ${sourceSessionId} FOR UPDATE`);
@@ -130,7 +128,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       for (const destinationTableId of destinations) {
         const [sessionInsert] = await tx.insert(tableSessions).values({
           tableId: destinationTableId,
-          businessSessionId: source.businessSessionId,
           groupId,
           personCount: source.personCount,
           babyCount: source.babyCount,
@@ -191,6 +188,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 
     return Response.json({ success: true, ...result });
   } catch (error) {
+    if (error instanceof DailyOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
     if (error instanceof CopyValidationError) return Response.json({ success: false, message: error.message }, { status: error.status });
     console.error("order copy failed", error);
     return Response.json({ success: false, message: "주문 복사 처리에 실패했습니다." }, { status: 500 });

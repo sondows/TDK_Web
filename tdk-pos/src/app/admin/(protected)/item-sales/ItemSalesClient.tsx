@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import admin from "../../admin.module.css";
 import reportStyles from "../sales-report/sales-report.module.css";
 import styles from "./item-sales.module.css";
@@ -15,6 +14,7 @@ type Sort = "quantity" | "sales" | "name";
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());
+const shiftDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
   !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const money = (value: number) => `${Math.round(value).toLocaleString("ko-KR")}원`;
@@ -22,6 +22,7 @@ const count = (value: number) => `${value.toLocaleString("ko-KR")}개`;
 const average = (value: number, days: number) => days ? `${(value / days).toLocaleString("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}개` : "-";
 
 export default function ItemSalesClient() {
+  const today = todayInKorea();
   const [startDate, setStartDate] = useState(todayInKorea);
   const [endDate, setEndDate] = useState(todayInKorea);
   const [sort, setSort] = useState<Sort>("quantity");
@@ -79,6 +80,14 @@ export default function ItemSalesClient() {
     ["총 품목매출", report ? money(totalSales) : "-"], ["총 판매수량", report ? count(totalQty) : "-"],
     ["판매품목수", report ? count(report.rows.length) : "-"], ["일평균 판매수량", report ? average(totalQty, salesDayCount) : "-"],
   ];
+  const quickRanges = [
+    { id: "year", label: `${today.slice(0, 4)}년`, startDate: `${today.slice(0, 4)}-01-01`, endDate: today },
+    { id: "recent90", label: "최근 90일", startDate: shiftDays(today, -89), endDate: today },
+    { id: "recent30", label: "최근 30일", startDate: shiftDays(today, -29), endDate: today },
+    { id: "recent7", label: "최근 7일", startDate: shiftDays(today, -6), endDate: today },
+    { id: "today", label: "당일", startDate: today, endDate: today },
+  ] as const;
+  const activeQuickRange = quickRanges.find(range => range.startDate === startDate && range.endDate === endDate)?.id;
   const changeRange = (start: string, end: string) => {
     setStartDate(start); setEndDate(end); setReport(null); setSelected(null);
     setLoading(validDate(start) && validDate(end) && start <= end &&
@@ -91,13 +100,22 @@ export default function ItemSalesClient() {
 
   return <div className={admin.content}>
     <div className={reportStyles.heading}><div className={reportStyles.headingTitle}>
-      <AdminBackLink ariaLabel="관리센터로 돌아가기" size={40} iconSize={20} /><h1>품목별 매출</h1>
+      <h1>품목별 매출</h1><p className={admin.pageDescription}>기간별 품목 판매량과 매출 현황을 조회합니다.</p>
     </div></div>
     <section className={reportStyles.period} aria-label="조회기간"><strong>조회기간</strong>
       <div className={reportStyles.periodInputs}>
         <label><input aria-label="시작일" type="date" value={startDate} onChange={event => changeRange(event.target.value, endDate)} /></label>
         <span>~</span>
         <label><input aria-label="종료일" type="date" value={endDate} onChange={event => changeRange(startDate, event.target.value)} /></label>
+      </div>
+      <div aria-label="빠른 기간 선택" className={reportStyles.periodQuick}>
+        {quickRanges.map(range => <button
+          aria-pressed={activeQuickRange === range.id}
+          className={`${reportStyles.periodQuickButton} ${activeQuickRange === range.id ? reportStyles.periodQuickButtonActive : ""}`}
+          key={range.id}
+          onClick={() => changeRange(range.startDate, range.endDate)}
+          type="button"
+        >{range.label}</button>)}
       </div>
     </section>
     {!validRange && <p className={reportStyles.error} role="alert">조회기간을 확인해 주세요. 최대 10년까지 조회할 수 있습니다.</p>}

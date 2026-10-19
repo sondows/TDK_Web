@@ -10,12 +10,17 @@ import { resolveTableLayout } from "@/lib/table-layout";
 import { calculateTableFinancials, summarizeSessionFinancials } from "@/lib/table-session-financials";
 import { toQrLanguageDisplayCode } from "@/lib/qr-language-code";
 import { loadPosMenuCatalog } from "@/lib/pos-menu-catalog";
+import { dailyOpeningCashStatus } from "@/lib/daily-opening-cash";
+import PosOpeningGate from "./PosOpeningGate";
 
 type QrOrderLocaleRow = RowDataPacket & { sessionId: number; languageCode: string | null };
 
-export default async function PosPage() {
+export default async function PosPage({ searchParams }: { searchParams?: Promise<{ openingCashDismissed?: string }> } = {}) {
   const authenticatedStaff = await getCurrentStaff();
   if (!authenticatedStaff) redirect("/login");
+  const openingCashDismissed = await searchParams?.then(params => params.openingCashDismissed);
+  const openingCash = await dailyOpeningCashStatus();
+  if (openingCash.enabled && !openingCash.registered && openingCashDismissed !== "1") return <PosOpeningGate />;
   const currentStaff = authenticatedStaff.staffCode === "000"
     ? { name: "매장 공용", role: "SHARED" as const }
     : authenticatedStaff;

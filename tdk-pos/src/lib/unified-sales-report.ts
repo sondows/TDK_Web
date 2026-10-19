@@ -1,6 +1,6 @@
 import { pool } from "@/db";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
-import { summarizeSalesFinancials, type FinancialCheckout, type FinancialPayment } from "@/lib/sales-financial-summary";
+import { summarizeCheckoutBreakdown, summarizeSalesFinancials, type FinancialCheckout, type FinancialPayment } from "@/lib/sales-financial-summary";
 
 export type SalesSource = "LEGACY_POS" | "TDK_POS";
 export type DailySales = {
@@ -9,6 +9,9 @@ export type DailySales = {
   salesAmount: number;
   saleCount: number;
   discountAmount: number;
+  discountCount: number | null;
+  takeoutAmount: number | null;
+  takeoutCount: number | null;
   cardAmount: number;
   cashAmount: number;
   bankTransferAmount: number;
@@ -22,24 +25,34 @@ export type DailySales = {
 
 type LegacyRow = RowDataPacket & { businessDate: string; netSales: string; saleCount: number; discountAmount: string; cardAmount: string; cashAmount: string; bankTransferAmount: string; otherAmount: string };
 type CheckoutRow = RowDataPacket & FinancialCheckout & { businessDate: string };
-type PaymentRow = RowDataPacket & FinancialPayment & { businessDate: string };
-type SessionRow = RowDataPacket & { checkoutId: number; sessionId: number; groupId: number | null; adults: number; children: number; openedAt: Date; closedAt: Date | null };
+type PaymentRow = RowDataPacket & FinancialPayment & { paymentId: number; businessDate: string };
+type AllocationRow = RowDataPacket & { paymentId: number; checkoutId: number; appliedAmount: string; sessionKind: string };
+type SessionRow = RowDataPacket & { checkoutId: number; sessionId: number; sessionKind: string; groupId: number | null; adults: number; children: number; openedAt: Date; closedAt: Date | null };
 type GroupSessionRow = RowDataPacket & { sessionId: number; groupId: number | null; adults: number; children: number; openedAt: Date; closedAt: Date | null };
 type MergeRow = RowDataPacket & { sourceId: number; destinationId: number };
-const checkoutBusinessDate = `COALESCE((SELECT MIN(bs.business_date) FROM checkout_items ci
-  JOIN order_items oi ON oi.order_item_id = ci.order_item_id
-  JOIN orders o ON o.order_id = oi.order_id
-  JOIN table_sessions ts ON ts.session_id = o.session_id
-  JOIN business_sessions bs ON bs.business_session_id = ts.business_session_id
-  WHERE ci.checkout_id = c.checkout_id), DATE(c.completed_at))`;
+const checkoutBusinessDate = `DATE(c.completed_at)`;
+
+/** Earliest calendar sale date, using the checkout's final completion time. */
+export async function firstAvailableUnifiedSalesDate(): Promise<string | null> {
+  const [rows] = await pool.query<(RowDataPacket & { firstDate: string | null })[]>(
+    `SELECT DATE_FORMAT(MIN(firstDate), '%Y-%m-%d') AS firstDate FROM (
+      SELECT MIN(business_date) AS firstDate FROM legacy_daily_sales WHERE source = 'LEGACY_POS'
+      UNION ALL
+      SELECT MIN(${checkoutBusinessDate}) AS firstDate FROM checkouts c WHERE c.completed_at IS NOT NULL
+    ) availableDates`,
+  );
+  return rows[0]?.firstDate ?? null;
+}
 
 async function loadCheckoutSessions(connection: PoolConnection, checkoutIds: number[]) {
   const result = new Map<number, GroupSessionRow[]>();
-  if (!checkoutIds.length) return result;
+  const takeoutItemCheckoutIds = new Set<number>();
+  if (!checkoutIds.length) return { sessionsByCheckout: result, takeoutItemCheckoutIds };
   const [linked] = await connection.query<SessionRow[]>(
-    "SELECT DISTINCT ci.checkout_id AS checkoutId, ts.session_id AS sessionId, ts.group_id AS groupId, ts.person_count AS adults, ts.baby_count AS children, ts.opened_at AS openedAt, ts.closed_at AS closedAt FROM checkout_items ci JOIN order_items oi ON oi.order_item_id = ci.order_item_id JOIN orders o ON o.order_id = oi.order_id JOIN table_sessions ts ON ts.session_id = o.session_id WHERE ci.checkout_id IN (?)",
+    "SELECT DISTINCT ci.checkout_id AS checkoutId, ts.session_id AS sessionId, ts.session_kind AS sessionKind, ts.group_id AS groupId, ts.person_count AS adults, ts.baby_count AS children, ts.opened_at AS openedAt, ts.closed_at AS closedAt FROM checkout_items ci JOIN order_items oi ON oi.order_item_id = ci.order_item_id JOIN orders o ON o.order_id = oi.order_id JOIN table_sessions ts ON ts.session_id = o.session_id WHERE ci.checkout_id IN (?)",
     [checkoutIds],
   );
+  for (const row of linked) if (row.sessionKind !== "DINE_IN") takeoutItemCheckoutIds.add(row.checkoutId);
   const linkedIds = [...new Set(linked.map(row => row.sessionId))];
   const groupIds = [...new Set(linked.map(row => row.groupId).filter((id): id is number => id !== null))];
   const [groupSessions] = groupIds.length ? await connection.query<GroupSessionRow[]>(
@@ -64,7 +77,7 @@ async function loadCheckoutSessions(connection: PoolConnection, checkoutIds: num
     }
     result.set(checkoutId, [...ids].map(id => byId.get(id)!).filter(Boolean));
   }
-  return result;
+  return { sessionsByCheckout: result, takeoutItemCheckoutIds };
 }
 
 /** Uses the same completed_at, APPROVED applied_amount and checkout count rules as /api/sales/summary. */
@@ -81,19 +94,29 @@ export async function loadUnifiedDailySales(start: string, endExclusive: string)
       [start, endExclusive],
     );
     const [payments] = await connection.query<PaymentRow[]>(
-      `SELECT p.checkout_id AS checkoutId, DATE_FORMAT(${checkoutBusinessDate}, '%Y-%m-%d') AS businessDate, p.applied_amount AS appliedAmount, pm.method_type AS methodType, p.status, DATE_FORMAT(p.cancelled_at, '%Y-%m-%d') AS cancelledAt FROM payments p INNER JOIN checkouts c ON c.checkout_id = p.checkout_id INNER JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE c.completed_at IS NOT NULL AND ${checkoutBusinessDate} >= ? AND ${checkoutBusinessDate} < ?`,
+      `SELECT p.payment_id AS paymentId, p.checkout_id AS checkoutId, DATE_FORMAT(${checkoutBusinessDate}, '%Y-%m-%d') AS businessDate, p.applied_amount AS appliedAmount, pm.method_type AS methodType, p.status, DATE_FORMAT(p.cancelled_at, '%Y-%m-%d') AS cancelledAt FROM payments p INNER JOIN checkouts c ON c.checkout_id = p.checkout_id INNER JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE c.completed_at IS NOT NULL AND ${checkoutBusinessDate} >= ? AND ${checkoutBusinessDate} < ?`,
       [start, endExclusive],
     );
-    const sessionsByCheckout = await loadCheckoutSessions(connection, checkouts.map(row => row.id));
-    const checkoutByDay = new Map<string, FinancialCheckout[]>();
-    const paymentByDay = new Map<string, FinancialPayment[]>();
+    const checkoutIds = checkouts.map(row => row.id);
+    const { sessionsByCheckout, takeoutItemCheckoutIds } = await loadCheckoutSessions(connection, checkoutIds);
+    const [allocations] = checkoutIds.length ? await connection.query<AllocationRow[]>(
+      "SELECT psa.payment_id AS paymentId, p.checkout_id AS checkoutId, psa.applied_amount AS appliedAmount, ts.session_kind AS sessionKind FROM payment_session_allocations psa JOIN payments p ON p.payment_id = psa.payment_id JOIN table_sessions ts ON ts.session_id = psa.session_id WHERE p.checkout_id IN (?)",
+      [checkoutIds],
+    ) : [[] as AllocationRow[]];
+    const allocationByCheckout = new Map<number, AllocationRow[]>();
+    for (const row of allocations) allocationByCheckout.set(row.checkoutId, [...(allocationByCheckout.get(row.checkoutId) ?? []), row]);
+    const checkoutByDay = new Map<string, CheckoutRow[]>();
+    const paymentByDay = new Map<string, PaymentRow[]>();
     for (const row of checkouts) checkoutByDay.set(row.businessDate, [...(checkoutByDay.get(row.businessDate) ?? []), row]);
     for (const row of payments) paymentByDay.set(row.businessDate, [...(paymentByDay.get(row.businessDate) ?? []), row]);
     const current = new Map<string, DailySales>();
     for (const [date, dayCheckouts] of checkoutByDay) {
-      const money = summarizeSalesFinancials(dayCheckouts, paymentByDay.get(date) ?? [], date, date);
+      const dayPayments = paymentByDay.get(date) ?? [];
+      const money = summarizeSalesFinancials(dayCheckouts, dayPayments, date, date);
+      const breakdown = summarizeCheckoutBreakdown(dayCheckouts, dayPayments, takeoutItemCheckoutIds,
+        dayCheckouts.flatMap(checkout => allocationByCheckout.get(checkout.id) ?? []));
       const approvedByCheckout = new Map<number, number>();
-      for (const payment of paymentByDay.get(date) ?? []) if (payment.status === "APPROVED")
+      for (const payment of dayPayments) if (payment.status === "APPROVED")
         approvedByCheckout.set(payment.checkoutId, (approvedByCheckout.get(payment.checkoutId) ?? 0) + Math.max(0, Math.floor(Number(payment.appliedAmount))));
       let guestCount = 0, incompleteGuestCount = 0, durationTotalMinutes = 0, durationCount = 0;
       for (const checkout of dayCheckouts) {
@@ -110,7 +133,9 @@ export async function loadUnifiedDailySales(start: string, endExclusive: string)
       }
       current.set(date, {
         businessDate: date, source: "TDK_POS", salesAmount: money.netSales, saleCount: money.transactionCount,
-        discountAmount: money.discountAmount, cardAmount: money.cardAmount, cashAmount: money.cashAmount,
+        discountAmount: money.discountAmount, discountCount: breakdown.discountCount,
+        takeoutAmount: breakdown.takeoutAmount, takeoutCount: breakdown.takeoutCount,
+        cardAmount: money.cardAmount, cashAmount: money.cashAmount,
         bankTransferAmount: money.bankTransferAmount, otherAmount: money.otherAmount - money.bankTransferAmount,
         overlapWithOtherSource: false,
         guestCount, incompleteGuestCount, durationTotalMinutes, durationCount,
@@ -123,6 +148,9 @@ export async function loadUnifiedDailySales(start: string, endExclusive: string)
     for (const row of legacy) combined.set(row.businessDate, {
       businessDate: row.businessDate, source: "LEGACY_POS", salesAmount: Number(row.netSales),
       saleCount: Number(row.saleCount), discountAmount: Number(row.discountAmount),
+      discountCount: Number(row.discountAmount) > 0 ? null : 0,
+      takeoutAmount: Number(row.saleCount) > 0 || Number(row.netSales) > 0 ? null : 0,
+      takeoutCount: Number(row.saleCount) > 0 || Number(row.netSales) > 0 ? null : 0,
       cardAmount: Number(row.cardAmount), cashAmount: Number(row.cashAmount),
       bankTransferAmount: Number(row.bankTransferAmount), otherAmount: Number(row.otherAmount),
       overlapWithOtherSource: current.has(row.businessDate),

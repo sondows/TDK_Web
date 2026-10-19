@@ -1,8 +1,8 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { checkouts, customerPrepaidLedger, customers, paymentMethods, payments } from "@/db/schema";
+import { checkoutItems, checkouts, customerPrepaidLedger, customers, orderItems, orders, paymentMethods, payments } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
-import { adjustmentReasons, tradeMethods, type TradeEntryType } from "@/lib/customer-trade";
+import { adjustmentReasons, fullyReversedAdjacentLedgerPairs, tradeMethods, type TradeEntryType } from "@/lib/customer-trade";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
   status,
@@ -62,6 +62,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cust
       adjustmentReason: customerPrepaidLedger.adjustmentReason,
       memo: customerPrepaidLedger.memo,
       paymentId: customerPrepaidLedger.paymentId,
+      paymentStatus: payments.status,
       checkoutId: checkouts.checkoutId,
       paymentMethodName: paymentMethods.methodName,
       reversesLedgerId: customerPrepaidLedger.reversesLedgerId,
@@ -73,13 +74,50 @@ export async function GET(request: Request, { params }: { params: Promise<{ cust
       .orderBy(asc(customerPrepaidLedger.transactionAt), asc(customerPrepaidLedger.ledgerId));
 
     let balance = 0;
-    const entries = rows.map(row => {
+    const history = rows.map(row => {
       const amount = Number(row.amount);
       balance += amount;
       return { ...row, entryType: row.entryType as TradeEntryType, amount, balance };
-    }).filter(row => (!startDate || row.transactionAt.slice(0, 10) >= startDate)
+    });
+    const checkoutIds = [...new Set(history.flatMap(row => row.checkoutId === null ? [] : [row.checkoutId]))];
+    const soldMenuRows = checkoutIds.length ? await db.select({
+      checkoutId: checkoutItems.checkoutId,
+      checkoutItemId: checkoutItems.checkoutItemId,
+      orderId: orders.orderId,
+      orderItemId: orderItems.orderItemId,
+      itemName: orderItems.itemName,
+      itemType: orderItems.itemType,
+      qty: checkoutItems.qty,
+    }).from(checkoutItems)
+      .innerJoin(orderItems, eq(orderItems.orderItemId, checkoutItems.orderItemId))
+      .innerJoin(orders, eq(orders.orderId, orderItems.orderId))
+      .where(inArray(checkoutItems.checkoutId, checkoutIds))
+      .orderBy(asc(orders.orderId), asc(orderItems.orderItemId)) : [];
+    const menuCountsByCheckout = new Map<number, Map<string, number>>();
+    for (const item of soldMenuRows) {
+      // Only independently sold menu rows count; free service rows and included components do not.
+      if (item.itemType !== "NORMAL") continue;
+      const menuCounts = menuCountsByCheckout.get(item.checkoutId) ?? new Map<string, number>();
+      menuCounts.set(item.itemName, (menuCounts.get(item.itemName) ?? 0) + item.qty);
+      menuCountsByCheckout.set(item.checkoutId, menuCounts);
+    }
+    const menuSummaryByCheckout = new Map<number, string>();
+    for (const [checkoutId, menuCounts] of menuCountsByCheckout) {
+      const menus = [...menuCounts.entries()];
+      const [first, ...others] = menus;
+      if (first) menuSummaryByCheckout.set(checkoutId, `${first[0]}${first[1]}${others.length ? ` 외 ${others.length}건` : ""}`);
+    }
+    const historyWithOrderSummary = history.map(row => ({
+      ...row,
+      orderSummary: row.checkoutId === null ? null : menuSummaryByCheckout.get(row.checkoutId) ?? null,
+    }));
+    const pairs = fullyReversedAdjacentLedgerPairs(historyWithOrderSummary);
+    const entries = historyWithOrderSummary.filter(row => (!startDate || row.transactionAt.slice(0, 10) >= startDate)
       && (!endDate || row.transactionAt.slice(0, 10) <= endDate)).reverse();
-    return json({ success: true, balance, entries });
+    const visibleIds = new Set(entries.map(row => row.ledgerId));
+    const hideableLedgerIds = pairs.flatMap(pair => visibleIds.has(pair.originalId) && visibleIds.has(pair.reversalId)
+      ? [pair.originalId, pair.reversalId] : []);
+    return json({ success: true, balance, entries, hideableLedgerIds });
   } catch (error) {
     console.error("Failed to load customer trade ledger", error);
     return json({ success: false, message: "거래내역을 불러오지 못했습니다." }, 500);

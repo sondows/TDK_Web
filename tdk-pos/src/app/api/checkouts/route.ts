@@ -9,6 +9,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
 import { createLookupCode } from "@/lib/lookup-code";
+import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 
 type PaymentCode = "CARD" | "CASH" | "TRANSFER" | "MEAL_TICKET" | "GIFT" | "OTHER";
 const paymentCodes = new Set<PaymentCode>(["CARD", "CASH", "TRANSFER", "MEAL_TICKET", "GIFT", "OTHER"]);
@@ -304,6 +305,8 @@ export async function POST(request: Request) {
     if (!Number.isSafeInteger(tableId) || tableId === 0 || (body.sessionId !== undefined && Number(body.sessionId) <= 0)) throw new CheckoutError("주문을 확인해 주세요.", 400);
     const action = body.action;
     const result = await db.transaction(async tx => {
+      if (action === "PAY" || action === "PAY_OTHER" || action === "PAY_CUSTOMER" || action === "COMPLETE")
+        await ensureDailyOpeningCash(tx);
       requestPhase = `load bill (${String(action)})`;
       const bill = await currentBill(tx, tableId);
       const beforeDiscount = bill.total;
@@ -600,6 +603,8 @@ export async function POST(request: Request) {
       : historyIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, historyIds)) : [];
     return Response.json({ success: true, ...result, completedCheckoutIds, completedPayments: result.completed ? history : undefined, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds } });
   } catch (error) {
+    if (error instanceof DailyOpeningRequiredError)
+      return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
     console.error(`[POST /api/checkouts] failed during ${requestPhase}`, error);
     const knownError = error instanceof CheckoutError;
     const e = knownError ? error : new CheckoutError("결제를 처리할 수 없습니다.", 500);

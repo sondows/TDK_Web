@@ -5,9 +5,11 @@ import type { CustomerSummary } from "@/lib/customer";
 import { createRequestId } from "@/lib/request-id";
 import { adjustmentReasons, formatTradeBalance, tradeMethods } from "@/lib/customer-trade";
 import styles from "../admin.module.css";
+import CustomerTradeDateTimePicker, { formatCustomerTradeDateTime } from "./CustomerTradeDateTimePicker";
 
 export type TradeAction = "DEPOSIT" | "REFUND" | "ADJUSTMENT";
 
+const DEPOSIT_METHOD_ORDER = ["CARD", "CASH", "TRANSFER", "OTHER"] as const;
 function nowInKorea() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
@@ -40,6 +42,10 @@ export default function CustomerTradeEntryModal({ action, balance, customer, onC
   const numericAmount = Number(amount);
   const adjustment = action === "ADJUSTMENT" && amount !== "" && Number.isSafeInteger(numericAmount) ? numericAmount - balance : null;
   const name = customer.name.trim() || customer.phone || "—";
+  const visibleTradeMethods = action === "DEPOSIT"
+    ? DEPOSIT_METHOD_ORDER.map(value => tradeMethods.find(method => method.value === value))
+      .filter((method): method is (typeof tradeMethods)[number] => method !== undefined)
+    : tradeMethods;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -129,17 +135,27 @@ export default function CustomerTradeEntryModal({ action, balance, customer, onC
               <label htmlFor="customer-trade-custom-reason">기타 사유</label>
               <input className={styles.customerFieldInput} id="customer-trade-custom-reason" maxLength={100} onChange={event => setCustomReason(event.target.value)} value={customReason} />
             </div>}
-          </> : <fieldset className={styles.customerTradeMethods}>
-            <legend>{action === "DEPOSIT" ? "입금방법" : "환불방법"}</legend>
-            <div>{tradeMethods.map(method => <label key={method.value}>
-              <input checked={methodCode === method.value} onChange={() => setMethodCode(method.value)} type="radio" value={method.value} />
+          </> : <div className={styles.customerTradeMethodRow}>
+            <span id="customer-trade-method-label">{action === "DEPOSIT" ? "입금방법" : "환불방법"}</span>
+            <div aria-labelledby="customer-trade-method-label" className={styles.customerTradeMethods} role="radiogroup">
+              {visibleTradeMethods.map(method => <label key={method.value}>
+              <input checked={methodCode === method.value} name="customer-trade-method" onChange={() => setMethodCode(method.value)} type="radio" value={method.value} />
               {method.label}
-            </label>)}</div>
-          </fieldset>}
+            </label>)}
+            </div>
+          </div>}
           <div className={styles.customerField}>
-            <label htmlFor="customer-trade-at">{action === "ADJUSTMENT" ? "조정일시" : action === "DEPOSIT" ? "입금일시" : "환불일시"}</label>
-            <input className={styles.customerFieldInput} id="customer-trade-at" onChange={event => setTransactionAt(event.target.value)}
-              required type="datetime-local" value={transactionAt} />
+            {action === "DEPOSIT"
+              ? <span id="customer-trade-at-label">입금일시</span>
+              : <label htmlFor="customer-trade-at">{action === "ADJUSTMENT" ? "조정일시" : "환불일시"}</label>}
+            {action === "DEPOSIT"
+              ? <CustomerTradeDateTimePicker label="입금일시" onChange={setTransactionAt} value={transactionAt} />
+              : <div className={styles.customerTradeDateTime}>
+                <span aria-hidden="true">{formatCustomerTradeDateTime(transactionAt)}</span>
+                <input aria-label={action === "ADJUSTMENT" ? "조정일시" : "환불일시"}
+                  className={styles.customerFieldInput} id="customer-trade-at" onChange={event => setTransactionAt(event.target.value)}
+                  required type="datetime-local" value={transactionAt} />
+              </div>}
           </div>
           {action !== "ADJUSTMENT" && <div className={styles.customerField}>
             <label htmlFor="customer-trade-memo">메모</label>

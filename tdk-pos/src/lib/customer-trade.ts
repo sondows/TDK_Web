@@ -23,14 +23,43 @@ export type CustomerTradeRow = {
   checkoutId: number | null;
   paymentMethodName: string | null;
   reversesLedgerId: number | null;
+  orderSummary?: string | null;
 };
 
 export type CustomerTradeResponse = {
   success: boolean;
   balance: number;
   entries: CustomerTradeRow[];
+  hideableLedgerIds: number[];
   message?: string;
 };
+
+type ReversalCandidate = Pick<CustomerTradeRow, "ledgerId" | "entryType" | "amount" | "paymentId" | "reversesLedgerId"> & {
+  paymentStatus: string | null;
+};
+const reversedType: Partial<Record<TradeEntryType, TradeEntryType>> = {
+  CUSTOMER_PAYMENT: "CUSTOMER_PAYMENT_REVERSAL",
+  CARD_OVERPAYMENT: "CARD_OVERPAYMENT_REVERSAL",
+  PAYMENT_OVERPAYMENT: "PAYMENT_OVERPAYMENT_REVERSAL",
+};
+
+/** Rows must be in the complete-history order used for the displayed running balance. */
+export function fullyReversedAdjacentLedgerPairs(rows: readonly ReversalCandidate[]) {
+  const pairs: { originalId: number; reversalId: number }[] = [];
+  for (let index = 1; index < rows.length; index++) {
+    const original = rows[index - 1];
+    const reversal = rows[index];
+    const originalCents = Math.round(Number(original.amount) * 100);
+    const reversalCents = Math.round(Number(reversal.amount) * 100);
+    if (original.paymentId === null || reversal.paymentId !== original.paymentId ||
+        (reversal.paymentStatus !== "CANCELLED" && reversal.paymentStatus !== "REFUNDED") ||
+        reversal.reversesLedgerId !== original.ledgerId || reversedType[original.entryType] !== reversal.entryType ||
+        !Number.isSafeInteger(originalCents) || !Number.isSafeInteger(reversalCents) ||
+        originalCents === 0 || originalCents + reversalCents !== 0) continue;
+    pairs.push({ originalId: original.ledgerId, reversalId: reversal.ledgerId });
+  }
+  return pairs;
+}
 
 export type CustomerTradeDetail = {
   entry: CustomerTradeRow;
@@ -52,6 +81,10 @@ export type CustomerTradeDetail = {
     totalAmount: number;
     items: Array<{
       checkoutItemId: number;
+      orderId: number;
+      orderItemId: number;
+      parentOrderItemId: number | null;
+      itemType: "NORMAL" | "COMPONENT" | "SERVICE";
       name: string;
       qty: number;
       unitPrice: number;
@@ -93,9 +126,9 @@ export function tradeDescription(entry: CustomerTradeRow) {
     case "PAYMENT_OVERPAYMENT_REVERSAL":
       return `${entry.paymentMethodName ?? "결제"} 선불적립 취소`;
     case "CUSTOMER_PAYMENT":
-      return entry.memo ?? "식사 고객결제";
+      return entry.orderSummary ?? "식사 고객결제";
     case "CUSTOMER_PAYMENT_REVERSAL":
-      return entry.memo ? `${entry.memo} 결제취소` : "식사 고객결제 취소";
+      return entry.orderSummary ? `${entry.orderSummary} 결제취소` : "식사 고객결제 취소";
   }
 }
 

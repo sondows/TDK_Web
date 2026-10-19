@@ -19,12 +19,7 @@ const displayStatus = (checkoutStatus: string, rows: PaymentRow[]): SaleDisplayS
   const cancelled = rows.filter(row => row.status === "CANCELLED" || row.status === "REFUNDED").reduce((sum, row) => sum + won(row.appliedAmount), 0);
   return cancelled > 0 && approved === 0 ? "CANCELLED" : cancelled > 0 ? "PARTIALLY_CANCELLED" : "COMPLETED";
 };
-const businessDateSql = `COALESCE((SELECT MIN(bs.business_date) FROM checkout_items ci
-  JOIN order_items oi ON oi.order_item_id = ci.order_item_id
-  JOIN orders o ON o.order_id = oi.order_id
-  JOIN table_sessions ts ON ts.session_id = o.session_id
-  JOIN business_sessions bs ON bs.business_session_id = ts.business_session_id
-  WHERE ci.checkout_id = c.checkout_id), DATE(c.completed_at))`;
+const businessDateSql = `DATE(c.completed_at)`;
 
 export async function GET(request: Request) {
   if (!await getCurrentAdminStaff()) return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });

@@ -3,7 +3,7 @@ import { tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { and, eq, inArray } from "drizzle-orm";
-import { BusinessOpeningRequiredError, BusinessSessionConflictError, ensureBusinessSession } from "@/lib/business-session";
+import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 
 export async function POST(request: Request) {
   try {
@@ -68,13 +68,12 @@ export async function POST(request: Request) {
     }
 
     const sessionId = await db.transaction(async tx => {
-      const business = await ensureBusinessSession(tx);
+      await ensureDailyOpeningCash(tx);
       const [existing] = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
         .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN"))).limit(1);
-      if (existing) throw new BusinessSessionConflictError("이미 사용 중인 테이블입니다.");
+      if (existing) throw new Error("이미 사용 중인 테이블입니다.");
       const [insertResult] = await tx.insert(tableSessions).values({
         tableId, personCount, babyCount, status: "OPEN",
-        businessSessionId: business.businessSessionId,
         openedByStaffId: currentStaff?.staffId,
       });
       return Number(insertResult.insertId);
@@ -86,8 +85,8 @@ export async function POST(request: Request) {
       sessionId,
     });
   } catch (error) {
-    if (error instanceof BusinessOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
-    if (error instanceof BusinessSessionConflictError) return Response.json({ success: false, message: error.message }, { status: 409 });
+    if (error instanceof DailyOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
+    if (error instanceof Error && error.message === "이미 사용 중인 테이블입니다.") return Response.json({ success: false, message: error.message }, { status: 409 });
     console.error("테이블 세션 생성 오류:", error);
 
     return Response.json(

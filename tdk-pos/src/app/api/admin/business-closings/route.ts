@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { businessSessions } from "@/db/schema";
+import { businessSessions, dailyClosingSnapshots } from "@/db/schema";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 
 export async function GET(request: Request) {
@@ -28,5 +28,22 @@ export async function GET(request: Request) {
     day.sessions.push({ ...snapshot, closedAt: row.closedAtLocal ? `${row.closedAtLocal}+09:00` : null, sessionId: row.businessSessionId });
     days.set(row.businessDate, day);
   }
-  return Response.json({ success: true, days: [...days.values()] }, { headers: { "Cache-Control": "no-store" } });
+  const revisions = await db.select({
+    id: dailyClosingSnapshots.dailyClosingId, date: dailyClosingSnapshots.salesDate,
+    revision: dailyClosingSnapshots.revision, snapshot: dailyClosingSnapshots.snapshot,
+    closedAtLocal: sql<string>`DATE_FORMAT(${dailyClosingSnapshots.closedAt}, '%Y-%m-%dT%H:%i:%s')`,
+  }).from(dailyClosingSnapshots).where(and(
+    from ? gte(dailyClosingSnapshots.salesDate, from) : undefined,
+    to ? lte(dailyClosingSnapshots.salesDate, to) : undefined,
+  )).orderBy(desc(dailyClosingSnapshots.salesDate), asc(dailyClosingSnapshots.revision));
+  for (const row of revisions) {
+    const snapshot = JSON.parse(row.snapshot) as { totalSales: number; saleCount: number };
+    const day = days.get(row.date) ?? { businessDate: row.date, totalSales: 0, saleCount: 0, sessions: [] };
+    if (row.revision === 1) day.sessions = []; // Old session records are retained in DB, not mixed into new cumulative revisions.
+    day.totalSales = snapshot.totalSales;
+    day.saleCount = snapshot.saleCount;
+    day.sessions.push({ ...snapshot, closedAt: `${row.closedAtLocal}+09:00`, sessionId: row.id, revision: row.revision });
+    days.set(row.date, day);
+  }
+  return Response.json({ success: true, days: [...days.values()].sort((a, b) => b.businessDate.localeCompare(a.businessDate)) }, { headers: { "Cache-Control": "no-store" } });
 }

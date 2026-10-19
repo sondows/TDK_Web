@@ -1,0 +1,22 @@
+.period { margin-bottom: 16px; }
+.periodInputs input { min-height: 40px; border-color: #cbd5da; border-radius: 4px; background: #fff; padding: 0 10px; color: #25343b; font-size: 14px; }
+.searchButton { min-height: 40px; border: 1px solid #cbd5da; border-radius: 4px; background: #fff; padding: 0 14px; color: #344e5a; font-size: 13px; font-weight: 600; }
+.searchButton:hover { background: #f2f5f6; }
+.searchButton:focus-visible, .session summary:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+.dayCard { border: 1px solid #dce3e7; border-radius: 5px; background: #fff; padding: 16px; }
+.dayCard h2 { color: #25343b; font-size: 18px; font-weight: 700; }
+.sessions { display: grid; gap: 8px; margin-top: 12px; }
+.session { border: 1px solid #dce3e7; border-radius: 4px; background: #fff; }
+.session summary { min-height: 44px; padding: 12px; color: #344e5a; cursor: pointer; font-weight: 600; }
+.session summary:hover { background: #f8fafb; }
+.sessionDetails { margin: 0 12px 12px; border-top: 1px solid #e2e8eb; padding-top: 8px; color: #34434a; font-size: 14px; }
+.detailLine { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.detailLine span { color: #60717a; }
+.detailLine strong { color: #25343b; font-weight: 600; text-align: right; }
+.error { color: #b42318; font-size: 14px; }
+.message, .empty { color: #60717a; }
+.empty { border: 1px solid #dce3e7; border-radius: 5px; background: #fff; padding: 20px; }
+@media (max-width: 620px) {
+  .periodInputs { flex-wrap: wrap; }
+  .periodInputs input { min-width: 140px; }
+}

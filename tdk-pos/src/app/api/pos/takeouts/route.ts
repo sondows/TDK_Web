@@ -8,7 +8,7 @@ import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { isValidPickupAt, pickupAtAfterMinutes } from "@/lib/phone-takeout-time";
 import { defaultTakeoutPreparationMinutes, getTakeoutPreparationMinutes } from "@/lib/takeout-preparation-setting";
 import { hasOutstandingTakeoutPayment } from "@/lib/takeout-cancellation-payment";
-import { BusinessOpeningRequiredError, BusinessSessionConflictError, ensureBusinessSession } from "@/lib/business-session";
+import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 
 export const dynamic = "force-dynamic";
 
@@ -89,9 +89,8 @@ export async function POST(request: Request) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const created = await db.transaction(async tx => {
-        const business = await ensureBusinessSession(tx);
+        await ensureDailyOpeningCash(tx);
         const [inserted] = await tx.insert(tableSessions).values({
-          businessSessionId: business.businessSessionId,
           tableId: null,
           sessionKind: body.kind as "TAKEOUT_WALK_IN" | "TAKEOUT_PHONE",
           createRequestKey: body.requestKey as string,
@@ -119,8 +118,7 @@ export async function POST(request: Request) {
       });
       return Response.json({ success: true, session: created }, { status: 201 });
     } catch (error) {
-      if (error instanceof BusinessOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
-      if (error instanceof BusinessSessionConflictError) return Response.json({ success: false, message: error.message }, { status: 409 });
+      if (error instanceof DailyOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
       const duplicate = (error as { code?: string; cause?: { code?: string } }).code === "ER_DUP_ENTRY" || (error as { cause?: { code?: string } }).cause?.code === "ER_DUP_ENTRY";
       if (duplicate) {
         const prior = await existingRequest();

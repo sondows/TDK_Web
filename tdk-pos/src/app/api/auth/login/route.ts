@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
 import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
+import { dailyOpeningCashStatus } from "@/lib/daily-opening-cash";
 import {
   createSessionToken,
   hashSessionToken,
@@ -47,6 +48,9 @@ export async function POST(request: Request) {
       );
     }
 
+    const openingCash = await dailyOpeningCashStatus();
+    const needsOpeningCash = openingCash.enabled && !openingCash.registered;
+
     const token = createSessionToken();
     await db.insert(staffSessions).values({
       staffId: staffMember.staffId,
@@ -54,7 +58,7 @@ export async function POST(request: Request) {
       status: "ACTIVE",
     });
 
-    const response = NextResponse.json({ success: true });
+    const response = NextResponse.json({ success: true, needsOpeningCash });
     response.cookies.set(SESSION_COOKIE_NAME, token, sessionCookieOptions);
     return response;
   } catch (error) {

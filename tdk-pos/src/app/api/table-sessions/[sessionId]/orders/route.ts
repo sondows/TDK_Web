@@ -2,10 +2,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 
 import { db } from "@/db";
-import { businessSessions, menuComponents, menuModifierGroups, menus, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
+import { menuComponents, menuModifierGroups, menus, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
+import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 
 type RequestedItem = { menuId: number; qty: number; isComplimentary: boolean; components: Array<{ menuComponentId: number; qty: number }>; options: Array<{ modifierOptionId: number; qty: number }> };
 const CENTS_PER_UNIT = BigInt(100);
@@ -62,12 +63,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
     if (!Number.isSafeInteger(sessionId) || sessionId <= 0 || !requestedItems) return Response.json({ success: false, message: "주문 요청이 올바르지 않습니다." }, { status: 400 });
 
     await db.transaction(async tx => {
-      const [session] = await tx.select({ sessionId: tableSessions.sessionId, businessSessionId: tableSessions.businessSessionId }).from(tableSessions).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
+      await ensureDailyOpeningCash(tx);
+      const [session] = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
       if (!session) throw new OrderValidationError("테이블 세션이 종료되었거나 존재하지 않습니다.");
-      if (!session.businessSessionId) throw new OrderValidationError("기존 영업세션의 추가 주문은 중지되었습니다. 기존 주문을 완료해 주세요.");
-      const [business] = await tx.select({ status: businessSessions.status }).from(businessSessions)
-        .where(eq(businessSessions.businessSessionId, session.businessSessionId)).limit(1);
-      if (business?.status !== "OPEN") throw new OrderValidationError("영업이 마감되었습니다. POS 화면을 새로고침해 주세요.");
 
       const menuIds = [...new Set(requestedItems.map(item => item.menuId))];
       const availableMenus = await tx.select({ menuId: menus.menuId, posName: menus.posName, price: menus.price, prepStationId: menus.prepStationId }).from(menus).where(and(inArray(menus.menuId, menuIds), eq(menus.isActive, 1)));
@@ -161,6 +159,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
 
     return Response.json({ success: true, message: "주문을 저장했습니다." });
   } catch (error) {
+    if (error instanceof DailyOpeningRequiredError) return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });
     if (error instanceof OrderValidationError) return Response.json({ success: false, message: error.message }, { status: 409 });
     console.error("POS 주문 저장 오류:", error);
     return Response.json({ success: false, message: "주문 저장에 실패했습니다." }, { status: 500 });

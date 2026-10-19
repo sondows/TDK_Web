@@ -15,13 +15,12 @@ const nextDay = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) + 86_
 
 // Checkout item snapshots already contain the quantity left after item cancellations.
 // APPROVED payments establish a completed sale without multiplying rows for split payments.
-const businessDateSql = "COALESCE(bs.business_date, DATE(c.completed_at))";
+const businessDateSql = "DATE(c.completed_at)";
 const soldItems = `FROM checkout_items ci
   JOIN checkouts c ON c.checkout_id = ci.checkout_id
   JOIN order_items oi ON oi.order_item_id = ci.order_item_id
   JOIN orders o ON o.order_id = oi.order_id
   JOIN table_sessions ts ON ts.session_id = o.session_id
-  LEFT JOIN business_sessions bs ON bs.business_session_id = ts.business_session_id
   WHERE ${businessDateSql} >= ? AND ${businessDateSql} < ? AND c.status = 'PAID'
     AND ci.qty > 0 AND ci.unit_price > 0 AND ci.amount > 0
     AND oi.item_type <> 'SERVICE'

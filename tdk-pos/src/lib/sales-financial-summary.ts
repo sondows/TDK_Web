@@ -47,3 +47,32 @@ export function summarizeSalesFinancials(
     cardAmount, cardCount, cashAmount, cashCount, otherAmount, otherCount, bankTransferAmount,
   };
 }
+
+/** Additional checkout facts for reports, using the closing preview's sold-checkout and session-allocation rules. */
+export function summarizeCheckoutBreakdown(
+  checkouts: Pick<FinancialCheckout, "id" | "discount">[],
+  payments: (Pick<FinancialPayment, "checkoutId" | "appliedAmount" | "status"> & { paymentId: number })[],
+  takeoutItemCheckoutIds: ReadonlySet<number>,
+  allocations: { paymentId: number; checkoutId: number; appliedAmount: string | number; sessionKind: string }[],
+) {
+  const approvedPayments = payments.filter(payment => payment.status === "APPROVED" && won(payment.appliedAmount) > 0);
+  const approvedByCheckout = new Set(approvedPayments.map(payment => payment.checkoutId));
+  const approvedByPayment = new Map(approvedPayments.map(payment => [payment.paymentId, payment]));
+  const takeoutCheckoutIds = new Set(takeoutItemCheckoutIds);
+  const allocatedByPayment = new Map<number, number>();
+  let takeoutAmount = 0;
+  for (const allocation of allocations) {
+    if (allocation.sessionKind !== "DINE_IN") takeoutCheckoutIds.add(allocation.checkoutId);
+    if (!approvedByPayment.has(allocation.paymentId)) continue;
+    const applied = won(allocation.appliedAmount);
+    allocatedByPayment.set(allocation.paymentId, (allocatedByPayment.get(allocation.paymentId) ?? 0) + applied);
+    if (allocation.sessionKind !== "DINE_IN" && applied > 0) takeoutAmount += applied;
+  }
+  const takeoutComplete = approvedPayments.every(payment =>
+    !takeoutCheckoutIds.has(payment.checkoutId) || (allocatedByPayment.get(payment.paymentId) ?? 0) === won(payment.appliedAmount));
+  return {
+    discountCount: checkouts.filter(checkout => approvedByCheckout.has(checkout.id) && won(checkout.discount) > 0).length,
+    takeoutAmount: takeoutComplete ? takeoutAmount : null,
+    takeoutCount: takeoutComplete ? [...takeoutCheckoutIds].filter(id => approvedByCheckout.has(id)).length : null,
+  };
+}

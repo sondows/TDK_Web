@@ -7,6 +7,7 @@ import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import { PIN_LENGTH } from "@/lib/pin";
+import OpeningFundModal from "@/app/pos/OpeningFundModal";
 
 type Staff = {
   staffId: number;
@@ -30,6 +31,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPinError, setShowPinError] = useState(false);
+  const [openingCashRequired, setOpeningCashRequired] = useState(false);
   const verificationRequestId = useRef(0);
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ staffCode: staffMember.staffCode, pin: pinValue }),
       });
-      const result = await response.json() as { success?: boolean };
+      const result = await response.json() as { success?: boolean; needsOpeningCash?: boolean };
 
       if (!response.ok || !result.success) {
         resetPinVerification();
@@ -81,7 +83,8 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace("/pos");
+      if (result.needsOpeningCash) setOpeningCashRequired(true);
+      else router.replace("/pos");
     } catch {
       setMessage("로그인 요청 중 네트워크 오류가 발생했습니다.");
     } finally {
@@ -197,6 +200,7 @@ export default function LoginPage() {
           </section>
         </div>
       )}
+      {openingCashRequired && <OpeningFundModal context="login" close={() => { setOpeningCashRequired(false); router.replace("/pos?openingCashDismissed=1"); }} onSaved={() => { setOpeningCashRequired(false); router.replace("/pos"); }} />}
     </main>
   );
 }

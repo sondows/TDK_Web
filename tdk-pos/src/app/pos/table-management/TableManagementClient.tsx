@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 
 import PosSubHeader from "../PosSubHeader";
+import OpeningFundModal from "../OpeningFundModal";
 import TableLayoutCanvas from "../TableLayoutCanvas";
 import TableShape from "../TableShape";
 import { posMainFixedTablePosition, tableLayoutFrameSize, type TableLayoutValues } from "@/lib/table-layout";
@@ -49,6 +50,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
   const [copySourceId, setCopySourceId] = useState<number | null>(null);
   const [copyDestinationIds, setCopyDestinationIds] = useState<number[]>([]);
   const [copyBusy, setCopyBusy] = useState(false);
+  const [openingForCopy, setOpeningForCopy] = useState(false);
   const [tableCancelBusy, setTableCancelBusy] = useState(false);
   const [tableCancelPreview, setTableCancelPreview] = useState<TableCancelPreview | null>(null);
   const [partySelectedIds, setPartySelectedIds] = useState<number[]>([]);
@@ -329,7 +331,8 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinationTableIds: copyDestinationIds }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; sourceTableNo?: string; destinationTableNos?: string[] };
+      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean; sourceTableNo?: string; destinationTableNos?: string[] };
+      if (response.status === 428 && result.openingRequired) { setOpeningForCopy(true); return; }
       if (!response.ok || !result.success || !result.destinationTableNos) {
         showStatus(result.message ?? "주문 복사에 실패했습니다.");
         if (response.status === 409) router.refresh();
@@ -562,6 +565,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
       </div>
     </div>
     {tableCancelPreview && <TableCancellationModal busy={tableCancelBusy} close={() => !tableCancelBusy && setTableCancelPreview(null)} complete={(tableNos) => { resetTemporarySelections(); showStatus(`${tableNos.map(tableNo => `${tableNo}T`).join(" + ")} 이용을 취소했습니다.`, true); router.refresh(); }} preview={tableCancelPreview} setBusy={setTableCancelBusy} />}
+    {openingForCopy && <OpeningFundModal context="order" close={() => setOpeningForCopy(false)} onSaved={() => { setOpeningForCopy(false); window.setTimeout(() => { void copyOrders(); }, 0); }} />}
   </Root>;
 }
 

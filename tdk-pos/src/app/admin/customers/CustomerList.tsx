@@ -106,14 +106,24 @@ export default function CustomerList({
   return (
     <div className={styles.customerTableScroll}>
       {orderError && <p className={styles.customerOrderError} role="alert">{orderError}</p>}
-      <table className={styles.customerTable}>
+      <table className={`${styles.customerTable} ${styles.customerListTable}`}>
+        <colgroup>
+          <col style={{ width: "34px" }} />
+          <col style={{ width: "300px" }} />
+          <col style={{ width: "150px" }} />
+          <col style={{ width: "180px" }} />
+          <col style={{ width: "105px" }} />
+          <col style={{ width: "100px" }} />
+          <col style={{ width: "72px" }} />
+          <col />
+        </colgroup>
         <thead>
-          <tr><th aria-label="순서" />{columns.map(column => <th key={column}>{column}</th>)}</tr>
+          <tr><th aria-label="순서" />{columns.map(column => <th key={column}>{column}</th>)}<th aria-hidden="true" /></tr>
         </thead>
         <tbody>
           {loading || error || customers.length === 0 ? (
             <tr>
-              <td className={styles.customerEmpty} colSpan={columns.length + 1}>{emptyMessage}</td>
+              <td className={styles.customerEmpty} colSpan={columns.length + 2}>{emptyMessage}</td>
             </tr>
           ) : orderedCustomers.map(customer => {
             const name = customer.name?.trim() ?? "";
@@ -156,6 +166,7 @@ export default function CustomerList({
                     수정
                   </button>}
                 </td>
+                <td aria-hidden="true" />
               </tr>
             );
           })}

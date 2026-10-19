@@ -55,7 +55,7 @@ export default function StaffManagement() {
       <div className={`${styles.customerToolbar} ${styles.staffToolbar}`}>
         <div className={styles.staffFilters}>
           <input aria-label="직원 검색" className={styles.customerSearch} onChange={event => setSearch(event.target.value)} placeholder="이름 또는 관리센터 아이디 검색" type="search" value={search} />
-          <StaffToggle checked={showInactive} label="사용중지 직원 보기" onChange={setShowInactive} />
+          <StaffToggle checked={showInactive} label="사용중지 직원 보기" onChange={setShowInactive} variant="employeeFilter" />
         </div>
         {!readOnly && <button className={styles.customerAddButton} onClick={() => setEditing(null)} ref={addButtonRef} type="button">+ 직원등록</button>}
       </div>

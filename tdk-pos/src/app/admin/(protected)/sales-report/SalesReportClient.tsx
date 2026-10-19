@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import { SaleDetailDialog } from "@/app/pos/sales/SalesHistoryClient";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus } from "@/lib/sales-types";
+import { defaultSalesReportRange, salesReportPresets, type SalesReportPreset, type SalesReportRange } from "@/lib/sales-report-period";
 import admin from "../../admin.module.css";
 import styles from "./sales-report.module.css";
 
@@ -13,25 +13,64 @@ type Row = {
   label: string; date: string; source: Source; overlapDays: number;
   salesAmount: number; saleCount: number; discountAmount: number;
   cardAmount: number; cashAmount: number; bankTransferAmount: number; otherAmount: number;
-  salesDayCount: number; dailySalesAverage: number | null;
+  salesDayCount: number; dailySalesAverage: number | null; dailySaleCountAverage: number | null;
+  discountCount: number | null; takeoutAmount: number | null; takeoutCount: number | null;
   customerAverage: number | null; tableAverage: number | null;
   durationMinutes: number | null; tableGuestAverage: number | null;
 };
 type Report = { success: boolean; view: View; rows: Row[]; totals: Row; overlapDays: number; message?: string };
 type DetailRow = { checkoutId: number; occurredAt: string; tableLabel: string; salesAmount: number; paymentMethods: string; status: SaleDisplayStatus; source: "TDK_POS" };
 type Details = { success: boolean; rows: DetailRow[]; page: number; pageSize: number; totalCount: number; message?: string };
+const DETAIL_COLUMN_WIDTHS = {
+  occurredAt: 170,
+  tableLabel: 140,
+  amount: 100,
+  paymentMethods: 250,
+  status: 150,
+} as const;
+const DETAIL_COLUMN_GAP = 20;
+const COLUMN_WIDTHS = {
+  period: 100,
+  sales: 130,
+  salesDays: 100,
+  dailyAverage: 120,
+  saleCount: 100,
+  discount: 100,
+  customerAverage: 100,
+  tableAverage: 100,
+  duration: 100,
+  guests: 100,
+} as const;
+const DAILY_COLUMN_WIDTHS = {
+  period: 100,
+  sales: 130,
+  saleCount: 100,
+  discount: 100,
+  customerAverage: 100,
+  tableAverage: 100,
+  duration: 110,
+  guests: 100,
+} as const;
+type ReportColumn = keyof typeof COLUMN_WIDTHS;
+const summaryColumns: ReportColumn[] = ["period", "sales", "salesDays", "dailyAverage", "saleCount", "discount", "customerAverage", "tableAverage", "duration", "guests"];
+const dailyColumns: ReportColumn[] = summaryColumns.filter(column => column !== "salesDays" && column !== "dailyAverage");
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-const firstOfMonth = (date: string) => `${date.slice(0, 7)}-01`;
 const lastOfMonth = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const amount = (value: number | null) => value === null ? "-" : Math.round(value).toLocaleString("ko-KR");
-const sourceName = (source: Source) => source === "LEGACY_POS" ? "구 POS" : source === "TDK_POS" ? "TDK-POS" : source === "MIXED" ? "기간 혼합" : "-";
+const dailyDateLabel = (date: string) => {
+  const weekday = ["일", "월", "화", "수", "목", "금", "토"][new Date(`${date}T00:00:00Z`).getUTCDay()];
+  return `${date.slice(5).replace("-", "/")} (${weekday})`;
+};
 const statusName: Record<SaleDisplayStatus, string> = { COMPLETED: "완료", PARTIALLY_CANCELLED: "일부취소", CANCELLED: "취소", IN_PROGRESS: "진행중" };
 
 export default function SalesReportClient() {
   const [view, setView] = useState<View>("daily");
-  const [startDate, setStartDate] = useState(() => firstOfMonth(todayInKorea()));
-  const [endDate, setEndDate] = useState(todayInKorea);
+  const [today, setToday] = useState(todayInKorea);
+  const [ranges, setRanges] = useState<Partial<Record<View, SalesReportRange>>>(() => ({ daily: defaultSalesReportRange("daily", todayInKorea()) }));
+  const [firstAvailableDate, setFirstAvailableDate] = useState<string | null>(null);
+  const [rangeError, setRangeError] = useState("");
+  const [selectedPresets, setSelectedPresets] = useState<Partial<Record<View, SalesReportPreset["id"]>>>({ daily: "current" });
   const [report, setReport] = useState<Report | null>(null);
   const [details, setDetails] = useState<Details | null>(null);
   const [page, setPage] = useState(1);
@@ -40,8 +79,34 @@ export default function SalesReportClient() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
   const [detailError, setDetailError] = useState("");
+  const { startDate, endDate } = ranges[view] ?? defaultSalesReportRange(view, today);
   const validRange = validDate(startDate) && validDate(endDate) && startDate <= endDate;
-  const yearOptions = Array.from({ length: Number(todayInKorea().slice(0, 4)) - 2017 + 11 }, (_, index) => 2017 + index);
+  const firstSelectableYear = Math.min(Number(firstAvailableDate?.slice(0, 4) ?? today.slice(0, 4)), Number(startDate.slice(0, 4)));
+  const yearOptions = Array.from({ length: Number(today.slice(0, 4)) + 11 - firstSelectableYear }, (_, index) => firstSelectableYear + index);
+  const presets = salesReportPresets(view, today, firstAvailableDate);
+  const matchesRange = (range: SalesReportRange | null) => range?.startDate === startDate && range.endDate === endDate;
+  const activePreset = presets.find(preset => preset.id === selectedPresets[view] && matchesRange(preset.range))?.id
+    ?? presets.find(preset => matchesRange(preset.range))?.id;
+
+  useEffect(() => {
+    const updateToday = () => setToday(current => { const next = todayInKorea(); return current === next ? current : next; });
+    const timer = window.setInterval(updateToday, 60_000);
+    window.addEventListener("focus", updateToday);
+    document.addEventListener("visibilitychange", updateToday);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", updateToday); document.removeEventListener("visibilitychange", updateToday); };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/admin/sales-report/range", { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const body = await response.json() as { success?: boolean; firstAvailableDate?: string | null; message?: string };
+        if (!response.ok || !body.success) throw new Error(body.message ?? "최초 매출일을 불러오지 못했습니다.");
+        setFirstAvailableDate(body.firstAvailableDate ?? null); setRangeError("");
+      })
+      .catch(() => { if (!controller.signal.aborted) setRangeError("최초 매출일을 불러오지 못해 전체 기간 선택을 사용할 수 없습니다."); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!validRange) return;
@@ -73,15 +138,18 @@ export default function SalesReportClient() {
     return () => controller.abort();
   }, [view, startDate, endDate, page, validRange]);
 
-  const updateRange = (start: string, end: string) => {
-    setStartDate(start); setEndDate(end); setPage(1); setReport(null); setDetails(null);
+  const updateRange = (start: string, end: string, target: View = view, preset?: SalesReportPreset["id"]) => {
+    setRanges(current => ({ ...current, [target]: { startDate: start, endDate: end } }));
+    setSelectedPresets(current => ({ ...current, [target]: preset }));
+    setPage(1); setReport(null); setDetails(null);
     setLoading(true); setDetailLoading(true); setError(""); setDetailError("");
   };
   const changeView = (next: View) => {
     if (next === view) return;
-    const start = next === "yearly" ? `${startDate.slice(0, 4)}-01-01` : next === "monthly" ? firstOfMonth(startDate) : startDate;
-    const end = next === "yearly" ? `${endDate.slice(0, 4)}-12-31` : next === "monthly" ? lastOfMonth(endDate.slice(0, 7)) : endDate;
-    setView(next); updateRange(start, end);
+    if (!ranges[next]) setSelectedPresets(current => ({ ...current, [next]: next === "detail" ? "today" : "current" }));
+    setRanges(current => current[next] ? current : { ...current, [next]: defaultSalesReportRange(next, todayInKorea()) });
+    setView(next); setPage(1); setReport(null); setDetails(null);
+    setLoading(true); setDetailLoading(true); setError(""); setDetailError("");
   };
   const openDetail = async (checkoutId: number) => {
     setDetailError("");
@@ -92,13 +160,24 @@ export default function SalesReportClient() {
       setSale(body.sale);
     } catch (cause) { setDetailError(cause instanceof Error ? cause.message : "판매 상세를 불러오지 못했습니다."); }
   };
-  const drillDay = (date: string) => { setView("detail"); updateRange(date, date); };
+  const drillDay = (date: string) => { updateRange(date, date, "detail"); setView("detail"); };
+  const showSalesDays = view === "yearly" || view === "monthly";
+  const visibleColumns = showSalesDays ? summaryColumns : dailyColumns;
+  const columnWidths: Record<ReportColumn, number> = {
+    ...COLUMN_WIDTHS,
+    ...(view === "monthly" ? { period: 130 } : {}),
+    ...(view === "daily" ? DAILY_COLUMN_WIDTHS : {}),
+  };
+  const reportTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column], 0);
+  const detailTableWidth = Object.values(DETAIL_COLUMN_WIDTHS).reduce((total, width) => total + width, 0) + DETAIL_COLUMN_GAP;
   const totals = report?.totals;
   const summary = [
-    ["매출", totals ? `${amount(totals.salesAmount)}원` : "-"],
-    ["일매출평균", totals?.dailySalesAverage == null ? "-" : `${amount(totals.dailySalesAverage)}원`],
-    ["판매건수", totals ? `${amount(totals.saleCount)}건` : "-"],
-    ["할인", totals ? `${amount(totals.discountAmount)}원` : "-"],
+    ["총매출", totals ? `${amount(totals.salesAmount)}원 (${amount(totals.saleCount)}건)` : "-"],
+    ["일평균매출", totals?.dailySalesAverage == null || totals.dailySaleCountAverage == null ? "-" :
+      `${amount(totals.dailySalesAverage)}원 (${totals.dailySaleCountAverage.toFixed(1)}건)`],
+    ["총포장매출", totals?.takeoutAmount == null || totals.takeoutCount == null ? "-" :
+      `${amount(totals.takeoutAmount)}원 / ${amount(totals.takeoutCount)}건`],
+    ["총할인", totals ? `${amount(totals.discountAmount)}원 (${totals.discountCount == null ? "-" : `${amount(totals.discountCount)}건`})` : "-"],
     ["객단가", totals?.customerAverage == null ? "-" : `${amount(totals.customerAverage)}원`],
     ["테이블단가", totals?.tableAverage == null ? "-" : `${amount(totals.tableAverage)}원`],
     ["평균 이용시간", totals?.durationMinutes == null ? "-" : `${amount(totals.durationMinutes)}분`],
@@ -106,7 +185,7 @@ export default function SalesReportClient() {
   ];
 
   return <div className={admin.content}>
-    <div className={styles.heading}><div className={styles.headingTitle}><AdminBackLink ariaLabel="관리센터로 돌아가기" size={40} iconSize={20} /><h1>매출조회</h1></div>
+    <div className={styles.heading}><div className={styles.headingTitle}><h1>매출조회</h1><p className={admin.pageDescription}>기간별 매출과 판매 현황을 조회합니다.</p></div>
       <div aria-label="매출조회 단위" className={styles.tabs} role="tablist">
         {([['yearly', '년별'], ['monthly', '월별'], ['daily', '일별'], ['detail', '상세']] as const).map(([key, label]) =>
           <button aria-selected={view === key} className={`${styles.tab} ${view === key ? styles.tabActive : ""}`} key={key} onClick={() => changeView(key)} role="tab" type="button">{label}</button>)}
@@ -115,23 +194,33 @@ export default function SalesReportClient() {
       {view === "yearly" ? <div className={styles.periodInputs}><label><select aria-label="시작 연도" onChange={event => updateRange(`${event.target.value}-01-01`, endDate)} value={startDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label><span>~</span><label><select aria-label="종료 연도" onChange={event => updateRange(startDate, `${event.target.value}-12-31`)} value={endDate.slice(0, 4)}>{yearOptions.map(year => <option key={year} value={year}>{year}년</option>)}</select></label></div>
         : view === "monthly" ? <div className={styles.periodInputs}><label><input aria-label="시작 년월" onChange={event => { if (event.target.value) updateRange(`${event.target.value}-01`, endDate); }} type="month" value={startDate.slice(0, 7)} /></label><span>~</span><label><input aria-label="종료 년월" onChange={event => { if (event.target.value) updateRange(startDate, lastOfMonth(event.target.value)); }} type="month" value={endDate.slice(0, 7)} /></label></div>
           : <div className={styles.periodInputs}><label><input aria-label="시작일" onChange={event => updateRange(event.target.value, endDate)} type="date" value={startDate} /></label><span>~</span><label><input aria-label="종료일" onChange={event => updateRange(startDate, event.target.value)} type="date" value={endDate} /></label></div>}
+      <div aria-label="빠른 기간 선택" className={styles.periodQuick}>{presets.map(preset => <button
+        aria-pressed={activePreset === preset.id} className={`${styles.periodQuickButton} ${activePreset === preset.id ? styles.periodQuickButtonActive : ""}`}
+        disabled={!preset.range} key={preset.id} onClick={() => { if (preset.range) updateRange(preset.range.startDate, preset.range.endDate, view, preset.id); }} type="button"
+      >{preset.label}</button>)}</div>
     </section>
     {!validRange && <p className={styles.error} role="alert">시작일과 종료일을 확인해 주세요.</p>}
+    {rangeError && <p className={styles.error} role="alert">{rangeError}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
-    <section aria-label="기간 집계" className={styles.summary}>{summary.map(([label, value]) => <div className={styles.summaryItem} key={label}><span>{label}</span><strong>{loading ? "-" : value}</strong></div>)}</section>
-    {report && report.overlapDays > 0 && <p className={styles.note}>두 출처가 겹치는 {report.overlapDays}일은 구 POS 집계만 반영했습니다.</p>}
+    <section aria-label="기간 집계" className={`${styles.summary} ${styles.summaryWithCounts}`}>{summary.map(([label, value]) => <div className={styles.summaryItem} key={label}><span>{label}</span><strong>{loading ? "-" : value}</strong></div>)}</section>
+    {totals && (totals.takeoutAmount === null || totals.discountCount === null) &&
+      <p className={styles.note}>구 POS 자료나 결제 배분 정보에 없는 항목은 -로 표시합니다.</p>}
     {view === "detail" ? <>
       <p className={styles.note}>구 POS는 일별 집계만 보관되어 개별 판매건을 표시할 수 없습니다. 아래 목록은 TDK-POS 판매건입니다.</p>
       {detailError && <p className={styles.error} role="alert">{detailError}</p>}
-      <div className={styles.tableScroll}><table className={styles.table}><thead><tr><th className={styles.dateCell}>일시</th><th className={styles.dateCell}>테이블/구분</th><th>금액</th><th className={styles.dateCell}>결제수단</th><th className={styles.dateCell}>상태</th></tr></thead>
-        <tbody>{details?.rows.map(row => <tr className={styles.clickable} key={row.checkoutId} onClick={() => void openDetail(row.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(row.checkoutId); } }} role="button" tabIndex={0}><td className={styles.dateCell}>{row.occurredAt.slice(0, 16).replace("T", " ")}</td><td className={styles.dateCell}>{row.tableLabel}</td><td className={styles.mainAmount}>{amount(row.salesAmount)}</td><td className={styles.dateCell}>{row.paymentMethods}</td><td className={styles.dateCell}>{statusName[row.status]}</td></tr>)}</tbody></table>
+      <div className={styles.tableScroll}><table className={`${styles.table} ${styles.detailTable}`} style={{ minWidth: detailTableWidth }}>
+        <colgroup><col style={{ width: DETAIL_COLUMN_WIDTHS.occurredAt }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.tableLabel }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.amount }} /><col style={{ width: DETAIL_COLUMN_GAP }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.paymentMethods }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.status }} /><col /></colgroup>
+        <thead><tr><th className={styles.dateCell}>일시</th><th className={styles.dateCell}>테이블/구분</th><th>금액</th><th className={styles.detailGapCell}></th><th className={styles.dateCell}>결제수단</th><th className={styles.dateCell}>상태</th><th className={styles.trailingSpaceHeader}></th></tr></thead>
+        <tbody>{details?.rows.map(row => <tr className={styles.clickable} key={row.checkoutId} onClick={() => void openDetail(row.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(row.checkoutId); } }} role="button" tabIndex={0}><td className={styles.dateCell}>{row.occurredAt.slice(0, 16).replace("T", " ")}</td><td className={styles.dateCell}>{row.tableLabel}</td><td className={styles.mainAmount}>{amount(row.salesAmount)}</td><td className={styles.detailGapCell}></td><td className={styles.dateCell}>{row.paymentMethods}</td><td className={styles.dateCell}>{statusName[row.status]}</td><td className={styles.trailingSpaceCell}></td></tr>)}</tbody></table>
         {detailLoading && <p className={styles.empty}>불러오는 중...</p>}
         {!detailLoading && !details?.rows.length && <p className={styles.empty}>표시할 TDK-POS 판매건이 없습니다.</p>}
       </div>
       {details && details.totalCount > details.pageSize && <div className={styles.pagination}><button disabled={page <= 1 || detailLoading} onClick={() => { setPage(value => value - 1); setDetails(null); setDetailLoading(true); }} type="button">이전</button><span>{page} / {Math.ceil(details.totalCount / details.pageSize)}</span><button disabled={page * details.pageSize >= details.totalCount || detailLoading} onClick={() => { setPage(value => value + 1); setDetails(null); setDetailLoading(true); }} type="button">다음</button></div>}
-    </> : <div className={styles.tableScroll}><table className={styles.table}><thead><tr><th className={styles.dateCell}>{view === "yearly" ? "연도" : view === "monthly" ? "년월" : "날짜"}</th><th>매출</th><th>판매건수</th><th>할인</th><th>객단가</th><th>테이블단가</th><th>평균 이용시간</th><th>평균 인원</th><th className={styles.sourceCell}>출처</th></tr></thead>
-      <tbody>{report?.rows.map(row => <tr className={view === "daily" ? styles.clickable : ""} data-source={row.source ?? "NONE"} key={row.date} onClick={view === "daily" ? () => drillDay(row.date) : undefined} onKeyDown={view === "daily" ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); drillDay(row.date); } } : undefined} role={view === "daily" ? "button" : undefined} tabIndex={view === "daily" ? 0 : undefined}><th className={styles.dateCell}>{row.label}</th><td className={styles.mainAmount}>{amount(row.salesAmount)}</td><td>{amount(row.saleCount)}</td><td>{amount(row.discountAmount)}</td><td>{amount(row.customerAverage)}</td><td>{amount(row.tableAverage)}</td><td>{amount(row.durationMinutes)}</td><td>{row.tableGuestAverage == null ? "-" : row.tableGuestAverage.toFixed(1)}</td><td className={styles.sourceCell}>{sourceName(row.source)}</td></tr>)}</tbody>
-      {totals && <tfoot><tr><th className={styles.dateCell}>합계</th><td>{amount(totals.salesAmount)}</td><td>{amount(totals.saleCount)}</td><td>{amount(totals.discountAmount)}</td><td>{amount(totals.customerAverage)}</td><td>{amount(totals.tableAverage)}</td><td>{amount(totals.durationMinutes)}</td><td>{totals.tableGuestAverage == null ? "-" : totals.tableGuestAverage.toFixed(1)}</td><td className={styles.sourceCell}>-</td></tr></tfoot>}
+    </> : <div className={styles.tableScroll}><table className={`${styles.table} ${styles.reportTable}`} style={{ minWidth: reportTableWidth }}>
+      <colgroup>{visibleColumns.map(column => <col key={column} style={{ width: columnWidths[column] }} />)}<col /></colgroup>
+      <thead><tr><th className={styles.dateCell}>{view === "yearly" ? "연도" : view === "monthly" ? "월" : "날짜"}</th><th>매출</th>{showSalesDays && <><th>영업일수</th><th>일매출평균</th></>}<th>판매건수</th><th>할인</th><th>객단가</th><th>테이블단가</th><th>평균 이용시간</th><th>평균 인원</th><th className={styles.trailingSpaceHeader}></th></tr></thead>
+      <tbody>{report?.rows.map(row => <tr className={view === "daily" ? styles.clickable : ""} key={row.date} onClick={view === "daily" ? () => drillDay(row.date) : undefined} onKeyDown={view === "daily" ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); drillDay(row.date); } } : undefined} role={view === "daily" ? "button" : undefined} tabIndex={view === "daily" ? 0 : undefined}><th className={styles.dateCell}>{view === "daily" ? dailyDateLabel(row.date) : row.label}</th><td className={styles.mainAmount}>{amount(row.salesAmount)}</td>{showSalesDays && <><td>{amount(row.salesDayCount)}일</td><td>{row.dailySalesAverage == null ? "-" : `${amount(row.dailySalesAverage)}원`}</td></>}<td>{amount(row.saleCount)}</td><td>{amount(row.discountAmount)}</td><td>{amount(row.customerAverage)}</td><td>{amount(row.tableAverage)}</td><td>{amount(row.durationMinutes)}</td><td>{row.tableGuestAverage == null ? "-" : row.tableGuestAverage.toFixed(1)}</td><td className={styles.trailingSpaceCell}></td></tr>)}</tbody>
+      {totals && <tfoot><tr><th className={styles.dateCell}>합계</th><td>{amount(totals.salesAmount)}</td>{showSalesDays && <><td>{amount(totals.salesDayCount)}일</td><td>{totals.dailySalesAverage == null ? "-" : `${amount(totals.dailySalesAverage)}원`}</td></>}<td>{amount(totals.saleCount)}</td><td>{amount(totals.discountAmount)}</td><td>{amount(totals.customerAverage)}</td><td>{amount(totals.tableAverage)}</td><td>{amount(totals.durationMinutes)}</td><td>{totals.tableGuestAverage == null ? "-" : totals.tableGuestAverage.toFixed(1)}</td><td className={styles.trailingSpaceCell}></td></tr></tfoot>}
       </table>{loading && <p className={styles.empty}>불러오는 중...</p>}</div>}
     {sale && <SaleDetailDialog close={() => setSale(null)} sale={sale} />}
   </div>;

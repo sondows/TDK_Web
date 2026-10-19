@@ -92,6 +92,7 @@ export default function PaymentModal({
   close,
   completed,
   onCashPaymentRegistered,
+  onBusinessOpeningRequired,
   onPrintReceipt,
   receiptPrinting,
 }: {
@@ -105,6 +106,7 @@ export default function PaymentModal({
   close: () => void;
   completed: () => void;
   onCashPaymentRegistered: () => void;
+  onBusinessOpeningRequired: (retry: () => void) => void;
   onPrintReceipt: (checkoutId?: number, isReprint?: boolean) => Promise<void>;
   receiptPrinting: boolean;
 }) {
@@ -113,6 +115,7 @@ export default function PaymentModal({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
+  const requestRetryRef = useRef<((body: Record<string, unknown>, afterRegistered?: () => void) => Promise<{ ok: boolean; message?: string }>) | null>(null);
   const autoPrintAttempted = useRef(new Set<string>());
   const autoCustomerPaymentRequested = useRef<string | null>(null);
   const [transactionCompleted, setTransactionCompleted] = useState(false);
@@ -220,7 +223,12 @@ export default function PaymentModal({
         autoCompleteEnabled?: boolean;
         debugPhase?: string;
         debugMessage?: string;
+        openingRequired?: boolean;
       };
+      if (response.status === 428 && result.openingRequired) {
+        onBusinessOpeningRequired(() => { void requestRetryRef.current?.(body, afterRegistered); });
+        return { ok: false, message: result.message };
+      }
       if (!response.ok || !result.success) {
         const message = result.message ?? "결제를 처리하지 못했습니다.";
         if (result.debugPhase || result.debugMessage) {
@@ -301,7 +309,8 @@ export default function PaymentModal({
       requestInFlight.current = false;
       setBusy(false);
     }
-  }, [tableId, sessionId, transactionCompleted, onCashPaymentRegistered, printCompletedReceipts]);
+  }, [tableId, sessionId, transactionCompleted, onCashPaymentRegistered, onBusinessOpeningRequired, printCompletedReceipts]);
+  useEffect(() => { requestRetryRef.current = request; }, [request]);
   useEffect(() => {
     if (!stagedCustomerPayment || !state || transactionCompleted || busy || requestInFlight.current) return;
     if (stagedCustomerPayment.amount < state.remaining || autoCustomerPaymentRequested.current === stagedCustomerPayment.requestKey) return;
@@ -397,7 +406,13 @@ export default function PaymentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "COMPLETE" }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean };
+      if (response.status === 428 && result.openingRequired) {
+        closingRef.current = false;
+        setBusy(false);
+        onBusinessOpeningRequired(() => { void complete(); });
+        return;
+      }
       if (!response.ok || !result.success) throw new Error(result.message ?? "결제를 완료하지 못했습니다.");
       completed();
     } catch (completeError) {

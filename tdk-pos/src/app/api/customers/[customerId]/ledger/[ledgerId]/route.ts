@@ -89,7 +89,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cus
 
     const itemRows = !checkout ? [] : await db.select({
       checkoutItemId: checkoutItems.checkoutItemId,
+      orderId: orders.orderId,
       orderItemId: checkoutItems.orderItemId,
+      parentOrderItemId: orderItems.parentOrderItemId,
+      itemType: orderItems.itemType,
       name: orderItems.itemName,
       qty: checkoutItems.qty,
       unitPrice: checkoutItems.unitPrice,
@@ -150,6 +153,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cus
         totalAmount: Number(checkout.totalAmount),
         items: itemRows.map(item => ({
           checkoutItemId: item.checkoutItemId,
+          orderId: item.orderId,
+          orderItemId: item.orderItemId,
+          parentOrderItemId: item.parentOrderItemId,
+          itemType: item.itemType,
           name: item.name,
           qty: item.qty,
           unitPrice: Number(item.unitPrice),

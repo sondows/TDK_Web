@@ -4,6 +4,8 @@ import { auditLogs, cashOpeningFunds, staff } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { cashOpeningFundTotal, parseCashOpeningFund, type CashOpeningFund } from "@/lib/cash-opening-fund";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { lockBusinessMutex } from "@/lib/business-session";
+import { databaseToday } from "@/lib/daily-opening-cash";
 
 async function authorizedStaffId() {
   const current = await getCurrentStaff();
@@ -48,13 +50,16 @@ export async function POST(request: Request) {
   const staffId = await authorizedStaffId();
   if (!staffId) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   try {
-    const fund = parseCashOpeningFund(await request.json());
+    const body = await request.json();
+    const fund = parseCashOpeningFund(body);
     if (!fund) return Response.json({ success: false, message: "준비금 수량과 금액을 확인해 주세요." }, { status: 400 });
     const totalAmount = cashOpeningFundTotal(fund);
     if (!Number.isSafeInteger(totalAmount)) return Response.json({ success: false, message: "합계금액이 너무 큽니다." }, { status: 400 });
-    const dates = await businessDates();
-    await db.transaction(async tx => {
+    const savedState = await db.transaction(async tx => {
+      await lockBusinessMutex(tx);
+      const dates = { today: await databaseToday(tx) };
       const [previous] = await tx.select().from(cashOpeningFunds).where(eq(cashOpeningFunds.businessDate, dates.today)).limit(1);
+      if (body?.createOnly === true && previous) return { businessDate: dates.today, alreadyRegistered: true, totalAmount: previous.totalAmount };
       await tx.insert(cashOpeningFunds).values({
         businessDate: dates.today,
         otherAmount: fund.otherAmount,
@@ -72,8 +77,9 @@ export async function POST(request: Request) {
         staffId, actionType: previous ? "UPDATE" : "CREATE", entityType: "CASH_OPENING_FUND", entityId: saved.id,
         description: JSON.stringify({ businessDate: dates.today, before: previous ? fundFromRow(previous) : null, after: fund, totalAmount }),
       });
+      return { businessDate: dates.today, alreadyRegistered: false, totalAmount };
     });
-    return Response.json({ success: true, businessDate: dates.today, totalAmount });
+    return Response.json({ success: true, ...savedState });
   } catch (error) {
     console.error("영업준비금 저장 실패:", error);
     return Response.json({ success: false, message: "영업준비금을 저장하지 못했습니다." }, { status: 500 });

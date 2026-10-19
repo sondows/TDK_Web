@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 type View = "yearly" | "monthly" | "daily" | "detail";
 type ReportRow = ReturnType<typeof addTotals> & {
   label: string; date: string; source: SalesSource | "MIXED" | null; overlapDays: number;
-  salesDayCount: number; dailySalesAverage: number | null;
+  salesDayCount: number; dailySalesAverage: number | null; dailySaleCountAverage: number | null;
+  discountCount: number | null; takeoutAmount: number | null; takeoutCount: number | null;
   customerAverage: number | null; tableAverage: number | null;
   durationMinutes: number | null; tableGuestAverage: number | null;
 };
@@ -23,9 +24,14 @@ function reportRow(label: string, date: string, days: DailySales[]): ReportRow {
   const incompleteGuestCount = days.reduce((sum, day) => sum + day.incompleteGuestCount, 0);
   const durationCount = days.reduce((sum, day) => sum + day.durationCount, 0);
   const durationTotal = days.reduce((sum, day) => sum + day.durationTotalMinutes, 0);
+  const discountCount = days.some(day => day.discountCount === null) ? null : days.reduce((sum, day) => sum + (day.discountCount ?? 0), 0);
+  const takeoutAmount = days.some(day => day.takeoutAmount === null) ? null : days.reduce((sum, day) => sum + (day.takeoutAmount ?? 0), 0);
+  const takeoutCount = days.some(day => day.takeoutCount === null) ? null : days.reduce((sum, day) => sum + (day.takeoutCount ?? 0), 0);
   return { label, date, source: sourceOf(days), ...totals,
     overlapDays: days.filter(day => day.overlapWithOtherSource).length,
     salesDayCount, dailySalesAverage: salesDayCount ? Math.round(totals.salesAmount / salesDayCount) : null,
+    dailySaleCountAverage: salesDayCount ? Math.round(totals.saleCount / salesDayCount * 10) / 10 : null,
+    discountCount, takeoutAmount, takeoutCount,
     customerAverage: totals.saleCount ? Math.round(totals.salesAmount / totals.saleCount) : null,
     tableAverage: !legacySales && totals.saleCount ? Math.round(totals.salesAmount / totals.saleCount) : null,
     durationMinutes: !legacySales && totals.saleCount && durationCount === totals.saleCount ? Math.round(durationTotal / durationCount) : null,
@@ -54,8 +60,8 @@ export async function GET(request: Request) {
     const endDate = params.get("endDate") ?? defaultEnd;
     if (!isoDate(startDate) || !isoDate(endDate) || startDate > endDate ||
         startDate < "1900-01-01" || endDate > "9998-12-31" || daysBetween(startDate, endDate) > 36_525 ||
-        ((view === "daily" || view === "detail") && daysBetween(startDate, endDate) > 3_660))
-      return Response.json({ success: false, message: "조회 기간을 확인해 주세요. 일별·상세는 최대 10년까지 조회할 수 있습니다." }, { status: 400 });
+        (view === "detail" && daysBetween(startDate, endDate) > 3_660))
+      return Response.json({ success: false, message: "조회 기간을 확인해 주세요. 상세 조회는 최대 10년까지 조회할 수 있습니다." }, { status: 400 });
     const endExclusive = nextDay(endDate) < nextDay(today) ? nextDay(endDate) : nextDay(today);
     const days = startDate < endExclusive ? await loadUnifiedDailySales(startDate, endExclusive) : [];
     const byDate = new Map(days.map(day => [day.businessDate, day]));

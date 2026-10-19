@@ -291,6 +291,20 @@ export const businessSessions = mysqlTable("business_sessions", {
   closingSnapshot: text("closing_snapshot"),
 }, table => [index("idx_business_sessions_date").on(table.businessDate, table.businessSessionId)]);
 
+/** Calendar-date settlement revisions. Historical business_sessions remain untouched. */
+export const dailyClosingSnapshots = mysqlTable("daily_closing_snapshots", {
+  dailyClosingId: bigint("daily_closing_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  salesDate: date("sales_date", { mode: "string" }).notNull(),
+  revision: int("revision", { unsigned: true }).notNull(),
+  requestKey: varchar("request_key", { length: 36 }).notNull(),
+  snapshot: text("snapshot").notNull(),
+  closedAt: datetime("closed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  closedByStaffId: bigint("closed_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+}, table => [
+  uniqueIndex("uq_daily_closing_date_revision").on(table.salesDate, table.revision),
+  uniqueIndex("uq_daily_closing_request").on(table.requestKey),
+]);
+
 export const businessSessionMutex = mysqlTable("business_session_mutex", {
   mutexId: tinyint("mutex_id").primaryKey(),
 });
