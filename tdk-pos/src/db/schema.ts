@@ -162,6 +162,27 @@ export const staffSessions = mysqlTable("staff_sessions", {
     .default("ACTIVE"),
 });
 
+/** Kitchen tablet credentials and sessions are independent from POS staff accounts. */
+export const kdsAccounts = mysqlTable("kds_accounts", {
+  kdsAccountId: bigint("kds_account_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  loginId: varchar("login_id", { length: 32 }).notNull(),
+  pinHash: varchar("pin_hash", { length: 255 }).notNull(),
+  isActive: tinyint("is_active").notNull().default(1),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("uq_kds_accounts_login_id").on(table.loginId)]);
+
+export const kdsSessions = mysqlTable("kds_sessions", {
+  kdsSessionId: bigint("kds_session_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  kdsAccountId: bigint("kds_account_id", { mode: "number", unsigned: true }).notNull(),
+  sessionTokenHash: varchar("session_token_hash", { length: 64 }).notNull(),
+  loggedInAt: datetime("logged_in_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  status: mysqlEnum("status", ["ACTIVE", "LOGGED_OUT"]).notNull().default("ACTIVE"),
+}, (table) => [
+  uniqueIndex("uq_kds_sessions_token").on(table.sessionTokenHash),
+  index("idx_kds_sessions_account").on(table.kdsAccountId),
+]);
+
 export const systemSettings = mysqlTable("system_settings", {
   settingKey: varchar("setting_key", { length: 100 }).primaryKey(),
   settingValue: varchar("setting_value", { length: 255 }).notNull(),
@@ -331,6 +352,10 @@ export const menus = mysqlTable("menus", {
   isQrVisible: tinyint("is_qr_visible").notNull().default(1),
   menuNumber: int("menu_number"),
   sortOrder: int("sort_order").notNull().default(0),
+  kdsKind: mysqlEnum("kds_kind", ["NONE", "POT", "ADDON", "SOLO"]).notNull().default("NONE"),
+  kdsGroupKey: varchar("kds_group_key", { length: 60 }),
+  kdsCompletionTimer: tinyint("kds_completion_timer").notNull().default(0),
+  kdsVisible: tinyint("kds_visible").notNull().default(1),
   createdAt: datetime("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -570,6 +595,45 @@ export const orderItems = mysqlTable("order_items", {
   }),
   note: varchar("note", { length: 500 }),
 });
+
+/** Kitchen work is attached to immutable order batches; sales and payment state stay separate. */
+export const kdsCookingGroups = mysqlTable("kds_cooking_groups", {
+  groupId: bigint("group_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  compatibilityKey: varchar("compatibility_key", { length: 80 }).notNull(),
+  startedAtMs: bigint("started_at_ms", { mode: "number", unsigned: true }).notNull(),
+}, table => [index("idx_kds_groups_compatibility_time").on(table.compatibilityKey, table.startedAtMs)]);
+
+/** One short database row lock serializes grouping across several kitchen tablets. */
+export const kdsGroupMutex = mysqlTable("kds_group_mutex", {
+  mutexId: tinyint("mutex_id").primaryKey(),
+});
+
+export const kdsSyncCursor = mysqlTable("kds_sync_cursor", {
+  cursorId: tinyint("cursor_id").primaryKey(),
+  initialOrderId: bigint("initial_order_id", { mode: "number", unsigned: true }).notNull(),
+  lastOrderId: bigint("last_order_id", { mode: "number", unsigned: true }).notNull(),
+});
+
+export const kdsTasks = mysqlTable("kds_tasks", {
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  orderId: bigint("order_id", { mode: "number", unsigned: true }).notNull().references(() => orders.orderId),
+  taskKey: varchar("task_key", { length: 80 }).notNull(),
+  memberItems: text("member_items").notNull(),
+  kind: mysqlEnum("kind", ["POT", "SOLO"]).notNull(),
+  compatibilityKey: varchar("compatibility_key", { length: 80 }).notNull(),
+  completionTimer: tinyint("completion_timer").notNull().default(0),
+  status: mysqlEnum("status", ["WAITING", "COOKING", "DONE"]).notNull().default("WAITING"),
+  cookingGroupId: bigint("cooking_group_id", { mode: "number", unsigned: true }).references(() => kdsCookingGroups.groupId),
+  cookingStartedAtMs: bigint("cooking_started_at_ms", { mode: "number", unsigned: true }),
+  cookingCompletedAtMs: bigint("cooking_completed_at_ms", { mode: "number", unsigned: true }),
+  previousState: text("previous_state"),
+  changedAtMs: bigint("changed_at_ms", { mode: "number", unsigned: true }),
+  cancelAcknowledgedAtMs: bigint("cancel_acknowledged_at_ms", { mode: "number", unsigned: true }),
+}, table => [
+  uniqueIndex("uq_kds_tasks_key").on(table.taskKey),
+  index("idx_kds_tasks_order").on(table.orderId),
+  index("idx_kds_tasks_status").on(table.status, table.taskId),
+]);
 
 /** Existing checkout tables. A checkout is linked to its bill scope through checkout_items. */
 export const paymentMethods = mysqlTable("payment_methods", {

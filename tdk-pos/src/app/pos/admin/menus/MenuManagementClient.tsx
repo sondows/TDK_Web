@@ -7,16 +7,18 @@ import { formatMoney } from "@/lib/format-money";
 import PosSubHeader from "../../PosSubHeader";
 import type { MenuChoiceConfig } from "@/lib/menu-choice-options";
 import { useAdminReadOnly } from "@/app/admin/AdminAccessContext";
+import type { KdsMenuConfig } from "@/lib/kds-menu-config";
 
 type Category = { categoryId: number; name: string; sortOrder: number };
 type ComponentMenu = { menuId: number; name: string; price: string };
 type MenuComponent = { menuComponentId: number; componentMenuId: number; itemName: string; price: string; qtyPerUnit: number; printOnKitchen: number; printOnReceipt: number; sortOrder: number };
-type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; isActive: number; menuNumber: number | null; sortOrder: number; imageUrl: string | null; components: MenuComponent[]; optionConfig: MenuChoiceConfig };
+type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; isActive: number; menuNumber: number | null; sortOrder: number; imageUrl: string | null; components: MenuComponent[]; optionConfig: MenuChoiceConfig; kdsKind: KdsMenuConfig["kdsKind"]; kdsGroupKey: string | null; kdsCompletionTimer: number; kdsVisible: number };
 type MenuComponentInput = { componentMenuId: number; qtyPerUnit: number; printOnKitchen: boolean; printOnReceipt: boolean };
-type MenuPayload = { name: string; price: string; categoryId: number; menuNumber: number | null; isActive: boolean; components: MenuComponentInput[]; optionConfig: MenuChoiceConfig };
+type MenuPayload = { name: string; price: string; categoryId: number; menuNumber: number | null; isActive: boolean; components: MenuComponentInput[]; optionConfig: MenuChoiceConfig } & KdsMenuConfig;
 type DuplicateMenuNumberCheck = (categoryId: number, menuNumber: number | null, exceptMenuId?: number) => string | null;
 
 const categoryDisplayName = (name: string) => ({ "김치찌개": "찌개", "사이드": "단품", "주류·음료": "음료" }[name] ?? name);
+const kdsKindLabel = (kind: KdsMenuConfig["kdsKind"]) => ({ NONE: "KDS 제외", POT: "찌개/냄비 조리", ADDON: "찌개 첨가", SOLO: "독립 조리" })[kind];
 const parsePrice = (value: string) => Number(value.replaceAll(",", "").trim());
 const formatPriceInput = (value: string | number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(Number(value));
 const sortMenus = (items: Menu[]) => [...items].sort((a, b) => a.categorySortOrder - b.categorySortOrder || a.sortOrder - b.sortOrder || a.menuId - b.menuId);
@@ -71,7 +73,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
     <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={readOnly ? setViewingMenu : setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} readOnly={readOnly} />)}</div>
     {viewingMenu && <Dialog close={() => setViewingMenu(null)} saving={false} title="메뉴 정보">
-      <dl className="space-y-3 text-sm"><div><dt className="font-bold text-slate-500">메뉴명</dt><dd>{viewingMenu.name}</dd></div><div><dt className="font-bold text-slate-500">가격</dt><dd>{formatMoney(viewingMenu.price)}</dd></div><div><dt className="font-bold text-slate-500">카테고리</dt><dd>{categoryDisplayName(viewingMenu.categoryName)}</dd></div><div><dt className="font-bold text-slate-500">메뉴번호</dt><dd>{viewingMenu.menuNumber ?? "—"}</dd></div><div><dt className="font-bold text-slate-500">옵션</dt><dd>{viewingMenu.optionConfig.enabled ? `${viewingMenu.optionConfig.title}: ${viewingMenu.optionConfig.buttons.join(", ")}` : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">구성 메뉴</dt><dd>{viewingMenu.components.map(component => `${component.itemName} × ${component.qtyPerUnit}`).join(", ") || "없음"}</dd></div></dl>
+      <dl className="space-y-3 text-sm"><div><dt className="font-bold text-slate-500">메뉴명</dt><dd>{viewingMenu.name}</dd></div><div><dt className="font-bold text-slate-500">가격</dt><dd>{formatMoney(viewingMenu.price)}</dd></div><div><dt className="font-bold text-slate-500">카테고리</dt><dd>{categoryDisplayName(viewingMenu.categoryName)}</dd></div><div><dt className="font-bold text-slate-500">메뉴번호</dt><dd>{viewingMenu.menuNumber ?? "—"}</dd></div><div><dt className="font-bold text-slate-500">KDS 표시</dt><dd>{viewingMenu.kdsVisible ? "ON" : "OFF"}</dd></div><div><dt className="font-bold text-slate-500">KDS 조리분류</dt><dd>{kdsKindLabel(viewingMenu.kdsKind)}</dd></div><div><dt className="font-bold text-slate-500">조리 그룹</dt><dd>{viewingMenu.kdsGroupKey || "기본"}</dd></div><div><dt className="font-bold text-slate-500">완료 후 타이머</dt><dd>{viewingMenu.kdsCompletionTimer ? "사용" : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">옵션</dt><dd>{viewingMenu.optionConfig.enabled ? `${viewingMenu.optionConfig.title}: ${viewingMenu.optionConfig.buttons.join(", ")}` : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">구성 메뉴</dt><dd>{viewingMenu.components.map(component => `${component.itemName} × ${component.qtyPerUnit}`).join(", ") || "없음"}</dd></div></dl>
     </Dialog>}
     {isCreateOpen && <CreateMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
     {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} sourceMenus={menuRows.filter(row => row.menuId !== editingMenu.menuId)} update={updateMenu} />}
@@ -92,8 +94,9 @@ function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu, readOnly
 
 function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, defaultCategoryId, close, create }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; defaultCategoryId: number; close: () => void; create: (payload: MenuPayload) => Promise<void> }) {
   const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>({ enabled: false, title: "", buttons: ["", ""], defaultIndex: 0 });
+  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: "NONE", kdsGroupKey: null, kdsCompletionTimer: false, kdsVisible: false });
   const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [menuNumberInput, setMenuNumberInput] = useState(""); const [categoryId, setCategoryId] = useState(defaultCategoryId); const [isActive, setIsActive] = useState(true); const [components, setComponents] = useState<MenuComponentInput[]>([]); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  const submit = async () => { const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !price.trim() || !Number.isFinite(Number(price)) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && (!optionConfig.title.trim() || optionConfig.buttons.some(button => !button.trim()))) { setError("옵션 제목과 버튼 이름을 모두 입력해 주세요."); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, menuNumber, isActive, components, optionConfig }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
+  const submit = async () => { const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !price.trim() || !Number.isFinite(Number(price)) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && (!optionConfig.title.trim() || optionConfig.buttons.some(button => !button.trim()))) { setError("옵션 제목과 버튼 이름을 모두 입력해 주세요."); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, menuNumber, isActive, components, optionConfig, ...kdsConfig }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
   return <Dialog close={close} saving={saving} title="새 메뉴 추가">
     <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
       <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
@@ -105,6 +108,7 @@ function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus
       <MenuNumberField value={menuNumberInput} setValue={setMenuNumberInput} />
     </div>
     <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
+    <KdsSettingsEditor value={kdsConfig} onChange={setKdsConfig} />
     <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} />
     {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
     <DialogFooter cancel={close} saving={saving} submit={submit} submitText="메뉴 추가" />
@@ -113,6 +117,7 @@ function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus
 
 function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, close, menu, sourceMenus, update }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; sourceMenus: Menu[]; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
   const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>(menu.optionConfig);
+  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: menu.kdsKind, kdsGroupKey: menu.kdsGroupKey, kdsCompletionTimer: Boolean(menu.kdsCompletionTimer), kdsVisible: Boolean(menu.kdsVisible) });
   const [copyOpen, setCopyOpen] = useState(false);
   const [pendingCopy, setPendingCopy] = useState<Menu | null>(null);
   const applyCopiedOptions = (source: Menu) => { setOptionConfig({ ...source.optionConfig, buttons: [...source.optionConfig.buttons] }); setCopyOpen(false); setPendingCopy(null); };
@@ -120,7 +125,7 @@ function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, 
   const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [menuNumberInput, setMenuNumberInput] = useState(menu.menuNumber === null ? "" : String(menu.menuNumber)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [isActive, setIsActive] = useState(menu.isActive === 1); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
   const selectImage = (file: File | undefined) => { if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 10 * 1024 * 1024) { setError("JPG, PNG, WebP 형식의 10MB 이하 이미지를 선택하세요."); return; } setError(""); setCropSource(URL.createObjectURL(file)); setZoom(1); };
   const applyCrop = async () => { if (!cropSource || !cropPixels) return; try { const image = new Image(); image.src = cropSource; await image.decode(); const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 1200; const context = canvas.getContext("2d"); if (!context) throw new Error("이미지를 처리할 수 없습니다."); context.drawImage(image, cropPixels.x, cropPixels.y, cropPixels.width, cropPixels.height, 0, 0, 1200, 1200); const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error("이미지를 처리할 수 없습니다.")), "image/webp", 0.92)); setCroppedImage(new File([blob], "menu-crop.webp", { type: "image/webp" })); setPreviewUrl(URL.createObjectURL(blob)); setRemoveImage(false); setCropSource(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "이미지를 자를 수 없습니다."); } };
-  const submit = async () => { const numericPrice = parsePrice(price); const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber, menu.menuId); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && (!optionConfig.title.trim() || optionConfig.buttons.some(button => !button.trim()))) { setError("옵션 제목과 버튼 이름을 모두 입력해 주세요."); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("menuNumber", menuNumber === null ? "" : String(menuNumber)); form.set("isActive", String(isActive)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); form.set("optionConfig", JSON.stringify(optionConfig)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
+  const submit = async () => { const numericPrice = parsePrice(price); const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리를 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber, menu.menuId); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && (!optionConfig.title.trim() || optionConfig.buttons.some(button => !button.trim()))) { setError("옵션 제목과 버튼 이름을 모두 입력해 주세요."); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("menuNumber", menuNumber === null ? "" : String(menuNumber)); form.set("isActive", String(isActive)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); form.set("optionConfig", JSON.stringify(optionConfig)); form.set("kdsKind", kdsConfig.kdsKind); form.set("kdsGroupKey", kdsConfig.kdsGroupKey ?? ""); form.set("kdsCompletionTimer", String(kdsConfig.kdsCompletionTimer)); form.set("kdsVisible", String(kdsConfig.kdsVisible)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
   return <><Dialog close={close} saving={saving} title="메뉴 수정">
     <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
       <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
@@ -133,6 +138,7 @@ function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, 
     </div>
     <ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} />
     <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
+    <KdsSettingsEditor value={kdsConfig} onChange={setKdsConfig} />
     <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} onCopy={() => setCopyOpen(true)} />
     {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
     <DialogFooter cancel={close} saving={saving} submit={submit} submitText="저장" />
@@ -147,6 +153,28 @@ function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, 
   </>;
 }
 
+
+function KdsSettingsEditor({ value, onChange }: { value: KdsMenuConfig; onChange: (value: KdsMenuConfig) => void }) {
+  return <section className="mt-3 rounded-xl border border-slate-200 p-3 text-sm">
+    <div className="flex items-center justify-between gap-3"><h3 className="font-bold">KDS 조리 설정</h3><MenuSwitch checked={value.kdsVisible} label="KDS 표시" onChange={checked => onChange({ ...value, kdsVisible: checked })} /></div>
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <label className="grid gap-1 font-semibold">조리분류
+        <select className={inputClass} onChange={event => {
+          const kind = event.target.value as KdsMenuConfig["kdsKind"];
+          onChange({ ...value, kdsKind: kind, kdsGroupKey: kind === "NONE" ? null : value.kdsGroupKey, kdsCompletionTimer: kind === "NONE" ? false : value.kdsCompletionTimer });
+        }} value={value.kdsKind}>
+          {(["NONE", "POT", "ADDON", "SOLO"] as const).map(kind => <option key={kind} value={kind}>{kdsKindLabel(kind)}</option>)}
+        </select>
+      </label>
+      <label className="grid gap-1 font-semibold">동시 조리 그룹
+        <input className={inputClass} disabled={value.kdsKind === "NONE"} maxLength={60} onChange={event => onChange({ ...value, kdsGroupKey: event.target.value || null })} placeholder="비우면 기본 분류 사용" value={value.kdsGroupKey ?? ""} />
+      </label>
+    </div>
+    <label className="mt-3 flex items-center gap-2 font-semibold"><input checked={value.kdsCompletionTimer} disabled={value.kdsKind === "NONE"} onChange={event => onChange({ ...value, kdsCompletionTimer: event.target.checked })} type="checkbox" />조리완료 후 경과시간 표시</label>
+    <p className="mt-2 text-xs text-slate-500">KDS 표시를 끄면 POS 주문에는 남고 주방 화면에서만 제외됩니다. 조리분류가 KDS 제외이면 표시를 켜도 조리작업을 만들지 않습니다.</p>
+    <p className="mt-1 text-xs text-slate-500">그룹을 비우면 찌개는 서로 묶이고, 독립 조리는 같은 메뉴끼리 묶입니다. 같은 그룹명을 입력하면 다른 메뉴도 함께 시작할 수 있습니다.</p>
+  </section>;
+}
 
 function MenuChoiceEditor({ value, onChange, onCopy }: { value: MenuChoiceConfig; onChange: (value: MenuChoiceConfig) => void; onCopy?: () => void }) {
   const changeCount = (count: number) => onChange({ ...value, buttons: Array.from({ length: count }, (_, index) => value.buttons[index] ?? ""), defaultIndex: value.defaultIndex < count ? value.defaultIndex : 0 });
@@ -232,11 +260,14 @@ function CategorySelect({ categories, categoryId, setCategoryId }: { categories:
   return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold"><span>카테고리 *</span><select className={inputClass} onChange={event => setCategoryId(Number(event.target.value))} value={categoryId}>{categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}</select></label>;
 }
 function PosUseToggle({ isActive, setIsActive }: { isActive: boolean; setIsActive: (value: boolean) => void }) {
+  return <MenuSwitch checked={isActive} label="POS 사용" onChange={setIsActive} />;
+}
+function MenuSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return <label className="flex min-h-10 items-center justify-self-start gap-[11px] whitespace-nowrap text-sm font-bold">
-    <span>POS 사용</span>
-    <input aria-label="POS 사용" checked={isActive} className="peer sr-only" onChange={event => setIsActive(event.target.checked)} role="switch" type="checkbox" />
-    <span aria-hidden="true" className={`flex h-[34px] w-[76px] items-center justify-between rounded-full p-1 text-xs font-extrabold text-white transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2 ${isActive ? "bg-blue-600" : "flex-row-reverse bg-slate-400"}`}>
-      <span>{isActive ? "ON" : "OFF"}</span>
+    <span>{label}</span>
+    <input aria-label={label} checked={checked} className="peer sr-only" onChange={event => onChange(event.target.checked)} role="switch" type="checkbox" />
+    <span aria-hidden="true" className={`flex h-[34px] w-[76px] items-center justify-between rounded-full p-1 text-xs font-extrabold text-white transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2 ${checked ? "bg-blue-600" : "flex-row-reverse bg-slate-400"}`}>
+      <span>{checked ? "ON" : "OFF"}</span>
       <span className="size-[26px] shrink-0 rounded-full bg-white shadow-sm" />
     </span>
   </label>;

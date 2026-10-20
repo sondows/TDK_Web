@@ -1,4 +1,4 @@
-import { db } from "@/db";
+import { db, pool } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
 import { OPENING_CASH_ENABLED_KEY } from "@/lib/business-session";
@@ -23,6 +23,14 @@ export async function PUT(request: Request) {
   if (!hasOpeningCashEnabled || typeof body?.openingCashEnabled !== "boolean")
     return Response.json({ success: false, message: "준비금 설정값을 확인해 주세요." }, { status: 400 });
   const openingCashEnabled = hasOpeningCashEnabled ? body.openingCashEnabled as boolean : undefined;
+  if (openingCashEnabled) {
+    try {
+      await pool.query("SELECT cash_opening_fund_id FROM cash_opening_funds LIMIT 0");
+    } catch (error) {
+      console.error("영업준비금 테이블 확인 실패:", error);
+      return Response.json({ success: false, message: "영업준비금 DB 테이블이 준비되지 않았습니다. 관리자에게 DB 마이그레이션을 요청해 주세요." }, { status: 503 });
+    }
+  }
   await db.transaction(async tx => {
     const values: Array<[string, string]> = [];
     if (openingCashEnabled !== undefined) values.push([OPENING_CASH_ENABLED_KEY, openingCashEnabled ? "1" : "0"]);

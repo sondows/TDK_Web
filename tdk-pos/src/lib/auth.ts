@@ -84,6 +84,17 @@ export async function verifyAdminPin(pin: string, storedHash: string | null) {
   return verifyNumericPin(pin, storedHash);
 }
 
+/** KDS uses the existing six-digit scrypt format, never the staff four-digit PIN. */
+export const isValidKdsPin = isValidAdminPin;
+export async function hashKdsPin(pin: string) {
+  if (!isValidKdsPin(pin)) throw new Error("KDS 번호는 숫자 6자리여야 합니다.");
+  return hashNumericPin(pin);
+}
+export async function verifyKdsPin(pin: string, storedHash: string | null) {
+  if (!storedHash || !isValidKdsPin(pin)) return false;
+  return verifyNumericPin(pin, storedHash);
+}
+
 async function verifyNumericPin(pin: string, storedHash: string) {
 
   const [algorithm, n, r, p, salt, expectedKey] = storedHash.split("$");

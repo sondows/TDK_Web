@@ -1,17 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export default function BusinessSettingsForm({ initialOpeningCashEnabled = false }: {
   initialOpeningCashEnabled?: boolean;
 }) {
   const [openingCashEnabled, setOpeningCashEnabled] = useState(initialOpeningCashEnabled);
+  const savedOpeningCashEnabled = useRef(initialOpeningCashEnabled);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [saveFailed, setSaveFailed] = useState(false);
 
   async function save(pointerActivatedButton: HTMLButtonElement | null = null) {
     setBusy(true);
     setMessage("");
+    setSaveFailed(false);
     try {
       const response = await fetch("/api/pos-settings/business-day", {
         method: "PUT",
@@ -19,10 +22,14 @@ export default function BusinessSettingsForm({ initialOpeningCashEnabled = false
         body: JSON.stringify({ openingCashEnabled }),
       });
       const result = await response.json() as { success?: boolean; message?: string };
-      setMessage(response.ok && result.success
-        ? "저장했습니다. 다음 날짜의 첫 판매부터 적용됩니다."
-        : result.message ?? "저장에 실패했습니다.");
+      const succeeded = response.ok && result.success;
+      setSaveFailed(!succeeded);
+      if (succeeded) savedOpeningCashEnabled.current = openingCashEnabled;
+      else setOpeningCashEnabled(savedOpeningCashEnabled.current);
+      setMessage(succeeded ? "저장했습니다. 다음 날짜의 첫 판매부터 적용됩니다." : result.message ?? "저장에 실패했습니다.");
     } catch {
+      setOpeningCashEnabled(savedOpeningCashEnabled.current);
+      setSaveFailed(true);
       setMessage("저장에 실패했습니다.");
     } finally {
       setBusy(false);
@@ -52,7 +59,7 @@ export default function BusinessSettingsForm({ initialOpeningCashEnabled = false
         <p className="mt-1 text-xs text-slate-500">등록된 날짜의 준비금은 새로고침이나 재마감 후에도 유지됩니다.</p>
       </div>
     </>
-    {message && <p className="mt-4 text-sm text-blue-700" role="status">{message}</p>}
+    {message && <p className={`mt-4 text-sm ${saveFailed ? "text-red-700" : "text-blue-700"}`} role={saveFailed ? "alert" : "status"}>{message}</p>}
     <button className="mt-5 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white disabled:opacity-50 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700" disabled={busy} onClick={event => void save(event.detail > 0 ? event.currentTarget : null)} type="button">{busy ? "저장 중" : "저장"}</button>
   </section>;
 }

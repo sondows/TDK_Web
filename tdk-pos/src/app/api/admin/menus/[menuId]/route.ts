@@ -8,10 +8,11 @@ import { generateMenuImages, removeStoredMenuImages } from "@/lib/menu-image-sto
 import { parseMenuComponentInputs, type MenuComponentInput } from "@/lib/menu-components";
 import { parseMenuNumber } from "@/lib/menu-number";
 import { parseMenuChoiceConfig, saveMenuChoiceConfig, type MenuChoiceConfig } from "@/lib/menu-choice-options";
+import { parseKdsMenuConfig, type KdsMenuConfig } from "@/lib/kds-menu-config";
 
 export const runtime = "nodejs";
 
-type UpdateValues = { name: string; price: number; categoryId: number; menuNumber: number | null; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[]; optionConfig?: MenuChoiceConfig };
+type UpdateValues = { name: string; price: number; categoryId: number; menuNumber: number | null; isActive: boolean; image: File | null; removeImage: boolean; components: MenuComponentInput[]; optionConfig?: MenuChoiceConfig; kdsConfig?: KdsMenuConfig };
 
 async function requireOwner() {
   const actor = await getMenuManager();
@@ -41,17 +42,21 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
       try { optionConfig = parseMenuChoiceConfig(JSON.parse(String(form.get("optionConfig")))) ?? undefined; } catch { return null; }
       if (!optionConfig) return null;
     }
+    const kdsConfig = form.has("kdsKind") ? parseKdsMenuConfig(form.get("kdsKind"), form.get("kdsGroupKey"), form.get("kdsCompletionTimer"), form.get("kdsVisible") ?? true) : undefined;
+    if (form.has("kdsKind") && !kdsConfig) return null;
     const nameValue = form.get("name");
     const name = typeof nameValue === "string" ? nameValue.trim() : "";
     const price = Number(form.get("price"));
     const categoryId = Number(form.get("categoryId"));
     const menuNumber = parseMenuNumber(form.get("menuNumber"));
     if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || removeImage === null || !components || (rawImage !== null && !(rawImage instanceof File))) return null;
-    return { name, price, categoryId, menuNumber, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components, optionConfig };
+    return { name, price, categoryId, menuNumber, isActive, image: rawImage instanceof File && rawImage.size > 0 ? rawImage : null, removeImage, components, optionConfig, kdsConfig: kdsConfig ?? undefined };
   }
-  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown };
+  const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown; kdsKind?: unknown; kdsGroupKey?: unknown; kdsCompletionTimer?: unknown; kdsVisible?: unknown };
   const optionConfig = body.optionConfig === undefined ? undefined : parseMenuChoiceConfig(body.optionConfig);
   if (body.optionConfig !== undefined && !optionConfig) return null;
+  const kdsConfig = body.kdsKind === undefined ? undefined : parseKdsMenuConfig(body.kdsKind, body.kdsGroupKey, body.kdsCompletionTimer, body.kdsVisible ?? true);
+  if (body.kdsKind !== undefined && !kdsConfig) return null;
   const isActive = parseBoolean(body.isActive);
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const price = Number(body.price);
@@ -59,7 +64,7 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
   const menuNumber = parseMenuNumber(body.menuNumber);
   const components = parseMenuComponentInputs(body.components);
   if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || isActive === null || !components) return null;
-  return { name, price, categoryId, menuNumber, isActive, image: null, removeImage: false, components, optionConfig: optionConfig ?? undefined };
+  return { name, price, categoryId, menuNumber, isActive, image: null, removeImage: false, components, optionConfig: optionConfig ?? undefined, kdsConfig: kdsConfig ?? undefined };
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ menuId: string }> }) {
@@ -89,7 +94,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
     }
 
     const result = await db.transaction(async tx => {
-      const [existing] = await tx.select({ menuId: menus.menuId, menuCode: menus.menuCode, categoryId: menus.categoryId, sortOrder: menus.sortOrder }).from(menus).where(eq(menus.menuId, menuId)).limit(1);
+      const [existing] = await tx.select({ menuId: menus.menuId, menuCode: menus.menuCode, categoryId: menus.categoryId, sortOrder: menus.sortOrder, kdsKind: menus.kdsKind, kdsGroupKey: menus.kdsGroupKey, kdsCompletionTimer: menus.kdsCompletionTimer, kdsVisible: menus.kdsVisible }).from(menus).where(eq(menus.menuId, menuId)).limit(1);
       if (!existing) return { status: "missing" as const };
       const [menuCategory] = await tx.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder, isActive: menuCategories.isActive }).from(menuCategories).where(eq(menuCategories.categoryId, values.categoryId)).for("update");
       if (!menuCategory || !menuCategory.isActive) return { status: "invalidCategory" as const };
@@ -107,7 +112,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
       const componentIds = [...new Set(values.components.map(component => component.componentMenuId))];
       const validComponents = componentIds.length ? await tx.select({ menuId: menus.menuId }).from(menus).where(and(inArray(menus.menuId, componentIds), eq(menus.isActive, 1))) : [];
       if (validComponents.length !== componentIds.length) return { status: "invalidItem" as const };
-      await tx.update(menus).set({ posName: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, isActive, sortOrder, updatedAt: new Date() }).where(eq(menus.menuId, menuId));
+      await tx.update(menus).set({ posName: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, isActive, sortOrder, updatedAt: new Date(), ...(values.kdsConfig ? { kdsKind: values.kdsConfig.kdsKind, kdsGroupKey: values.kdsConfig.kdsGroupKey, kdsCompletionTimer: values.kdsConfig.kdsCompletionTimer ? 1 : 0, kdsVisible: values.kdsConfig.kdsVisible ? 1 : 0 } : {}) }).where(eq(menus.menuId, menuId));
       const existingComponents = await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menuComponents.componentMenuId })
         .from(menuComponents).where(eq(menuComponents.parentMenuId, menuId)).for("update");
       const requestedComponentIds = new Set(values.components.map(component => component.componentMenuId));
@@ -132,7 +137,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ me
       if (generatedImages) await tx.insert(menuImages).values(generatedImages.map(image => ({ menuId, imageType: image.imageType, imageUrl: image.imageUrl, sortOrder: 0, isActive: 1 })));
       const posImageUrl = generatedImages?.find(image => image.imageType === "POS")?.imageUrl ?? (values.removeImage ? null : (await tx.select({ imageUrl: menuImages.imageUrl }).from(menuImages).where(and(eq(menuImages.menuId, menuId), eq(menuImages.imageType, "POS"), eq(menuImages.isActive, 1))).limit(1))[0]?.imageUrl ?? null);
       const linkedComponents = values.components.length ? await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menus.menuId, itemName: menus.posName, price: menus.price, qtyPerUnit: menuComponents.qtyPerUnit, printOnKitchen: menuComponents.printOnKitchen, printOnReceipt: menuComponents.printOnReceipt, sortOrder: menuComponents.sortOrder }).from(menuComponents).innerJoin(menus, eq(menus.menuId, menuComponents.componentMenuId)).where(eq(menuComponents.parentMenuId, menuId)) : [];
-      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents, optionConfig: values.optionConfig } };
+      return { status: "ok" as const, oldImageUrls: oldImageRows.map(row => row.imageUrl), menu: { menuId, menuCode: existing.menuCode, name: values.name, price: values.price.toFixed(2), categoryId: values.categoryId, menuNumber: values.menuNumber, categoryName: menuCategory.name, categorySortOrder: menuCategory.sortOrder, isActive, sortOrder, imageUrl: posImageUrl, components: linkedComponents, optionConfig: values.optionConfig, kdsKind: values.kdsConfig?.kdsKind ?? existing.kdsKind, kdsGroupKey: values.kdsConfig ? values.kdsConfig.kdsGroupKey : existing.kdsGroupKey, kdsCompletionTimer: values.kdsConfig ? Number(values.kdsConfig.kdsCompletionTimer) : existing.kdsCompletionTimer, kdsVisible: values.kdsConfig ? Number(values.kdsConfig.kdsVisible) : existing.kdsVisible } };
     });
 
     if (result.status === "missing") return Response.json({ success: false, message: "메뉴를 찾을 수 없습니다." }, { status: 404 });

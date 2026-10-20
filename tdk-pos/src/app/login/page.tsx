@@ -7,7 +7,6 @@ import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import { PIN_LENGTH } from "@/lib/pin";
-import OpeningFundModal from "@/app/pos/OpeningFundModal";
 
 type Staff = {
   staffId: number;
@@ -31,7 +30,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPinError, setShowPinError] = useState(false);
-  const [openingCashRequired, setOpeningCashRequired] = useState(false);
   const verificationRequestId = useRef(0);
 
   useEffect(() => {
@@ -75,16 +73,16 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ staffCode: staffMember.staffCode, pin: pinValue }),
       });
-      const result = await response.json() as { success?: boolean; needsOpeningCash?: boolean };
+      const result = await response.json() as { success?: boolean; message?: string };
 
       if (!response.ok || !result.success) {
         resetPinVerification();
-        setShowPinError(true);
+        if (response.status === 401) setShowPinError(true);
+        else setMessage(result.message ?? "로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
         return;
       }
 
-      if (result.needsOpeningCash) setOpeningCashRequired(true);
-      else router.replace("/pos");
+      router.replace("/pos");
     } catch {
       setMessage("로그인 요청 중 네트워크 오류가 발생했습니다.");
     } finally {
@@ -101,19 +99,19 @@ export default function LoginPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ staffCode: staffMember.staffCode, pin: pinValue }),
     })
-      .then(response => response.json() as Promise<{ success?: boolean }>)
-      .then(result => {
+      .then(async response => ({ response, result: await response.json() as { success?: boolean } }))
+      .then(({ response, result }) => {
         if (requestId !== verificationRequestId.current) return;
 
-        if (result.success) {
+        if (response.ok && result.success) {
           setPinStatus("valid");
           void completeLogin(staffMember, pinValue);
           return;
         }
 
-        setPin("");
-        setPinStatus("idle");
-        setShowPinError(true);
+        resetPinVerification();
+        if (response.status === 401) setShowPinError(true);
+        else setMessage("PIN 검증 서비스를 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.");
       })
       .catch(() => {
         if (requestId === verificationRequestId.current) {
@@ -200,7 +198,6 @@ export default function LoginPage() {
           </section>
         </div>
       )}
-      {openingCashRequired && <OpeningFundModal context="login" close={() => { setOpeningCashRequired(false); router.replace("/pos?openingCashDismissed=1"); }} onSaved={() => { setOpeningCashRequired(false); router.replace("/pos"); }} />}
     </main>
   );
 }

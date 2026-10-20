@@ -7,6 +7,7 @@ import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
 import { getPaymentAutoCompleteSeconds } from "@/lib/payment-auto-complete-setting";
 import IdleResetSettingsForm from "@/app/pos/admin/settings/IdleResetSettingsForm";
 import AdminReadOnlyFields from "@/app/admin/AdminReadOnlyFields";
+import KdsAccountsForm from "./KdsAccountsForm";
 import styles from "../../../admin.module.css";
 
 export default async function AdminPosSettingsPage() {
@@ -25,6 +26,7 @@ export default async function AdminPosSettingsPage() {
         <p className={styles.pageDescription}>POS 사용 및 동작 방식을 설정합니다.</p>
       </div>
       <AdminReadOnlyFields><IdleResetSettingsForm initialLoginMode={loginMode} initialSeconds={Number.isInteger(seconds) ? seconds : 60} initialPaymentAutoCompleteSeconds={paymentAutoCompleteSeconds} /></AdminReadOnlyFields>
+      <KdsAccountsForm />
     </div>
   </div>;
 }

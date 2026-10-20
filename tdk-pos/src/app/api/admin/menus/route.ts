@@ -8,6 +8,7 @@ import { getMenuManager } from "@/lib/management-auth";
 import { parseMenuComponentInputs } from "@/lib/menu-components";
 import { parseMenuNumber } from "@/lib/menu-number";
 import { parseMenuChoiceConfig, saveMenuChoiceConfig } from "@/lib/menu-choice-options";
+import { parseKdsMenuConfig } from "@/lib/kds-menu-config";
 
 async function requireOwner() {
   const actor = await getMenuManager();
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
   const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner(); if (auth.error) return auth.error;
   try {
-    const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown };
+    const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown; kdsKind?: unknown; kdsGroupKey?: unknown; kdsCompletionTimer?: unknown; kdsVisible?: unknown };
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const price = Number(body.price);
     const categoryId = Number(body.categoryId);
@@ -32,8 +33,9 @@ export async function POST(request: Request) {
     const isActive = body.isActive === false ? 0 : 1;
     const components = parseMenuComponentInputs(body.components);
     const optionConfig = body.optionConfig === undefined ? { enabled: false as const, title: "", buttons: [], defaultIndex: 0 } : parseMenuChoiceConfig(body.optionConfig);
+    const kdsConfig = parseKdsMenuConfig(body.kdsKind ?? "NONE", body.kdsGroupKey ?? null, body.kdsCompletionTimer ?? false, body.kdsVisible ?? true);
     if (!optionConfig) return Response.json({ success: false, message: "옵션 설정을 확인해 주세요." }, { status: 400 });
-    if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || !components) return Response.json({ success: false, message: "메뉴명, 메뉴번호, 가격, 카테고리, 구성품을 확인하세요." }, { status: 400 });
+    if (!name || name.length > 150 || !Number.isFinite(price) || Math.abs(price) > 999999999999.99 || !Number.isInteger(categoryId) || menuNumber === undefined || !components || !kdsConfig) return Response.json({ success: false, message: "메뉴명, 메뉴번호, 가격, 카테고리, 구성품, 주방 설정을 확인하세요." }, { status: 400 });
 
     const [category] = await db.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder, isActive: menuCategories.isActive })
       .from(menuCategories).where(eq(menuCategories.categoryId, categoryId)).limit(1);
@@ -54,12 +56,12 @@ export async function POST(request: Request) {
           const [lastMenu] = await tx.select({ sortOrder: menus.sortOrder }).from(menus).where(eq(menus.categoryId, categoryId)).orderBy(desc(menus.sortOrder), desc(menus.menuId)).limit(1);
           const sortOrder = (lastMenu?.sortOrder ?? 0) + 10;
           const menuCode = nextMenuCode();
-          const inserted = await tx.insert(menus).values({ menuCode, posName: name, categoryId, menuNumber, price: price.toFixed(2), isActive, sortOrder });
+          const inserted = await tx.insert(menus).values({ menuCode, posName: name, categoryId, menuNumber, price: price.toFixed(2), isActive, sortOrder, kdsKind: kdsConfig.kdsKind, kdsGroupKey: kdsConfig.kdsGroupKey, kdsCompletionTimer: kdsConfig.kdsCompletionTimer ? 1 : 0, kdsVisible: kdsConfig.kdsVisible ? 1 : 0 });
           const menuId = Number(inserted[0].insertId);
           if (optionConfig.enabled) await saveMenuChoiceConfig(tx, menuId, optionConfig);
           if (components.length) await tx.insert(menuComponents).values(components.map((component, index) => ({ parentMenuId: menuId, componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen ? 1 : 0, printOnReceipt: component.printOnReceipt ? 1 : 0, sortOrder: index * 10 })));
           const linkedComponents = components.length ? await tx.select({ menuComponentId: menuComponents.menuComponentId, componentMenuId: menus.menuId, itemName: menus.posName, price: menus.price, qtyPerUnit: menuComponents.qtyPerUnit, printOnKitchen: menuComponents.printOnKitchen, printOnReceipt: menuComponents.printOnReceipt, sortOrder: menuComponents.sortOrder }).from(menuComponents).innerJoin(menus, eq(menus.menuId, menuComponents.componentMenuId)).where(eq(menuComponents.parentMenuId, menuId)) : [];
-          return { status: "ok" as const, menu: { menuId, menuCode, name, price: price.toFixed(2), categoryId, menuNumber, categoryName: category.name, categorySortOrder: category.sortOrder, isActive, sortOrder, components: linkedComponents, optionConfig } };
+          return { status: "ok" as const, menu: { menuId, menuCode, name, price: price.toFixed(2), categoryId, menuNumber, categoryName: category.name, categorySortOrder: category.sortOrder, isActive, sortOrder, components: linkedComponents, optionConfig, kdsKind: kdsConfig.kdsKind, kdsGroupKey: kdsConfig.kdsGroupKey, kdsCompletionTimer: kdsConfig.kdsCompletionTimer ? 1 : 0, kdsVisible: kdsConfig.kdsVisible ? 1 : 0 } };
         });
         if (result.status === "duplicateNumber") return Response.json({ success: false, message: `${category.name} 분류에서 이미 사용 중인 메뉴번호입니다.` }, { status: 409 });
         if (result.status === "invalidCategory") return Response.json({ success: false, message: "사용 가능한 카테고리를 선택하세요." }, { status: 400 });

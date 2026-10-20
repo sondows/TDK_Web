@@ -34,11 +34,13 @@ export function isExternalAdminPathAllowed(pathname: string, method: string): bo
   if (isPathOrChild(pathname, "/admin")) return true;
   if (isPathOrChild(pathname, "/api/admin")) return true;
   if (isPathOrChild(pathname, "/api/admin-center")) return true;
+  if (isPathOrChild(pathname, "/kitchen")) return method === "GET" || method === "HEAD";
+  if (isPathOrChild(pathname, "/api/kitchen")) return true;
   if (isPathOrChild(pathname, "/api/pos-settings")) return true;
   if (isPathOrChild(pathname, "/api/customers")) return true;
   if (/^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname)) return method === "GET" || method === "HEAD";
   if (isPathOrChild(pathname, "/_next")) return method === "GET" || method === "HEAD";
-  if (pathname === "/manifest.webmanifest" || pathname === "/favicon.ico") return method === "GET" || method === "HEAD";
+  if (pathname === "/manifest.webmanifest" || pathname === "/kds.webmanifest" || pathname === "/favicon.ico") return method === "GET" || method === "HEAD";
   if (isPathOrChild(pathname, "/icons")) return method === "GET" || method === "HEAD";
   return false;
 }

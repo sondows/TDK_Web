@@ -133,10 +133,6 @@ export default function PosShell({ staffName, staffRole, tables, takeouts, menus
  const [exitMessage, setExitMessage] = useState("");
 
  const router = useRouter(); const searchParams = useSearchParams(); const refreshedOnTableManagementReturn = useRef(false); const [selectedId, setSelectedId] = useState<number | null>(null); const [selectionVersion, setSelectionVersion] = useState(0); const [view, setView] = useState<"tables"|"takeout"|"reservation"|"waiting">("tables"); const [tab, setTab] = useState<"summary" | "pending" | "detail" | "table" | "kitchen">("summary"); const [fullscreen, setFullscreen] = useState(false); const [personModal, setPersonModal] = useState(false); const [discountModal, setDiscountModal] = useState(false); const [riceStockModal, setRiceStockModal] = useState(false); const [openingFundModal, setOpeningFundModal] = useState(false); const [personBusy, setPersonBusy] = useState(false); const [personError, setPersonError] = useState(""); const [cart, setCart] = useState<PendingCartItem[]>([]); const [quantityMenu, setQuantityMenu] = useState<Menu | null>(null); const [submittingOrder, setSubmittingOrder] = useState(false); const [orderError, setOrderError] = useState(""); const [menuResetVersion, setMenuResetVersion] = useState(0); const [tableOverrides, setTableOverrides] = useState<Record<number, Partial<Table>>>({}); const [newTakeouts, setNewTakeouts] = useState<Table[]>([]); const [cancelledTakeoutIds, setCancelledTakeoutIds] = useState<number[]>([]); const displayTables = tables.map(table => ({ ...table, ...tableOverrides[table.tableId] })); const displayTakeouts = [...takeouts.filter(session => !cancelledTakeoutIds.includes(session.sessionId!)), ...newTakeouts.filter(session => !takeouts.some(persisted => persisted.sessionId === session.sessionId) && !cancelledTakeoutIds.includes(session.sessionId!))]; const openTableCount = countOpenTables(displayTables);
- useEffect(() => {
-  if (searchParams.get("openingCashDismissed") !== "1") return;
-  window.history.replaceState(null, "", "/pos");
- }, [searchParams]);
   const refreshPosData = useCallback(() => {
   setTableOverrides({});
   setNewTakeouts([]);
