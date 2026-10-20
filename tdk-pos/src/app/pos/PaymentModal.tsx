@@ -921,7 +921,7 @@ function PaymentDeletionDialog({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4">
       <section aria-modal="true" aria-describedby="payment-deletion-prompt" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
-        <PosSubHeader title="결제내역 삭제" />
+        <PosSubHeader showBackButton={false} title="결제내역 삭제" />
         <div className="px-7 py-7">
           <div className="space-y-3 text-center">
             <div className="flex items-baseline justify-center gap-5 text-lg text-slate-800"><span>{paymentLabel}</span><strong className="text-xl font-extrabold tabular-nums">{money(paymentAmount)}</strong></div>
@@ -954,7 +954,7 @@ function PaymentResetDialog({ paymentCount, error, busy, close, submit }: { paym
 function ConfirmOverpaymentDialog({ compact, methodLabel, amount, due, excess, busy, secondaryLabel, secondaryAction, confirm }: { compact: boolean; methodLabel: string; amount: number; due: number; excess: number; busy: boolean; secondaryLabel: string; secondaryAction: () => void; confirm: () => void }) {
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4">
     <section aria-modal="true" className={`w-full ${compact ? "max-w-[440px]" : "max-w-[480px]"} overflow-hidden rounded-2xl bg-white shadow-2xl`} role="dialog">
-      <PosSubHeader title={`${methodLabel} 초과결제 확인`} />
+      <PosSubHeader showBackButton={false} title={`${methodLabel} 초과결제 확인`} />
       <div className={`px-7 ${compact ? "py-5" : "py-6"} text-lg`}>
         {compact ? (
           <>
@@ -983,7 +983,7 @@ function ConfirmOverpaymentDialog({ compact, methodLabel, amount, due, excess, b
 function CardErrorDialog({ message, close }: { message: string; close: () => void }) {
   return <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4">
     <section aria-modal="true" className="w-full max-w-[420px] overflow-hidden rounded-2xl bg-white shadow-2xl" role="alertdialog">
-      <PosSubHeader title="결제 확인" />
+      <PosSubHeader className="!px-5 [&>div]:w-full [&>div]:justify-center" showBackButton={false} title="결제 확인" />
       <div className="px-7 py-7 text-center text-xl font-bold text-slate-800">
         <p className="whitespace-pre-line">{message}</p>
         <button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-extrabold text-white" onClick={close} type="button">확인</button>

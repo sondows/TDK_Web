@@ -59,6 +59,31 @@
 .logoutButton:hover { background: #f2f5f6; }
 .logoutError { color: #bc3535; }
 
+.exitButton {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5da;
+  border-radius: 6px;
+  background: #fff;
+  color: #52636c;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.exitButton svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+.exitButton:hover { background: #f2f5f6; color: #25343b; }
+.exitButton:active { background: #e8eef0; }
+.exitButton:focus-visible { outline: 2px solid #455a64; outline-offset: 2px; }
+.exitOverlay { position: fixed; z-index: 300; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(19 31 38 / 45%); padding: 20px; }
+.exitDialog { width: min(100%, 420px); border: 1px solid #dce3e7; border-radius: 12px; background: #fff; padding: 24px; color: #25343b; box-shadow: 0 12px 32px rgb(15 23 42 / 16%); }
+.exitDialog h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.exitDialog p { margin: 16px 0 20px; color: #52636c; line-height: 1.6; }
+.exitConfirmButton { min-height: 42px; width: 100%; border: 1px solid #cbd5da; border-radius: 6px; background: #f8fafb; color: #344e5a; font-weight: 700; }
+.exitConfirmButton:hover { background: #f2f5f6; }
+
 .loginScreen {
   display: flex;
   min-height: 100vh;
@@ -1087,6 +1112,8 @@
   .brand { font-size: 18px; }
   .userArea { min-width: 0; gap: 8px; }
   .logoutButton { min-height: 40px; padding: 6px 9px; }
+  .userName { max-width: min(22vw, 112px); overflow: hidden; text-overflow: ellipsis; }
+  .exitButton { width: 40px; height: 40px; flex-basis: 40px; }
 
   .workspace { display: block; min-height: 0; width: 100%; }
   .workspace > .sidebar { display: none; }
@@ -1151,6 +1178,9 @@
 }
 
 @media (max-width: 480px) {
+  .header { gap: 5px; padding-right: 8px; padding-left: 8px; }
+  .brand { font-size: 16px; }
+  .userArea { gap: 5px; }
   .userArea > span { display: none; }
 }
 

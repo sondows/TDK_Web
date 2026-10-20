@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import AdminLogoutButton from "./AdminLogoutButton";
+import AdminExitButton from "./AdminExitButton";
 import AdminSidebar from "./AdminSidebar";
 import { AdminAccessProvider } from "./AdminAccessContext";
 import type { AdminPermission } from "@/lib/staff-management";
@@ -36,7 +37,7 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
       <div className={styles.brand}>TDK <span>관리센터</span></div>
-      <div className={styles.userArea}>{permission === "READ_ONLY" && <span className={styles.readOnlyBadge}>조회 전용</span>}<span>{userName}</span>{showLogout && <AdminLogoutButton />}</div>
+      <div className={styles.userArea}>{permission === "READ_ONLY" && <span className={styles.readOnlyBadge}>조회 전용</span>}<span className={styles.userName}>{userName}</span>{showLogout && <AdminLogoutButton />}<AdminExitButton /></div>
     </header>
     <div className={styles.workspace}>
       <AdminSidebar menuOnly={menuOnly} />
