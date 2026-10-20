@@ -1,9 +1,9 @@
 import "server-only";
 
 import { cookies } from "next/headers";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { kdsAccounts, kdsSessions } from "@/db/schema";
+import { kdsAccounts, kdsSessions, staff, staffSessions } from "@/db/schema";
 import { hashSessionToken, sessionCookieSecure, SESSION_MAX_AGE_SECONDS } from "@/lib/auth";
 
 export const KDS_SESSION_COOKIE_NAME = "tdk_kds_session";
@@ -36,5 +36,22 @@ export async function getCurrentKdsAccount() {
     gt(kdsSessions.loggedInAt, cutoff),
     eq(kdsAccounts.isActive, 1),
   )).limit(1);
-  return account ?? null;
+  if (account) return account;
+
+  // Admin Center credentials use staff_sessions but have their own KDS cookie.
+  // This keeps KDS authentication separate from POS/admin browser sessions.
+  const [staffAccount] = await db.select({
+    kdsAccountId: staff.staffId,
+    loginId: sql<string>`COALESCE(${staff.adminLoginId}, '')`,
+  }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
+    eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
+    eq(staffSessions.status, "ACTIVE"),
+    gt(staffSessions.loggedInAt, cutoff),
+    eq(staff.isActive, 1),
+    ne(staff.staffCode, "000"),
+    ne(staff.adminPermission, "NONE"),
+    isNotNull(staff.adminLoginId),
+    isNotNull(staff.adminPinHash),
+  )).limit(1);
+  return staffAccount ?? null;
 }
