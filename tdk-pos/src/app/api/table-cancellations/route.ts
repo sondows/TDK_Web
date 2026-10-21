@@ -6,6 +6,7 @@ import { getCurrentStaff, verifyPin } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidPin } from "@/lib/pin";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
+import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "서비스", "에러", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
       for (const orderId of orderIds) await tx.update(orders).set({ subtotalAmount: "0.00", totalAmount: "0.00", status: "CANCELLED" }).where(eq(orders.orderId, orderId));
       if (merges.length) await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(inArray(tableSessionMerges.mergeId, merges.map(merge => merge.mergeId)));
       await tx.update(tableSessions).set({ status: "CANCELLED", closedAt: new Date(), closedByStaffId: checker.staffId }).where(inArray(tableSessions.sessionId, sessionIds));
+      await cancelOrphanedUnpaidCheckouts(tx, sessionIds);
 
       return { tableNos: sessions.map(session => session.tableNo).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })) };
     });

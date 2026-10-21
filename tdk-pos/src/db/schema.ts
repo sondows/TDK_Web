@@ -355,6 +355,7 @@ export const menus = mysqlTable("menus", {
   kdsKind: mysqlEnum("kds_kind", ["NONE", "POT", "ADDON", "SOLO"]).notNull().default("NONE"),
   kdsGroupKey: varchar("kds_group_key", { length: 60 }),
   kdsCompletionTimer: tinyint("kds_completion_timer").notNull().default(0),
+  kdsPostCookTimer: tinyint("kds_post_cook_timer").notNull().default(0),
   kdsVisible: tinyint("kds_visible").notNull().default(1),
   createdAt: datetime("created_at")
     .notNull()
@@ -622,6 +623,8 @@ export const kdsTasks = mysqlTable("kds_tasks", {
   kind: mysqlEnum("kind", ["POT", "SOLO"]).notNull(),
   compatibilityKey: varchar("compatibility_key", { length: 80 }).notNull(),
   completionTimer: tinyint("completion_timer").notNull().default(0),
+  postCookTimerMinutes: tinyint("post_cook_timer_minutes", { unsigned: true }),
+  postCookTimerStartedAtMs: bigint("post_cook_timer_started_at_ms", { mode: "number", unsigned: true }),
   status: mysqlEnum("status", ["WAITING", "COOKING", "DONE"]).notNull().default("WAITING"),
   cookingGroupId: bigint("cooking_group_id", { mode: "number", unsigned: true }).references(() => kdsCookingGroups.groupId),
   cookingStartedAtMs: bigint("cooking_started_at_ms", { mode: "number", unsigned: true }),

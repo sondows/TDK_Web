@@ -1,0 +1,38 @@
+﻿ M tdk-device-agent/appsettings.json
+ M tdk-pos/src/app/admin/(protected)/settings/pos/page.tsx
+ M tdk-pos/src/app/admin/AdminSidebar.tsx
+ M tdk-pos/src/app/admin/menus/page.tsx
+ M tdk-pos/src/app/api/admin/menus/[menuId]/route.ts
+ M tdk-pos/src/app/api/admin/menus/route.ts
+ M tdk-pos/src/app/api/kitchen/route.ts
+ M tdk-pos/src/app/api/kitchen/tasks/[taskId]/route.ts
+ M tdk-pos/src/app/api/order-items/[orderItemId]/cancellations/route.ts
+ M tdk-pos/src/app/api/order-items/cancellations/batch/route.ts
+ M tdk-pos/src/app/api/pos/takeouts/route.ts
+ M tdk-pos/src/app/api/table-cancellations/route.ts
+ M tdk-pos/src/app/api/table-sessions/[sessionId]/route.ts
+ M tdk-pos/src/app/kitchen/KitchenClient.tsx
+ M tdk-pos/src/app/pos/PersonCountModal.tsx
+ M tdk-pos/src/app/pos/PosShell.tsx
+ M tdk-pos/src/app/pos/admin/menus/MenuManagementClient.tsx
+ M tdk-pos/src/db/schema.ts
+ M tdk-pos/src/lib/kds-menu-config.ts
+ M tdk-pos/src/lib/kds-model.test.mjs
+ M tdk-pos/src/lib/kds-model.ts
+ M tdk-pos/src/lib/kds-party-grouping.test.mjs
+ M tdk-pos/src/lib/kds-party-grouping.ts
+ M tdk-pos/src/lib/kds-server.ts
+ M tdk-pos/src/lib/menu-choice-options.ts
+?? _tdk-pos-kds-recovery-20261021-160056/
+?? tdk-pos/db-migrations/20261020_kds_table_bulk_timer.sql
+?? tdk-pos/src/app/admin/(protected)/settings/pos/kds/
+?? tdk-pos/src/app/api/admin/kds-arrival-sound/
+?? tdk-pos/src/app/api/admin/kds-cooking/
+?? tdk-pos/src/app/api/kitchen/tables/
+?? tdk-pos/src/lib/kds-arrival-sound-setting.ts
+?? tdk-pos/src/lib/kds-arrival-sound.test.mjs
+?? tdk-pos/src/lib/kds-arrival-sound.ts
+?? tdk-pos/src/lib/kds-cooking-settings.ts
+?? tdk-pos/src/lib/orphan-checkout-cancellation-model.ts
+?? tdk-pos/src/lib/orphan-checkout-cancellation.test.mjs
+?? tdk-pos/src/lib/orphan-checkout-cancellation.ts

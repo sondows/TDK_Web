@@ -10,6 +10,10 @@ export type KdsPartyTask = {
 export type KdsTableGroup<T> = { sessionId: number; tasks: T[] };
 export type KdsPartyCard<T> = { key: string; tables: KdsTableGroup<T>[] };
 
+export function activeKdsTableTasks<T extends KdsPartyTask>(tasks: T[]) {
+  return tasks.filter(task => !task.cancelled && task.status !== "DONE");
+}
+
 export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[]): KdsPartyCard<T>[] {
   const cards = new Map<string, { card: KdsPartyCard<T>; tables: Map<number, KdsTableGroup<T>> }>();
   for (const task of tasks) {

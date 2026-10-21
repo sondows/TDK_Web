@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
+import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
 export async function PATCH(_request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   const currentStaff = await getCurrentStaff();
@@ -20,6 +21,7 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
     const closed = await db.transaction(async tx => {
       const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
       if (updateResult.affectedRows !== 1) return false;
+      await cancelOrphanedUnpaidCheckouts(tx, [sessionId]);
       await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(and(
         eq(tableSessionMerges.status, "ACTIVE"),
         or(eq(tableSessionMerges.sourceSessionId, sessionId), eq(tableSessionMerges.destinationSessionId, sessionId)),

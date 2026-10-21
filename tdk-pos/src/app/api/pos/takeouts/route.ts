@@ -9,6 +9,7 @@ import { isValidPickupAt, pickupAtAfterMinutes } from "@/lib/phone-takeout-time"
 import { defaultTakeoutPreparationMinutes, getTakeoutPreparationMinutes } from "@/lib/takeout-preparation-setting";
 import { hasOutstandingTakeoutPayment } from "@/lib/takeout-cancellation-payment";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
+import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
 export const dynamic = "force-dynamic";
 
@@ -230,6 +231,7 @@ export async function DELETE(request: Request) {
       }
       if (orderIds.length) await tx.update(orders).set({ subtotalAmount: "0.00", totalAmount: "0.00", status: "CANCELLED" }).where(inArray(orders.orderId, orderIds));
       await tx.update(tableSessions).set({ status: "CANCELLED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId: cancelledByStaffId }).where(eq(tableSessions.sessionId, sessionId));
+      await cancelOrphanedUnpaidCheckouts(tx, [sessionId]);
     });
     return Response.json({ success: true });
   } catch (error) {

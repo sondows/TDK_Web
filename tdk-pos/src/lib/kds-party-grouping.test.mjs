@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { groupKdsTasksByParty, partyHasActiveTask } from "./kds-party-grouping.ts";
+import { activeKdsTableTasks, groupKdsTasksByParty, partyHasActiveTask } from "./kds-party-grouping.ts";
 
 const task = (taskId, sessionId, groupId, status = "WAITING", sessionKind = "DINE_IN") =>
   ({ taskId, sessionId, groupId, sessionKind, status, cancelled: false });
@@ -33,4 +33,13 @@ test("takeout is isolated even if a group id or session id resembles a party key
     task(1, 30, 7), task(2, 50, 7, "WAITING", "TAKEOUT_PHONE"), task(3, 7, null),
   ]);
   assert.deepEqual(cards.map(card => card.key), ["party:7", "session:50", "session:7"]);
+});
+
+test("bulk table completion targets only active non-cancelled tasks", () => {
+  const tasks = [
+    { taskId: 1, status: "COOKING", cancelled: false },
+    { taskId: 2, status: "WAITING", cancelled: true },
+    { taskId: 3, status: "DONE", cancelled: false },
+  ];
+  assert.deepEqual(activeKdsTableTasks(tasks).map(task => task.taskId), [1]);
 });

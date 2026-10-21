@@ -14,7 +14,7 @@ export function parseMenuChoiceConfig(value: unknown): MenuChoiceConfig | null {
   const title = input.title.trim();
   const buttons = input.buttons.map(button => typeof button === "string" ? button.trim() : "");
   const defaultIndex = Number(input.defaultIndex);
-  if (!title || title.length > 150 || buttons.length < 2 || buttons.length > 4 || buttons.some(button => !button || button.length > 150) || defaultIndex < 0 || defaultIndex >= buttons.length) return null;
+  if (title.length > 150 || buttons.length < 2 || buttons.length > 4 || buttons.some(button => !button || button.length > 150) || defaultIndex < 0 || defaultIndex >= buttons.length) return null;
   return { enabled: true, title, buttons, defaultIndex };
 }
 

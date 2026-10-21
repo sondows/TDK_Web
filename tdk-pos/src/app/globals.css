@@ -25,6 +25,22 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* KDS is a touch display; keep browser selection and tap flashes off its display surface. */
+[data-kds-display] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-kds-display] button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+[data-kds-display] button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 /* Reusable behavior for POS dialog copy and actions; do not apply to form fields. */
 .pos-display-copy,
 .pos-modal-copy {

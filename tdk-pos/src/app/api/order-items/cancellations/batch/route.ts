@@ -8,6 +8,7 @@ import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { canEditDisplayedOrderSession } from "@/lib/party-order-access";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { assertNoCompletedTakeoutPayment } from "@/lib/takeout-order-cancellation-guard";
+import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "이물질", "클레임", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -183,6 +184,7 @@ export async function POST(request: Request) {
         const source = effectiveRows.find(row => row.orderId === orderId);
         await tx.update(orders).set({ subtotalAmount: decimal(remainingTotal), totalAmount: decimal(remainingTotal), status: remainingTotal === 0 ? "CANCELLED" : source?.orderStatus }).where(eq(orders.orderId, orderId));
       }
+      await cancelOrphanedUnpaidCheckouts(tx, targetSessionIds);
       return { reauth: false as const, isFullOrderCancellation };
     });
 

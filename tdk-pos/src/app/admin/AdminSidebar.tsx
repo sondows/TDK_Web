@@ -34,6 +34,7 @@ const navigation: NavigationItem[] = [
       { label: "기타결제 설정", href: "/admin/settings/other-payments" },
       { label: "포장 설정", href: "/admin/settings/takeout" },
       { label: "영업마감", href: "/admin/settings/pos/business-closing" },
+      { label: "KDS 설정", href: "/admin/settings/pos/kds" },
     ],
   },
   {

@@ -1,0 +1,38 @@
+﻿ M ../tdk-device-agent/appsettings.json
+ M src/app/admin/(protected)/settings/pos/page.tsx
+ M src/app/admin/AdminSidebar.tsx
+ M src/app/admin/menus/page.tsx
+ M src/app/api/admin/menus/[menuId]/route.ts
+ M src/app/api/admin/menus/route.ts
+ M src/app/api/kitchen/route.ts
+ M src/app/api/kitchen/tasks/[taskId]/route.ts
+ M src/app/api/order-items/[orderItemId]/cancellations/route.ts
+ M src/app/api/order-items/cancellations/batch/route.ts
+ M src/app/api/pos/takeouts/route.ts
+ M src/app/api/table-cancellations/route.ts
+ M src/app/api/table-sessions/[sessionId]/route.ts
+ M src/app/kitchen/KitchenClient.tsx
+ M src/app/pos/PersonCountModal.tsx
+ M src/app/pos/PosShell.tsx
+ M src/app/pos/admin/menus/MenuManagementClient.tsx
+ M src/db/schema.ts
+ M src/lib/kds-menu-config.ts
+ M src/lib/kds-model.test.mjs
+ M src/lib/kds-model.ts
+ M src/lib/kds-party-grouping.test.mjs
+ M src/lib/kds-party-grouping.ts
+ M src/lib/kds-server.ts
+ M src/lib/menu-choice-options.ts
+?? ../_tdk-pos-kds-recovery-20261021-160056/
+?? db-migrations/20261020_kds_table_bulk_timer.sql
+?? src/app/admin/(protected)/settings/pos/kds/
+?? src/app/api/admin/kds-arrival-sound/
+?? src/app/api/admin/kds-cooking/
+?? src/app/api/kitchen/tables/
+?? src/lib/kds-arrival-sound-setting.ts
+?? src/lib/kds-arrival-sound.test.mjs
+?? src/lib/kds-arrival-sound.ts
+?? src/lib/kds-cooking-settings.ts
+?? src/lib/orphan-checkout-cancellation-model.ts
+?? src/lib/orphan-checkout-cancellation.test.mjs
+?? src/lib/orphan-checkout-cancellation.ts

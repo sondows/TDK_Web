@@ -1,0 +1,15 @@
+﻿db-migrations/20261020_kds_table_bulk_timer.sql
+src/app/admin/(protected)/settings/pos/kds/KdsArrivalSoundForm.tsx
+src/app/admin/(protected)/settings/pos/kds/KdsCookingForm.tsx
+src/app/admin/(protected)/settings/pos/kds/page.tsx
+src/app/api/admin/kds-arrival-sound/route.ts
+src/app/api/admin/kds-cooking/route.ts
+src/app/api/kitchen/tables/[sessionId]/complete/route.ts
+src/app/api/kitchen/tables/[sessionId]/start/route.ts
+src/lib/kds-arrival-sound-setting.ts
+src/lib/kds-arrival-sound.test.mjs
+src/lib/kds-arrival-sound.ts
+src/lib/kds-cooking-settings.ts
+src/lib/orphan-checkout-cancellation-model.ts
+src/lib/orphan-checkout-cancellation.test.mjs
+src/lib/orphan-checkout-cancellation.ts

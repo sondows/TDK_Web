@@ -6,6 +6,7 @@ import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { assertNoCompletedTakeoutPayment } from "@/lib/takeout-order-cancellation-guard";
+import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
 const reasons = new Set(["고객 요청", "주문 실수", "조리 불량", "이물질", "클레임", "기타"]);
 const cents = (value: string) => Math.round(Number(value) * 100);
@@ -39,7 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
       const amount = item.itemType === "SERVICE" ? 0 : cents(item.unitPrice) * qty; await tx.insert(orderItemCancellations).values({ orderItemId, cancelledQty: qty, cancelledAmount: decimal(amount), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId: cancelledBy });
       const remaining = item.qty - used - qty; if (remaining === 0) await tx.update(orderItems).set({ status: "CANCELLED", cancelledAt: new Date(), cancelledByStaffId: cancelledBy }).where(eq(orderItems.orderItemId, orderItemId));
       await syncRiceOrderItemStock(tx, orderItemId, item.menuId, remaining, cancelledBy);
-      const all = await tx.select({ id: orderItems.orderItemId, total: orderItems.totalAmount }).from(orderItems).where(eq(orderItems.orderId, item.orderId)); const ids = all.map(row => row.id); const allCancels = ids.length ? await tx.select({ id: orderItemCancellations.orderItemId, amount: orderItemCancellations.cancelledAmount }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, ids)) : []; const total = all.reduce((sum, row) => sum + cents(row.total), 0) - allCancels.reduce((sum, row) => sum + cents(row.amount), 0); await tx.update(orders).set({ subtotalAmount: decimal(total), totalAmount: decimal(total), status: total === 0 ? "CANCELLED" : item.orderStatus }).where(eq(orders.orderId, item.orderId)); return { reauth: false as const, remaining };
+      const all = await tx.select({ id: orderItems.orderItemId, total: orderItems.totalAmount }).from(orderItems).where(eq(orderItems.orderId, item.orderId)); const ids = all.map(row => row.id); const allCancels = ids.length ? await tx.select({ id: orderItemCancellations.orderItemId, amount: orderItemCancellations.cancelledAmount }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, ids)) : []; const total = all.reduce((sum, row) => sum + cents(row.total), 0) - allCancels.reduce((sum, row) => sum + cents(row.amount), 0); await tx.update(orders).set({ subtotalAmount: decimal(total), totalAmount: decimal(total), status: total === 0 ? "CANCELLED" : item.orderStatus }).where(eq(orders.orderId, item.orderId)); await cancelOrphanedUnpaidCheckouts(tx, [item.sessionId]); return { reauth: false as const, remaining };
     });
     if (result.reauth) return Response.json({ success: false, reauth: true, message: "취소자 확인이 필요합니다." }, { status: 401 }); return Response.json({ success: true, remainingQty: result.remaining });
   } catch (error) { return Response.json({ success: false, message: error instanceof Error ? error.message : "주문 취소에 실패했습니다." }, { status: 409 }); }
