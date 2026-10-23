@@ -5,7 +5,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { cashOpeningFundTotal, parseCashOpeningFund, type CashOpeningFund } from "@/lib/cash-opening-fund";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { lockBusinessMutex } from "@/lib/business-session";
-import { databaseToday } from "@/lib/daily-opening-cash";
+import { dailyOpeningCashStatus, databaseToday } from "@/lib/daily-opening-cash";
 
 async function authorizedStaffId() {
   const current = await getCurrentStaff();
@@ -34,12 +34,14 @@ export async function GET() {
   const staffId = await authorizedStaffId();
   if (!staffId) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   try {
-    const dates = await businessDates();
+    const [dates, openingStatus] = await Promise.all([businessDates(), dailyOpeningCashStatus()]);
     const [today, yesterday] = await Promise.all([
       db.select().from(cashOpeningFunds).where(eq(cashOpeningFunds.businessDate, dates.today)).limit(1),
       db.select().from(cashOpeningFunds).where(eq(cashOpeningFunds.businessDate, dates.yesterday)).limit(1),
     ]);
-    return Response.json({ success: true, businessDate: dates.today, today: today[0] ? fundFromRow(today[0]) : null, yesterday: yesterday[0] ? fundFromRow(yesterday[0]) : null }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ success: true, businessDate: dates.today, today: today[0] ? fundFromRow(today[0]) : null, yesterday: yesterday[0] ? fundFromRow(yesterday[0]) : null,
+      openingStatus: { enabled: openingStatus.enabled, registered: openingStatus.registered },
+      openingCashRequired: openingStatus.enabled && !openingStatus.registered }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("영업준비금 조회 실패:", error);
     return Response.json({ success: false, message: "영업준비금을 불러오지 못했습니다." }, { status: 500 });

@@ -34,7 +34,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
   onCreated: (session: TakeoutSession) => void;
   onCancelled: (sessionId: number) => void;
   onBlockingUiChange?: (open: boolean) => void;
-  onBusinessOpeningRequired: (retry: () => void) => void;
+  onBusinessOpeningRequired: (retry: () => void) => boolean | void;
 }) {
   const pending = useRef(false);
   const createRequest = useRef<{ kind: TakeoutSession["sessionKind"]; key: string } | null>(null);
@@ -103,7 +103,11 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         body: JSON.stringify({ kind: "TAKEOUT_WALK_IN", requestKey: createRequest.current.key }),
       });
       const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
-      if (response.status === 428 && result.openingRequired) { onBusinessOpeningRequired(() => void createTakeout()); return; }
+      if (response.status === 428 && result.openingRequired) {
+        const promptShown = onBusinessOpeningRequired(() => void createTakeout());
+        if (promptShown === false) setError(result.message ?? "오늘 준비금이 등록되지 않아 포장 주문을 만들 수 없습니다.");
+        return;
+      }
       if (!response.ok || !result.success || !result.session) {
         failureMessage = result.message ?? failureMessage;
         throw new Error(failureMessage);

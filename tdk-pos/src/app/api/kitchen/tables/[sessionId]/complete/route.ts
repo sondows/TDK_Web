@@ -1,17 +1,18 @@
-import { getCurrentKdsAccount } from "@/lib/kds-auth";
+import { getCurrentKdsStaff } from "@/lib/kds-auth";
 import type { KdsTaskStatus } from "@/lib/kds-model";
 import { cancelKdsTableCompletion, finalizeKdsTableCompletion, KdsActionError, requestKdsTableCompletion } from "@/lib/kds-server";
 import { getKdsCookingSettings } from "@/lib/kds-cooking-settings";
+import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 
 type ExpectedTask = { taskId: number; status: KdsTaskStatus; changedAtMs: number | null };
 
 export async function POST(request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
-  if (!(await getCurrentKdsAccount())) {
+  if (!(await getCurrentKdsStaff())) {
     return Response.json({ success: false, message: "KDS 로그인이 필요합니다." }, { status: 401 });
   }
   const sessionId = Number((await params).sessionId);
   const body = await request.json().catch(() => null) as {
-    action?: unknown; tasks?: unknown; requestId?: unknown; requestedAtMs?: unknown;
+    action?: unknown; tasks?: unknown; requestId?: unknown; requestedAtMs?: unknown; immediate?: unknown;
   } | null;
   const action = String(body?.action ?? "REQUEST");
   const validTask = (task: unknown): task is ExpectedTask => {
@@ -31,12 +32,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
   try {
     if (action === "REQUEST") {
       const settings = await getKdsCookingSettings();
-      const result = await requestKdsTableCompletion(sessionId, body.tasks as ExpectedTask[], settings.defaultBoilTimeMinutes);
+      const countdownSeconds = await getKdsCompletionCountdownSeconds();
+      const result = await requestKdsTableCompletion(sessionId, body.tasks as ExpectedTask[], settings.defaultBoilTimeMinutes, countdownSeconds);
       return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
     }
     const result = action === "CANCEL"
       ? await cancelKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number)
-      : { completed: await finalizeKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number) };
+      : { completed: await finalizeKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number, body.immediate === true) };
     return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof KdsActionError) return Response.json({ success: false, message: error.message }, { status: error.statusCode });

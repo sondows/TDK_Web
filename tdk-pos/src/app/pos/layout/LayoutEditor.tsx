@@ -1,71 +1,32 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clampTableLayoutPosition, clampTableLayoutToCanvas, layoutSizeFromDisplayedBodyPx, posMainFixedTableBodySize, posMainFixedTableSize, tableBodySizeLimitsForCanvas, TABLE_BODY_SIZE_LIMITS, type TableLayoutValues } from "@/lib/table-layout";
+import { clampTableLayoutPosition, clampTableLayoutToCanvas, layoutSizeFromDisplayedBodyPx, posMainFixedTableBodySize, posMainFixedTableSize, TABLE_LAYOUT_REFERENCE_CANVAS, tableBodySizeLimitsForCanvas, TABLE_BODY_SIZE_LIMITS, type TableLayoutValues } from "@/lib/table-layout";
 import TableShape from "../TableShape";
-import TableLayoutCanvas from "../TableLayoutCanvas";
+import TableLayoutRenderer from "../TableLayoutRenderer";
 import ManagementPageHeader from "../admin/ManagementPageHeader";
 
 type Table = TableLayoutValues & { tableId: number; tableNo: string; tableName: string | null; capacity: number; isActive: number };
 type NewTable = { tableNo: string; capacity: number };
 const LAYOUT_GRID_SIZE = 20;
-const REMOVED_GRID_TICKS = 4;
-const CANVAS_HEIGHT_REDUCTION = LAYOUT_GRID_SIZE * REMOVED_GRID_TICKS;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const snap = (value: number) => Math.round(value / 2) * 2;
 
 export default function LayoutEditor({ tables: initial, returnPath = "/admin", embedded = false, readOnly = false }: { tables: Table[]; returnPath?: "/admin" | "/pos/admin"; embedded?: boolean; readOnly?: boolean }) {
   const router = useRouter();
   const board = useRef<HTMLDivElement>(null);
-  const naturalCanvasAspect = useRef<number | null>(null);
   const [tables, setTables] = useState(initial);
   const [selected, setSelected] = useState<number | null>(initial.find((table) => table.isActive)?.tableId ?? null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [newTable, setNewTable] = useState<NewTable | null>(null);
-  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
-  const [canvasHeight, setCanvasHeight] = useState<number | null>(null);
-  const [layoutCanvasBounds, setLayoutCanvasBounds] = useState<{ width: number; height: number } | null>(null);
+  const canvasSize = TABLE_LAYOUT_REFERENCE_CANVAS;
   const current = tables.find((table) => table.tableId === selected) ?? null;
   const currentBodySize = current ? posMainFixedTableBodySize(current) : null;
   const currentSizeLimits = current ? tableBodySizeLimitsForCanvas(current, canvasSize.width, canvasSize.height) : TABLE_BODY_SIZE_LIMITS;
   const [sizeDraft, setSizeDraft] = useState<{ tableId: number; width: string; height: string } | null>(null);
-
-  useEffect(() => {
-    const canvas = board.current;
-    if (!canvas) return;
-    const observer = new ResizeObserver(() => {
-      const { width, height: renderedHeight } = canvas.getBoundingClientRect();
-      if (naturalCanvasAspect.current === null && width > 0) {
-        naturalCanvasAspect.current = renderedHeight / width;
-      }
-      const naturalHeight = width * (naturalCanvasAspect.current ?? 0);
-      const height = Math.max(0, naturalHeight - CANVAS_HEIGHT_REDUCTION);
-      setCanvasHeight(height);
-      setCanvasSize({ width, height });
-      setTables((items) => {
-        let changed = false;
-        const next = items.map((item) => {
-          const bounded = clampTableLayoutPosition(item, width, height);
-          if (bounded.positionX !== item.positionX || bounded.positionY !== item.positionY || bounded.layoutWidth !== item.layoutWidth || bounded.layoutHeight !== item.layoutHeight) changed = true;
-          return bounded;
-        });
-        return changed ? next : items;
-      });
-    });
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
-    const canvas = board.current;
-    if (!canvas || canvasHeight === null) return;
-    const { width, height } = canvas.getBoundingClientRect();
-    const next = { width: Math.round(width), height: Math.round(height) };
-    setLayoutCanvasBounds((currentBounds) => currentBounds?.width === next.width && currentBounds.height === next.height ? currentBounds : next);
-  }, [canvasHeight, canvasSize.width]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); };
@@ -92,8 +53,11 @@ export default function LayoutEditor({ tables: initial, returnPath = "/admin", e
     setSizeDraft({ tableId: table.tableId, width: String(Math.round(next.width)), height: String(Math.round(next.height)) });
   };
   const point = (event: PointerEvent) => {
-    const rect = board.current?.getBoundingClientRect();
-    return rect ? { x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 } : null;
+    const scene = board.current?.querySelector<HTMLElement>("[data-table-layout-scene]");
+    const rect = scene?.getBoundingClientRect();
+    return rect && rect.width > 0 && rect.height > 0
+      ? { x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 }
+      : null;
   };
   const drag = (event: React.PointerEvent<HTMLButtonElement>, table: Table) => {
     if ((event.target as HTMLElement).dataset.resize) return;
@@ -109,11 +73,14 @@ export default function LayoutEditor({ tables: initial, returnPath = "/admin", e
   const resize = (event: React.PointerEvent<HTMLSpanElement>, table: Table) => {
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
     const startX = event.clientX; const startY = event.clientY;
+    const scene = board.current?.querySelector<HTMLElement>("[data-table-layout-scene]");
+    const renderedScene = scene?.getBoundingClientRect();
+    const scale = renderedScene && scene && scene.clientWidth > 0 ? renderedScene.width / scene.clientWidth : 1;
     const startSize = posMainFixedTableBodySize(table);
     const limits = tableBodySizeLimitsForCanvas(table, canvasSize.width, canvasSize.height);
     const move = (nextEvent: PointerEvent) => {
-      const width = clamp(Math.round(startSize.width + nextEvent.clientX - startX), limits.minWidth, limits.maxWidth);
-      const height = clamp(Math.round(startSize.height + nextEvent.clientY - startY), limits.minHeight, limits.maxHeight);
+      const width = clamp(Math.round(startSize.width + (nextEvent.clientX - startX) / scale), limits.minWidth, limits.maxWidth);
+      const height = clamp(Math.round(startSize.height + (nextEvent.clientY - startY) / scale), limits.minHeight, limits.maxHeight);
       updateDisplayedSize(table, width, height);
     };
     const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
@@ -158,23 +125,35 @@ export default function LayoutEditor({ tables: initial, returnPath = "/admin", e
     setSelected(null);
   };
 
-  return <main className={`${embedded ? "h-full" : "h-dvh"} overflow-hidden bg-slate-100 p-3 text-slate-900`}>
-    <div className="mx-auto w-full max-w-[1800px]" style={layoutCanvasBounds ? { width: `min(100%, ${layoutCanvasBounds.width + 262}px)` } : undefined}>
-    <ManagementPageHeader compact maxWidth="w-full" onBack={() => leave(returnPath)} title="테이블 배치" actions={readOnly ? null : <><button className="min-h-12 rounded-xl border border-slate-300 bg-white px-5 font-semibold" onClick={() => setNewTable({ tableNo: "", capacity: 4 })} type="button">+ 테이블</button><button className="min-h-12 rounded-xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-400" disabled={saving} onClick={save} type="button">{saving ? "저장 중" : "저장"}</button></>} />
-    {message && <p className="mt-2 text-sm font-semibold text-blue-700">{message}</p>}
-    <div className="mt-2 grid min-h-0 w-full grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" style={layoutCanvasBounds ? { height: `${layoutCanvasBounds.height + 2}px` } : undefined}>
-      <TableLayoutCanvas ref={board} className="pos-layout-editor-canvas touch-none" style={{ ...(canvasHeight === null ? {} : { height: `${canvasHeight}px` }), alignSelf: "start", backgroundColor: "#f8fafc", backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${LAYOUT_GRID_SIZE}px ${LAYOUT_GRID_SIZE}px` }}>
-        <span aria-label="테이블 배치 가능 영역" className="pointer-events-none absolute inset-0 z-0 border border-dashed border-emerald-400/70" />
-        {tables.filter((table) => table.isActive).map((table) => <TableShape key={table.tableId} {...table} fixedSize={posMainFixedTableSize(table)} amountDue={0} editable={!readOnly} guestCount={0} onClick={() => setSelected(table.tableId)} onPointerDown={readOnly ? undefined : (event) => drag(event, table)} onResizePointerDown={readOnly ? undefined : (event) => resize(event, table)} selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />)}
-      </TableLayoutCanvas>
-      <aside className="min-h-0 border-l border-slate-200 bg-white p-4">
+  const Root = embedded ? "div" : "main";
+  return <Root className={embedded ? "w-full text-slate-900" : "h-dvh overflow-hidden bg-slate-100 p-3 text-slate-900"}>
+    <div className={embedded ? "w-full" : "mx-auto flex h-full w-full flex-col"}>
+    {!embedded && <ManagementPageHeader compact maxWidth="w-full" onBack={() => leave(returnPath)} title="테이블 배치" actions={readOnly ? null : <><button className="min-h-12 rounded-xl border border-slate-300 bg-white px-5 font-semibold" onClick={() => setNewTable({ tableNo: "", capacity: 4 })} type="button">+ 테이블</button><button className="min-h-12 rounded-xl bg-blue-600 px-5 font-bold text-white disabled:bg-slate-400" disabled={saving} onClick={save} type="button">{saving ? "저장 중" : "저장"}</button></>} />}
+    {!embedded && message && <p className="mt-2 text-sm font-semibold text-blue-700">{message}</p>}
+    <section className={embedded ? "w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" : "mt-2 grid min-h-0 w-full flex-1 grid-cols-[minmax(0,1fr)_260px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"}>
+      {embedded && <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div><h2 className="text-lg font-extrabold text-slate-900">배치 설정</h2><p className="mt-1 text-sm text-slate-500">테이블을 선택하거나 드래그하여 배치와 좌석 정보를 조정하세요.</p></div>
+        {!readOnly && <button className="min-h-12 rounded-xl border border-slate-300 bg-white px-5 font-semibold text-slate-700 hover:bg-slate-50" onClick={() => setNewTable({ tableNo: "", capacity: 4 })} type="button">+ 테이블</button>}
+      </div>}
+      <div className={embedded ? "grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_280px]" : "contents"}>
+        <div className={embedded ? "min-w-0" : "contents"}>
+          {embedded && <h3 className="mb-3 text-sm font-bold text-slate-700">테이블 배치</h3>}
+          <div className={embedded ? "aspect-[920/745] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50" : "contents"}>
+      <TableLayoutRenderer canvasRef={board} tables={tables.filter((table) => table.isActive)} renderTable={(table, fixedPosition) => <TableShape {...table} fixedPosition={fixedPosition} amountDue={0} editable={!readOnly} guestCount={0} onClick={() => setSelected(table.tableId)} onPointerDown={readOnly ? undefined : (event) => drag(event, table)} onResizePointerDown={readOnly ? undefined : (event) => resize(event, table)} posMainTable selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />} className="pos-layout-editor-canvas touch-none" debugName="layout-editor-scene" showSceneBoundary sceneBoundaryClassName="border-emerald-400/70" sceneStyle={{ backgroundColor: "#f8fafc", backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${LAYOUT_GRID_SIZE}px ${LAYOUT_GRID_SIZE}px` }}>
+      </TableLayoutRenderer>
+          </div>
+        </div>
+      <aside className={embedded ? "min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-5" : "min-h-0 border-l border-slate-200 bg-white p-4"}>
         <fieldset className="contents" disabled={readOnly}>
-        <p className="text-xs font-bold tracking-wide text-slate-400">선택 테이블</p>
-        {current ? <div className="mt-3 space-y-4"><h2 className="text-xl font-bold">{current.tableNo}번 테이블</h2><section className="space-y-2"><p className="text-sm font-semibold">테이블 크기</p><label className="flex items-center gap-2 text-sm">가로<input aria-label="테이블 가로 크기(px)" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-right" inputMode="numeric" min={currentSizeLimits.minWidth} max={currentSizeLimits.maxWidth} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.width : Math.round(currentBodySize?.width ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: value, height: sizeDraft?.tableId === current.tableId ? sizeDraft.height : String(Math.round(currentBodySize?.height ?? 0)) }); const width = Number(value); if (Number.isInteger(width) && width >= currentSizeLimits.minWidth && width <= currentSizeLimits.maxWidth) updateDisplayedSize(current, width, currentBodySize?.height ?? width); }} /><span className="text-slate-500">px</span></label><label className="flex items-center gap-2 text-sm">세로<input aria-label="테이블 세로 크기(px)" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-right" inputMode="numeric" min={currentSizeLimits.minHeight} max={currentSizeLimits.maxHeight} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.height : Math.round(currentBodySize?.height ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: sizeDraft?.tableId === current.tableId ? sizeDraft.width : String(Math.round(currentBodySize?.width ?? 0)), height: value }); const height = Number(value); if (Number.isInteger(height) && height >= currentSizeLimits.minHeight && height <= currentSizeLimits.maxHeight) updateDisplayedSize(current, currentBodySize?.width ?? height, height); }} /><span className="text-slate-500">px</span></label><p className="text-[11px] text-slate-500">가로 60–400px · 세로 60–300px</p></section><div><p className="mb-2 text-sm font-semibold">좌석수</p><div className="flex items-center gap-2"><button className="h-10 w-10 rounded-lg border text-lg" onClick={() => update(current.tableId, { capacity: Math.max(0, current.capacity - 1) })}>−</button><span className="w-10 text-center text-xl font-bold">{current.capacity}</span><button className="h-10 w-10 rounded-lg border text-lg" onClick={() => update(current.tableId, { capacity: current.capacity + 1 })}>+</button></div></div><button className="w-full rounded-lg border px-3 py-2 font-semibold" onClick={() => update(current.tableId, { rotation: (current.rotation + 90) % 360 })}>↻ 회전</button><button className="w-full rounded-lg border px-3 py-2 font-semibold" onClick={duplicate}>▣ 복제</button><button className="w-full rounded-lg border border-red-200 px-3 py-2 font-semibold text-red-600" onClick={deactivate}>비활성화</button></div> : <p className="mt-4 text-sm text-slate-500">배치판에서 테이블을 선택하세요.</p>}
+        <p className="text-lg font-extrabold text-slate-900">선택 테이블</p>
+        {current ? <div className="mt-4 space-y-5"><h3 className="text-base font-bold text-slate-700">{current.tableNo}번 테이블</h3><section className="space-y-2"><p className="text-sm font-semibold">테이블 크기</p><label className="flex items-center gap-2 text-sm font-bold text-slate-700">가로<input aria-label="테이블 가로 크기(px)" className="min-h-12 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-right text-base font-normal" inputMode="numeric" min={currentSizeLimits.minWidth} max={currentSizeLimits.maxWidth} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.width : Math.round(currentBodySize?.width ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: value, height: sizeDraft?.tableId === current.tableId ? sizeDraft.height : String(Math.round(currentBodySize?.height ?? 0)) }); const width = Number(value); if (Number.isInteger(width) && width >= currentSizeLimits.minWidth && width <= currentSizeLimits.maxWidth) updateDisplayedSize(current, width, currentBodySize?.height ?? width); }} /><span className="text-slate-500">px</span></label><label className="flex items-center gap-2 text-sm font-bold text-slate-700">세로<input aria-label="테이블 세로 크기(px)" className="min-h-12 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-right text-base font-normal" inputMode="numeric" min={currentSizeLimits.minHeight} max={currentSizeLimits.maxHeight} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.height : Math.round(currentBodySize?.height ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: sizeDraft?.tableId === current.tableId ? sizeDraft.width : String(Math.round(currentBodySize?.width ?? 0)), height: value }); const height = Number(value); if (Number.isInteger(height) && height >= currentSizeLimits.minHeight && height <= currentSizeLimits.maxHeight) updateDisplayedSize(current, currentBodySize?.width ?? height, height); }} /><span className="text-slate-500">px</span></label><p className="text-[11px] text-slate-500">가로 60–400px · 세로 60–300px</p></section><div><p className="mb-2 text-sm font-semibold">좌석수</p><div className="flex items-center gap-2"><button className="min-h-12 w-12 rounded-lg border border-slate-300 bg-white text-lg font-bold" onClick={() => update(current.tableId, { capacity: Math.max(0, current.capacity - 1) })}>−</button><span className="w-10 text-center text-xl font-bold">{current.capacity}</span><button className="min-h-12 w-12 rounded-lg border border-slate-300 bg-white text-lg font-bold" onClick={() => update(current.tableId, { capacity: current.capacity + 1 })}>+</button></div></div><button className="min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50" onClick={() => update(current.tableId, { rotation: (current.rotation + 90) % 360 })}>↻ 회전</button><button className="min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50" onClick={duplicate}>▣ 복제</button><button className="min-h-12 w-full rounded-lg border border-red-200 bg-white px-3 py-2 font-semibold text-red-600 hover:bg-red-50" onClick={deactivate}>비활성화</button></div> : <p className="mt-4 text-sm text-slate-500">배치판에서 테이블을 선택하세요.</p>}
         </fieldset>
       </aside>
-    </div>
+      </div>
+      {embedded && message && <p className="mt-5 text-sm font-semibold text-blue-700" role="status">{message}</p>}
+      {embedded && !readOnly && <div className="mt-6 flex justify-end border-t border-slate-200 pt-5"><button className="min-h-12 rounded-xl bg-blue-600 px-7 text-lg font-extrabold text-white disabled:bg-slate-300" disabled={saving} onClick={save} type="button">{saving ? "저장 중" : "저장"}</button></div>}
+    </section>
     </div>
     {newTable && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40"><form className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onSubmit={(event) => { event.preventDefault(); void addTable(); }}><h2 className="text-lg font-bold">테이블 추가</h2><label className="mt-4 block text-sm font-semibold">테이블 번호<input autoFocus className="mt-1 w-full rounded-lg border p-2" value={newTable.tableNo} onChange={(event) => setNewTable({ ...newTable, tableNo: event.target.value })} /></label><label className="mt-3 block text-sm font-semibold">좌석수<input className="mt-1 w-full rounded-lg border p-2" min="0" type="number" value={newTable.capacity} onChange={(event) => setNewTable({ ...newTable, capacity: Math.max(0, Number(event.target.value)) })} /></label><div className="mt-5 flex justify-end gap-2"><button className="rounded-lg border px-3 py-2" type="button" onClick={() => setNewTable(null)}>취소</button><button className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white" type="submit">추가</button></div></form></div>}
-  </main>;
+  </Root>;
 }

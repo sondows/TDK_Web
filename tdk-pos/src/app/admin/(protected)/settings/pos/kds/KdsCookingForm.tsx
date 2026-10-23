@@ -36,7 +36,7 @@ export default function KdsCookingForm({ initial }: { initial: KdsCookingSetting
 
   return <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
     <h2 className="text-lg font-bold text-slate-800">외부 끓임 시간 설정</h2>
-    <p className="mt-1 text-sm text-slate-600">조리 완료 요청 시 김치찌개류에 표시할 시간 선택값입니다. 완료 카운트다운은 항상 5초입니다.</p>
+    <p className="mt-1 text-sm text-slate-600">조리 완료 요청 시 김치찌개류에 표시할 외부 끓임 시간 선택값입니다.</p>
     <div className="mt-4 grid grid-cols-3 gap-3">
       {settings.boilTimeOptions.map((minutes, index) => <label className="text-sm font-semibold text-slate-700" key={index}>
         시간 버튼 {index + 1} (분)

@@ -598,13 +598,8 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   grid-template-columns: minmax(0, 1fr) var(--table-management-actions-width);
 }
 
-.table-management-height-probe {
-  height: var(--table-management-full-panel-height);
-}
-
 .table-management-canvas {
-  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-  background-size: calc(20px * var(--table-management-ui-scale)) calc(20px * var(--table-management-ui-scale));
+  background-color: #f8fafc;
 }
 
 .table-management-actions {
@@ -615,8 +610,30 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   gap: calc(8px * var(--table-management-ui-scale));
 }
 
+.table-management-screen.table-management-compact-modal {
+  justify-content: safe center;
+  overflow-y: auto;
+}
+
+.table-management-compact-modal .table-management-panel {
+  flex-shrink: 0;
+}
+
+.table-management-compact-modal .table-management-actions {
+  padding-block: 8px;
+  overflow-y: auto;
+}
+
+.table-management-compact-modal .table-management-actions > div {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+
 .table-management-actions button,
-.table-management-footer button {
+.table-management-footer button:not(.table-management-logo) {
   padding-inline: calc(20px * var(--table-management-ui-scale));
   border-radius: calc(12px * var(--table-management-ui-scale));
   font-size: calc(22px * var(--table-management-ui-scale));
@@ -634,28 +651,28 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   border-top: 1px solid #e2e8f0;
 }
 
-.table-management-footer button {
+.table-management-footer button:not(.table-management-logo) {
   width: 80%;
   height: 70px;
 }
 
-.table-management-canvas > div:not(:first-child) {
+.table-management-canvas [data-table-layout-scene] > div {
   top: calc(16px * var(--table-management-ui-scale));
   left: calc(16px * var(--table-management-ui-scale));
   padding: calc(12px * var(--table-management-ui-scale));
   border-radius: calc(12px * var(--table-management-ui-scale));
 }
 
-.table-management-canvas > div:not(:first-child) > p {
+.table-management-canvas [data-table-layout-scene] > div > p {
   margin-bottom: calc(8px * var(--table-management-ui-scale));
   font-size: calc(14px * var(--table-management-ui-scale));
 }
 
-.table-management-canvas > div:not(:first-child) > div {
+.table-management-canvas [data-table-layout-scene] > div > div {
   gap: calc(8px * var(--table-management-ui-scale));
 }
 
-.table-management-canvas > div:not(:first-child) button {
+.table-management-canvas [data-table-layout-scene] > div button {
   min-height: calc(40px * var(--table-management-ui-scale));
   padding-inline: calc(16px * var(--table-management-ui-scale));
   border-radius: calc(8px * var(--table-management-ui-scale));
@@ -1512,9 +1529,8 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
 .pos-table-fixed-size > span:nth-of-type(5) { border-radius: 12px; }
 
 .pos-layout-editor-canvas {
-  width: min(100%, calc(100dvh - 10rem));
-  height: auto;
-  aspect-ratio: 447 / 401;
-  align-self: center;
-  justify-self: center;
+  width: 100%;
+  height: 100%;
+  align-self: stretch;
+  justify-self: stretch;
 }

@@ -106,7 +106,7 @@ export default function PaymentModal({
   close: () => void;
   completed: () => void;
   onCashPaymentRegistered: () => void;
-  onBusinessOpeningRequired: (retry: () => void) => void;
+  onBusinessOpeningRequired: (retry: () => void) => boolean | void;
   onPrintReceipt: (checkoutId?: number, isReprint?: boolean) => Promise<void>;
   receiptPrinting: boolean;
 }) {
@@ -226,7 +226,8 @@ export default function PaymentModal({
         openingRequired?: boolean;
       };
       if (response.status === 428 && result.openingRequired) {
-        onBusinessOpeningRequired(() => { void requestRetryRef.current?.(body, afterRegistered); });
+        const promptShown = onBusinessOpeningRequired(() => { void requestRetryRef.current?.(body, afterRegistered); });
+        if (promptShown === false) setError(result.message ?? "오늘 준비금이 등록되지 않아 결제를 진행할 수 없습니다.");
         return { ok: false, message: result.message };
       }
       if (!response.ok || !result.success) {
@@ -410,7 +411,8 @@ export default function PaymentModal({
       if (response.status === 428 && result.openingRequired) {
         closingRef.current = false;
         setBusy(false);
-        onBusinessOpeningRequired(() => { void complete(); });
+        const promptShown = onBusinessOpeningRequired(() => { void complete(); });
+        if (promptShown === false) setError(result.message ?? "오늘 준비금이 등록되지 않아 결제를 완료할 수 없습니다.");
         return;
       }
       if (!response.ok || !result.success) throw new Error(result.message ?? "결제를 완료하지 못했습니다.");

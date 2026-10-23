@@ -7,6 +7,7 @@ import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import { PIN_LENGTH } from "@/lib/pin";
+import { OPENING_FUND_PROMPT_DISMISSED_KEY } from "@/lib/opening-fund-prompt";
 
 type Staff = {
   staffId: number;
@@ -82,6 +83,8 @@ export default function LoginPage() {
         return;
       }
 
+      try { window.sessionStorage.removeItem(OPENING_FUND_PROMPT_DISMISSED_KEY); }
+      catch { /* The next authenticated POS session will still check the server. */ }
       router.replace("/pos");
     } catch {
       setMessage("로그인 요청 중 네트워크 오류가 발생했습니다.");

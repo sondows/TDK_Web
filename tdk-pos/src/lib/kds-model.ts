@@ -22,6 +22,33 @@ export function isKdsCookingSettings(value: unknown): value is KdsCookingSetting
 export type KdsMemberKind = "POT" | "ADDON" | "SOLO" | "COMPONENT";
 export type KdsMember = { itemId: number; kind: KdsMemberKind };
 
+export type KdsDisplayItem = {
+  name: string; qty: number; kind: KdsMemberKind;
+  options: Array<{ name: string; qty: number }>;
+};
+
+/** Format only members already assigned to one persisted KDS task. */
+export function formatKdsTaskDisplay(kind: "POT" | "SOLO", items: KdsDisplayItem[]) {
+  const primary = items.find(item => item.kind === "POT" || item.kind === "SOLO") ??
+    items.find(item => item.kind !== "COMPONENT");
+  if (!primary) return { name: "주문 항목", qty: 0, details: [] as string[] };
+  const qty = kind === "POT"
+    ? items.filter(item => item.kind === "POT").reduce((sum, item) => sum + item.qty, 0)
+    : primary.qty;
+  const members = new Map<string, number>();
+  for (const item of items) {
+    if (item === primary || (kind === "POT" && item.kind === "POT" && item.name === primary.name)) continue;
+    members.set(item.name, (members.get(item.name) ?? 0) + item.qty);
+  }
+  const options = new Map<string, number>();
+  for (const item of items) for (const option of item.options) {
+    if (/(?:매운맛|순한맛|안매움)/.test(option.name) || members.has(option.name)) continue;
+    options.set(option.name, (options.get(option.name) ?? 0) + option.qty);
+  }
+  const details = [...members, ...options].map(([name, count]) => count > 1 ? `${name} ×${count}` : name);
+  return { name: primary.name, qty, details };
+}
+
 export type KdsSourceItem = {
   itemId: number;
   parentItemId: number | null;
@@ -106,7 +133,37 @@ export type KdsState = KdsStateSnapshot & {
   changedAtMs: number | null;
 };
 export const KDS_WINDOW_MS = 3000;
-export const KDS_COMPLETION_COUNTDOWN_MS = 5000;
+export const KDS_QUEUED_UNDO_TRANSPORT_GRACE_MS = 4000;
+export function canAcceptKdsQueuedUndo(delayFromFirstClickMs: unknown, changedAtMs: number | null, now: number) {
+  return typeof delayFromFirstClickMs === "number" && Number.isInteger(delayFromFirstClickMs) &&
+    delayFromFirstClickMs >= 0 && delayFromFirstClickMs <= KDS_WINDOW_MS &&
+    changedAtMs !== null && now >= changedAtMs &&
+    now - changedAtMs <= KDS_WINDOW_MS + KDS_QUEUED_UNDO_TRANSPORT_GRACE_MS;
+}
+export const DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS = 5;
+export const DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES = 10;
+export function isKdsCompletedTimeShrinkStartMinutes(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 120;
+}
+export function kdsCompletedElapsedMinutes(completedAtMs: number | null, nowMs: number) {
+  if (completedAtMs === null || !Number.isFinite(completedAtMs) || completedAtMs <= 0 || !Number.isFinite(nowMs)) return null;
+  return Math.max(0, Math.floor((nowMs - completedAtMs) / 60_000));
+}
+export function kdsCompletedTimeShrinkStage(completedAtMs: number | null, nowMs: number, startMinutes: number) {
+  const elapsed = kdsCompletedElapsedMinutes(completedAtMs, nowMs);
+  if (elapsed === null || !isKdsCompletedTimeShrinkStartMinutes(startMinutes)) return 0;
+  return Math.max(0, Math.min(5, elapsed - startMinutes));
+}
+export const MIN_KDS_COMPLETION_COUNTDOWN_SECONDS = 1;
+export const MAX_KDS_COMPLETION_COUNTDOWN_SECONDS = 30;
+export const KDS_COMPLETION_COUNTDOWN_MS = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS * 1000;
+export function isKdsCompletionCountdownSeconds(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) &&
+    value >= MIN_KDS_COMPLETION_COUNTDOWN_SECONDS && value <= MAX_KDS_COMPLETION_COUNTDOWN_SECONDS;
+}
+export function kdsCompletionCountdownMs(seconds: number = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) {
+  return (isKdsCompletionCountdownSeconds(seconds) ? seconds : DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) * 1000;
+}
 export function canJoinKdsCookingGroup(lastMenuStartAtMs: number, now: number) {
   return now >= lastMenuStartAtMs && now - lastMenuStartAtMs <= KDS_WINDOW_MS;
 }
@@ -121,13 +178,15 @@ export function findKdsRecentMenuGroup(candidates: KdsRecentMenuGroup[], now: nu
       !candidate.completionPending && canJoinKdsCookingGroup(candidate.lastStartAtMs, now))
     .sort((a, b) => b.lastStartAtMs - a.lastStartAtMs || b.groupId - a.groupId)[0] ?? null;
 }
-export function remainingKdsCompletionSeconds(requestedAtMs: number, now: number) {
+export function remainingKdsCompletionSeconds(requestedAtMs: number, now: number, countdownSeconds = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) {
   const elapsedSeconds = Math.floor(Math.max(0, now - requestedAtMs) / 1000);
-  return Math.min(5, Math.max(1, Math.floor(KDS_COMPLETION_COUNTDOWN_MS / 1000) - elapsedSeconds));
+  const durationSeconds = isKdsCompletionCountdownSeconds(countdownSeconds) ? countdownSeconds : DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS;
+  return Math.min(durationSeconds, Math.max(1, durationSeconds - elapsedSeconds));
 }
 export type KdsTableButtonTask = {
   status: KdsTaskStatus; changedAtMs: number | null; bulkStartId?: string | null;
-  completionRequestId?: string | null; completionRequestScope?: "TASK" | "TABLE" | null; cancelled?: boolean;
+  completionRequestId?: string | null; completionRequestScope?: "TASK" | "TABLE" | null;
+  completionRequestedAtMs?: number | null; taskId?: number; cancelled?: boolean;
 };
 export function getKdsTableButtonAction(tasks: KdsTableButtonTask[], now: number, localBatchStartId?: string | null) {
   const recentBatch = tasks.filter(task => !task.cancelled && task.status === "COOKING" && task.bulkStartId &&
@@ -136,10 +195,20 @@ export function getKdsTableButtonAction(tasks: KdsTableButtonTask[], now: number
   if (recentBatch?.bulkStartId) return { action: "UNDO_START" as const, batchStartId: recentBatch.bulkStartId };
   if (localBatchStartId) return { action: "UNDO_START" as const, batchStartId: localBatchStartId };
   const tableCompletion = tasks.find(task => !task.cancelled && task.completionRequestScope === "TABLE" && task.completionRequestId);
-  if (tableCompletion?.completionRequestId) return { action: "CANCEL_COMPLETION" as const, requestId: tableCompletion.completionRequestId };
+  if (tableCompletion?.completionRequestId) return { action: "FINALIZE_TABLE_COMPLETION" as const, requestId: tableCompletion.completionRequestId };
+  const taskCompletions = tasks.filter(task => !task.cancelled && task.status === "COOKING" &&
+    task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null && task.completionRequestedAtMs !== undefined);
+  if (taskCompletions.length) return { action: "FINALIZE_TASK_COMPLETIONS" as const, taskIds: taskCompletions.flatMap(task => task.taskId === undefined ? [] : [task.taskId]) };
   if (tasks.some(task => !task.cancelled && task.status === "COOKING")) return { action: "REQUEST_COMPLETION" as const };
   if (tasks.some(task => !task.cancelled && task.status === "WAITING")) return { action: "START" as const };
   return { action: "NOOP" as const };
+}
+export function matchesKdsTableStartBatch(expectedTaskIds: number[], actualTaskIds: number[]) {
+  if (!expectedTaskIds.length || expectedTaskIds.length !== actualTaskIds.length ||
+    new Set(expectedTaskIds).size !== expectedTaskIds.length || new Set(actualTaskIds).size !== actualTaskIds.length) return false;
+  const expected = expectedTaskIds.slice().sort((a, b) => a - b);
+  const actual = actualTaskIds.slice().sort((a, b) => a - b);
+  return expected.every((taskId, index) => taskId === actual[index]);
 }
 export function canUseKdsMenuAction(status: KdsTaskStatus, previousStatus: KdsTaskStatus | null, changedAtMs: number | null, now: number, startSource?: "MENU" | "STATUS" | "TABLE" | null) {
   return status === "WAITING" || (status === "COOKING" && previousStatus === "WAITING" &&
@@ -148,6 +217,17 @@ export function canUseKdsMenuAction(status: KdsTaskStatus, previousStatus: KdsTa
 export function canUndoKdsStatusStart(status: KdsTaskStatus, previousStatus: KdsTaskStatus | null, changedAtMs: number | null, now: number, startSource?: "MENU" | "STATUS" | "TABLE" | null) {
   return status === "COOKING" && previousStatus === "WAITING" && startSource !== "TABLE" && startSource !== "MENU" &&
     changedAtMs !== null && now >= changedAtMs && now - changedAtMs <= KDS_WINDOW_MS;
+}
+export function remainingKdsStartUndoSeconds(
+  status: KdsTaskStatus, previousStatus: KdsTaskStatus | null, changedAtMs: number | null, now: number,
+  startSource?: "MENU" | "STATUS" | "TABLE" | null, bulkStartId?: string | null,
+) {
+  if (status !== "COOKING" || previousStatus !== "WAITING" || changedAtMs === null ||
+    now < changedAtMs || now - changedAtMs > KDS_WINDOW_MS) return null;
+  const canUndo = canUseKdsMenuAction(status, previousStatus, changedAtMs, now, startSource) ||
+    canUndoKdsStatusStart(status, previousStatus, changedAtMs, now, startSource) ||
+    (startSource === "TABLE" && Boolean(bulkStartId));
+  return canUndo ? Math.max(1, Math.ceil((changedAtMs + KDS_WINDOW_MS - now) / 1000)) : null;
 }
 export function remainingKdsQuantity(originalQty: number, cancelledQty: number, cancelled: boolean) {
   return cancelled ? 0 : Math.max(0, originalQty - cancelledQty);
@@ -171,9 +251,10 @@ export function transitionKdsState(
   action: "MENU" | "TIME",
   now: number,
   newGroup?: { groupId: number | null; startedAtMs: number },
+  allowQueuedUndo = false,
 ): KdsState | null {
   const previous = state.previousState;
-  const recent = withinWindow(state, now);
+  const recent = withinWindow(state, now) || allowQueuedUndo;
   let next: KdsStateSnapshot | null = null;
   if (action === "MENU" && state.status === "WAITING") {
     if (newGroup) next = { status: "COOKING", cookingGroupId: newGroup.groupId, cookingStartedAtMs: newGroup.startedAtMs, cookingCompletedAtMs: null };

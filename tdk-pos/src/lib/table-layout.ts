@@ -6,10 +6,15 @@ export type TableLayoutValues = {
   rotation: number;
 };
 
-// Use the existing 1280x800 POS table area as the fixed pixel reference.
-// Saved position and size percentages are converted through this canvas so
-// resizing the browser cannot scale them, while layout edits still apply.
-export const POS_TABLE_REFERENCE_CANVAS = { width: 447, height: 401 } as const;
+export function tableSceneScaleToFit(availableWidth: number, availableHeight: number, referenceWidth: number, referenceHeight: number) {
+  if (availableWidth <= 0 || availableHeight <= 0 || referenceWidth <= 0 || referenceHeight <= 0) return 1;
+  return Math.min(availableWidth / referenceWidth, availableHeight / referenceHeight, 1);
+}
+
+// Shared logical scene used by layout editing and table-management views.
+// The POS main view measures its full native panel and uses the same saved layout values.
+export const TABLE_LAYOUT_REFERENCE_CANVAS = { width: 920, height: 745 } as const;
+const LEGACY_TABLE_SIZE_REFERENCE_CANVAS = { width: 447, height: 401 } as const;
 const POS_TABLE_GEOMETRY_SCALE = 1.19;
 const TABLE_BODY_INSET = { horizontal: 0.86, vertical: 0.7 };
 const TABLE_FRAME_SAFE_INSET = 1;
@@ -24,8 +29,8 @@ export const TABLE_BODY_SIZE_LIMITS = {
 type TableSizeAxis = "width" | "height";
 
 const referenceBodySize = (axis: TableSizeAxis) => axis === "width"
-  ? POS_TABLE_REFERENCE_CANVAS.width * POS_TABLE_GEOMETRY_SCALE * TABLE_BODY_INSET.horizontal
-  : POS_TABLE_REFERENCE_CANVAS.height * POS_TABLE_GEOMETRY_SCALE * TABLE_BODY_INSET.vertical;
+  ? LEGACY_TABLE_SIZE_REFERENCE_CANVAS.width * POS_TABLE_GEOMETRY_SCALE * TABLE_BODY_INSET.horizontal
+  : LEGACY_TABLE_SIZE_REFERENCE_CANVAS.height * POS_TABLE_GEOMETRY_SCALE * TABLE_BODY_INSET.vertical;
 
 function axisLimits(axis: TableSizeAxis) {
   return axis === "width"
@@ -143,12 +148,14 @@ export function clampTableLayoutPosition<T extends TableLayoutValues>(layout: T,
   const frame = tableLayoutFrameSize(layout);
   const horizontalInset = Math.min(TABLE_FRAME_SAFE_INSET, Math.max(0, (canvasWidth - frame.width) / 2));
   const verticalInset = Math.min(TABLE_FRAME_SAFE_INSET, Math.max(0, (canvasHeight - frame.height) / 2));
-  const centerX = clamp(layout.positionX / 100 * canvasWidth, frame.width / 2 + horizontalInset, canvasWidth - frame.width / 2 - horizontalInset);
-  const centerY = clamp(layout.positionY / 100 * canvasHeight, frame.height / 2 + verticalInset, canvasHeight - frame.height / 2 - verticalInset);
+  const originalCenterX = layout.positionX / 100 * canvasWidth;
+  const originalCenterY = layout.positionY / 100 * canvasHeight;
+  const centerX = clamp(originalCenterX, frame.width / 2 + horizontalInset, canvasWidth - frame.width / 2 - horizontalInset);
+  const centerY = clamp(originalCenterY, frame.height / 2 + verticalInset, canvasHeight - frame.height / 2 - verticalInset);
   return {
     ...layout,
-    positionX: centerX / canvasWidth * 100,
-    positionY: centerY / canvasHeight * 100,
+    positionX: centerX === originalCenterX ? layout.positionX : centerX / canvasWidth * 100,
+    positionY: centerY === originalCenterY ? layout.positionY : centerY / canvasHeight * 100,
   } as T;
 }
 
@@ -185,15 +192,5 @@ export function resolveTableLayout(
     layoutWidth: normalizeStoredSize(layout.layoutWidth, fallback.layoutWidth, "width"),
     layoutHeight: normalizeStoredSize(layout.layoutHeight, fallback.layoutHeight, "height"),
     rotation: [0, 90, 180, 270].includes(Number(layout.rotation)) ? Number(layout.rotation) : 0,
-  };
-}
-
-export function tableLayoutStyle(layout: TableLayoutValues) {
-  return {
-    left: `${layout.positionX}%`,
-    top: `${layout.positionY}%`,
-    width: `${layout.layoutWidth}%`,
-    height: `${layout.layoutHeight}%`,
-    transform: `translate(-50%, -50%) rotate(${layout.rotation}deg)`,
   };
 }

@@ -213,7 +213,7 @@ export default function OrderSummaryPanel({
   onCancellationSuccess: () => void;
   onPaymentCompleted: () => void;
   onCashPaymentRegistered: () => void;
-  onBusinessOpeningRequired: (retry: () => void) => void;
+  onBusinessOpeningRequired: (retry: () => void) => boolean | void;
   onPrintReceipt: (checkoutId?: number, isReprint?: boolean) => Promise<void>;
   receiptPrinting: boolean;
   party: {

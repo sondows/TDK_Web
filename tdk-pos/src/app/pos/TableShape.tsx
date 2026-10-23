@@ -3,11 +3,11 @@
 import { useEffect, useState, type PointerEventHandler } from "react";
 import { formatMoney } from "@/lib/format-money";
 import { formatSessionElapsed } from "@/lib/session-time";
-import { tableLayoutStyle, type TableLayoutValues } from "@/lib/table-layout";
+import type { TableLayoutValues } from "@/lib/table-layout";
 
-type Props = TableLayoutValues & { tableNumber: string; guestCount: number; amountDue: number; prepaidAmount?: number; customerName?: string | null; startedAt: string | null; hasOpenSession?: boolean; posMainTable?: boolean; fixedPosition?: { left: number; top: number; width: number; height: number }; fixedSize?: { width: number; height: number }; sageOccupied?: boolean; hasQrOrder?: boolean; qrLanguageCode?: string | null; mergedSourceTableNos?: string[]; partyTableNos?: string[]; partyRelationHighlight?: boolean; mergeSplitCandidate?: boolean; mergeSplitSelected?: boolean; scale?: number; enhancedText?: boolean; dataTableManagementItem?: boolean; grouped?: boolean; blocked?: boolean; partyGroupBadge?: number | null; partyGroupColor?: string; partyGroupSelected?: boolean; partyHighlight?: boolean; thickSelection?: boolean; selected?: boolean; editable?: boolean; onClick?: () => void; onPointerDown?: PointerEventHandler<HTMLButtonElement>; onResizePointerDown?: PointerEventHandler<HTMLSpanElement> };
+type Props = TableLayoutValues & { tableNumber: string; guestCount: number; amountDue: number; prepaidAmount?: number; customerName?: string | null; startedAt: string | null; hasOpenSession?: boolean; posMainTable?: boolean; fixedPosition: { left: number; top: number; width: number; height: number }; sageOccupied?: boolean; hasQrOrder?: boolean; qrLanguageCode?: string | null; mergedSourceTableNos?: string[]; partyTableNos?: string[]; partyRelationHighlight?: boolean; mergeSplitCandidate?: boolean; mergeSplitSelected?: boolean; enhancedText?: boolean; dataTableManagementItem?: boolean; grouped?: boolean; blocked?: boolean; partyGroupBadge?: number | null; partyGroupColor?: string; partyGroupSelected?: boolean; partyHighlight?: boolean; thickSelection?: boolean; selected?: boolean; editable?: boolean; onClick?: () => void; onPointerDown?: PointerEventHandler<HTMLButtonElement>; onResizePointerDown?: PointerEventHandler<HTMLSpanElement> };
 
-export default function TableShape({ tableNumber, guestCount, amountDue, prepaidAmount = 0, customerName = null, startedAt, hasOpenSession, posMainTable = false, fixedPosition, fixedSize, sageOccupied = false, hasQrOrder = false, qrLanguageCode = null, mergedSourceTableNos = [], partyTableNos = [], partyRelationHighlight = false, mergeSplitCandidate = false, mergeSplitSelected = false, scale = 1, enhancedText = false, dataTableManagementItem = false, grouped = false, blocked = false, partyGroupBadge = null, partyGroupColor, partyGroupSelected = false, partyHighlight = false, thickSelection = false, selected = false, editable = false, onClick, onPointerDown, onResizePointerDown, ...layout }: Props) {
+export default function TableShape({ tableNumber, guestCount, amountDue, prepaidAmount = 0, customerName = null, startedAt, hasOpenSession, posMainTable = false, fixedPosition, sageOccupied = false, hasQrOrder = false, qrLanguageCode = null, mergedSourceTableNos = [], partyTableNos = [], partyRelationHighlight = false, mergeSplitCandidate = false, mergeSplitSelected = false, enhancedText = false, dataTableManagementItem = false, grouped = false, blocked = false, partyGroupBadge = null, partyGroupColor, partyGroupSelected = false, partyHighlight = false, thickSelection = false, selected = false, editable = false, onClick, onPointerDown, onResizePointerDown, ...layout }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const occupied = hasOpenSession ?? (guestCount > 0 && startedAt !== null);
   const fixedTextLayout = posMainTable || !dataTableManagementItem;
@@ -20,18 +20,13 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
   const detailsClass = enhancedText ? "h-4 text-xs font-medium leading-4 text-slate-500" : "h-4 text-[9px] font-medium leading-4 text-slate-500";
   const mainOccupied = fixedTextLayout && occupied;
   const useSageSurface = sageOccupied && occupied;
-  const baseStyle = fixedPosition ? {
+  const tableStyle = {
     left: `${fixedPosition.left}%`,
     top: `${fixedPosition.top}%`,
     width: `${fixedPosition.width}px`,
     height: `${fixedPosition.height}px`,
     transform: `translate(-50%, -50%) rotate(${layout.rotation}deg)`,
-  } : fixedSize ? {
-    ...tableLayoutStyle(layout),
-    width: `${fixedSize.width}px`,
-    height: `${fixedSize.height}px`,
-  } : tableLayoutStyle(layout);
-  const tableStyle = scale === 1 ? baseStyle : { ...baseStyle, transform: `${baseStyle.transform} scale(${scale})`, transformOrigin: "center" };
+  };
   const partyBorderStyle = partyGroupColor ? { borderColor: partyGroupColor, ...(partyGroupSelected ? { boxShadow: `0 0 0 3px ${partyGroupColor}55` } : {}) } : undefined;
   const surfaceStyle = {
     ...partyBorderStyle,
@@ -41,7 +36,7 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
       ...(!selected && !partyGroupColor && !partyRelationHighlight ? { borderColor: "#A9BEB2" } : {}),
     } : {}),
   };
-  return <button aria-label={`${tableNumber}번 테이블`} data-table-management-item={dataTableManagementItem ? "true" : undefined} className={`absolute overflow-visible ${fixedPosition ? "pos-table-unit-fixed" : ""} ${fixedPosition || fixedSize ? "pos-table-fixed-size" : ""} ${editable ? "touch-none" : ""} ${selected ? "z-10" : ""}`} onClick={onClick} onPointerDown={onPointerDown} style={tableStyle} type="button">
+  return <button aria-label={`${tableNumber}번 테이블`} data-table-management-item={dataTableManagementItem ? "true" : undefined} className={`absolute overflow-visible pos-table-unit-fixed pos-table-fixed-size ${editable ? "touch-none" : ""} ${selected ? "z-10" : ""}`} onClick={onClick} onPointerDown={onPointerDown} style={tableStyle} type="button">
     {chairs.map((chair, index) => <span key={index} className={`absolute h-[18%] w-[24%] rounded-md border transition-transform ${posMainTable ? "shadow-none" : "shadow-sm"} ${chair.active ? (sageOccupied ? `border-[#789487] bg-[#789487] ${posMainTable ? "" : "shadow-[0_1px_2px_rgba(120,148,135,0.2)]"}` : `border-amber-700 bg-amber-600 ${posMainTable ? "" : "shadow-amber-900/20"}`) : "border-slate-200 bg-slate-100"} ${chair.side === "top" ? (chair.active ? "top-[0.5%]" : "top-[6%]") : (chair.active ? "bottom-[0.5%]" : "bottom-[6%]")} ${chair.slot === "left" ? "left-[17%]" : "right-[17%]"}`} />)}
     <span className={`absolute inset-x-[7%] inset-y-[15%] z-10 flex flex-col items-center ${mainOccupied ? "" : "justify-center"} rounded-[20px] border [box-sizing:border-box] ${useSageSurface ? "" : "bg-[linear-gradient(135deg,#ffffff_0%,#f1f5f9_47%,#ffffff_100%)]"} ${posMainTable ? (occupied ? "pos-table-surface-open" : "shadow-none") : "shadow-[0_5px_11px_rgba(15,23,42,0.14)]"} ${mergeSplitSelected ? "border-[5px] border-violet-600 ring-2 ring-violet-200 shadow-violet-900/20" : mergeSplitCandidate ? "border-[3px] border-violet-500 ring-1 ring-violet-200" : selected ? (partyGroupColor ? "border-[5px]" : dataTableManagementItem || partyHighlight || thickSelection ? "border-[3px] border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-900/15" : "border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-900/15") : blocked ? "border-[3px] border-red-500 ring-1 ring-red-200" : grouped ? (partyGroupColor ? "border-[3px]" : "border-[3px] border-sky-400 ring-1 ring-sky-200") : "border-slate-200"}`} style={surfaceStyle}>
       {partyGroupBadge !== null && <span aria-label={`일행 그룹 ${partyGroupBadge}`} className="absolute -right-3 -top-3 z-20 flex size-9 items-center justify-center rounded-full text-lg font-extrabold text-white shadow-md" style={{ backgroundColor: partyGroupColor ?? "#0284C7" }}>{partyGroupBadge}</span>}

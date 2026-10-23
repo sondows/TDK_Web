@@ -162,7 +162,7 @@ export const staffSessions = mysqlTable("staff_sessions", {
     .default("ACTIVE"),
 });
 
-/** Kitchen tablet credentials and sessions are independent from POS staff accounts. */
+/** Legacy KDS-only credentials and sessions are retained for data compatibility; new KDS auth uses staff sessions. */
 export const kdsAccounts = mysqlTable("kds_accounts", {
   kdsAccountId: bigint("kds_account_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   loginId: varchar("login_id", { length: 32 }).notNull(),
