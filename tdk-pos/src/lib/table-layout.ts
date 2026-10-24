@@ -11,9 +11,9 @@ export function tableSceneScaleToFit(availableWidth: number, availableHeight: nu
   return Math.min(availableWidth / referenceWidth, availableHeight / referenceHeight, 1);
 }
 
-// Shared logical scene used by layout editing and table-management views.
-// The POS main view measures its full native panel and uses the same saved layout values.
-export const TABLE_LAYOUT_REFERENCE_CANVAS = { width: 920, height: 745 } as const;
+// One logical scene for POS, table management, and both layout editors.
+// Stored positions remain percentages; table body sizes remain pixels.
+export const TABLE_LAYOUT_REFERENCE_CANVAS = { width: 1300, height: 900 } as const;
 const LEGACY_TABLE_SIZE_REFERENCE_CANVAS = { width: 447, height: 401 } as const;
 const POS_TABLE_GEOMETRY_SCALE = 1.19;
 const TABLE_BODY_INSET = { horizontal: 0.86, vertical: 0.7 };

@@ -1,5 +1,6 @@
 .git
 .next
+.pos-runtime
 node_modules
 .env*
 !.env.production.example

@@ -138,7 +138,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/admin", e
       <div className={embedded ? "grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_280px]" : "contents"}>
         <div className={embedded ? "min-w-0" : "contents"}>
           {embedded && <h3 className="mb-3 text-sm font-bold text-slate-700">테이블 배치</h3>}
-          <div className={embedded ? "aspect-[920/745] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50" : "contents"}>
+          <div className={embedded ? "min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50" : "contents"} style={embedded ? { aspectRatio: `${canvasSize.width} / ${canvasSize.height}` } : undefined}>
       <TableLayoutRenderer canvasRef={board} tables={tables.filter((table) => table.isActive)} renderTable={(table, fixedPosition) => <TableShape {...table} fixedPosition={fixedPosition} amountDue={0} editable={!readOnly} guestCount={0} onClick={() => setSelected(table.tableId)} onPointerDown={readOnly ? undefined : (event) => drag(event, table)} onResizePointerDown={readOnly ? undefined : (event) => resize(event, table)} posMainTable selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />} className="pos-layout-editor-canvas touch-none" debugName="layout-editor-scene" showSceneBoundary sceneBoundaryClassName="border-emerald-400/70" sceneStyle={{ backgroundColor: "#f8fafc", backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${LAYOUT_GRID_SIZE}px ${LAYOUT_GRID_SIZE}px` }}>
       </TableLayoutRenderer>
           </div>
