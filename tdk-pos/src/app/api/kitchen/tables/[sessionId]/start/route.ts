@@ -9,6 +9,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
   const body = await request.json().catch(() => null) as { action?: unknown; batchStartId?: unknown; taskIds?: unknown; queuedUndoDelayMs?: unknown } | null;
   if (!Number.isSafeInteger(sessionId) || sessionId <= 0 || !body ||
     !["START", "UNDO"].includes(String(body.action)) ||
+    (body.action === "START" && body.taskIds !== undefined &&
+      (!Array.isArray(body.taskIds) || body.taskIds.length === 0 || body.taskIds.length > 1000 ||
+        !body.taskIds.every(taskId => Number.isSafeInteger(taskId) && Number(taskId) > 0))) ||
     (body.action === "UNDO" && (typeof body.batchStartId !== "string" || body.batchStartId.length > 36 ||
       !Array.isArray(body.taskIds) || body.taskIds.length === 0 || body.taskIds.length > 1000 ||
       !body.taskIds.every(taskId => Number.isSafeInteger(taskId) && Number(taskId) > 0)))) {
@@ -22,7 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
     const dbStartedAt = performance.now();
     const result = body.action === "UNDO"
       ? await undoKdsTableStart(sessionId, body.batchStartId as string, body.taskIds as number[], body.queuedUndoDelayMs as number | undefined)
-      : await startKdsTable(sessionId);
+      : await startKdsTable(sessionId, body.taskIds as number[] | undefined);
     return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store",
       "Server-Timing": `kds-db;dur=${(performance.now() - dbStartedAt).toFixed(1)}` } });
   } catch (error) {

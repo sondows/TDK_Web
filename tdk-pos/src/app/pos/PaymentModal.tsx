@@ -616,14 +616,7 @@ export default function PaymentModal({
   const billSessionIds = new Set(state.sessionIds);
   const billRows = buildPartyOrderRows(orderDetails
     .filter(order => billSessionIds.has(order.sessionId) && order.status !== "CANCELLED")
-    .flatMap(order => order.items.map(item => ({ ...item, orderId: order.orderId, sessionId: order.sessionId }))),
-    state.discounts.map(discount => ({
-      sessionId: discount.sessionId,
-      discountType: discount.type,
-      label: discount.label,
-      discountAmount: String(discount.amount),
-      discountRate: null,
-    })));
+    .flatMap(order => order.items.map(item => ({ ...item, orderId: order.orderId, sessionId: order.sessionId }))));
   const discountTotal = state.discounts.reduce(
     (sum, discount) => sum + Math.max(0, discount.amount),
     0,
@@ -842,7 +835,7 @@ export default function PaymentModal({
               disabled={busy || !transactionCompleted || state.remaining !== 0}
               onClick={() => void complete()}
               type="button"
-            >{transactionCompleted && state.remaining === 0 && lastPaymentAutoCompleteEnabled && autoCompleteSeconds !== null && autoCompleteSeconds > 0 && secondsUntilClose !== null ? `${secondsUntilClose}초후 결제완료` : "결제완료"}</button>
+            >{transactionCompleted && state.remaining === 0 && lastPaymentAutoCompleteEnabled && autoCompleteSeconds !== null && autoCompleteSeconds > 0 && secondsUntilClose !== null ? `결제완료 (${secondsUntilClose}초후)` : "결제완료"}</button>
           </section>
         </div>
       </section>

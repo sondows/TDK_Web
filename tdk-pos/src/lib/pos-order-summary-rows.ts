@@ -6,6 +6,7 @@ export type SummarySourceItem = {
   itemType: "NORMAL" | "COMPONENT" | "SERVICE";
   itemName: string;
   unitPrice: string;
+  totalAmount?: string;
   effectiveQty: number;
   qty?: number;
   options?: Array<{
@@ -44,26 +45,16 @@ export type PartySummarySourceItem = SummarySourceItem & {
   }>;
 };
 
-export type PartySummaryDiscount = {
-  sessionId: number;
-  discountType: string;
-  label: string;
-  discountAmount: string;
-  discountRate: number | null;
+const effectiveSourceAmount = (item: PartySummarySourceItem) => {
+  if (item.itemType === "SERVICE") return 0;
+  const sourceTotal = Number(item.totalAmount);
+  if (Number.isFinite(sourceTotal) && item.qty && item.qty > 0)
+    return sourceTotal * item.effectiveQty / item.qty;
+  return Number(item.unitPrice) * item.effectiveQty;
 };
 
-const gcd = (left: number, right: number): number => {
-  let a = Math.abs(left);
-  let b = Math.abs(right);
-  while (b) [a, b] = [b, a % b];
-  return a || 1;
-};
-
-/** Groups party display rows only when menu, price/discount/options, and actual component ratios match. */
-export function buildPartyOrderRows(
-  items: PartySummarySourceItem[],
-  discounts: PartySummaryDiscount[],
-): SummaryRow[] {
+/** Groups party display rows by menu identity and actual unit selling price. */
+export function buildPartyOrderRows(items: PartySummarySourceItem[]): SummaryRow[] {
   const activeParents = items.filter(
     (item) => item.itemType !== "COMPONENT" && item.effectiveQty > 0,
   );
@@ -74,62 +65,19 @@ export function buildPartyOrderRows(
     rows.push(item);
     componentsByParent.set(item.parentOrderItemId, rows);
   }
-  const discountsBySession = new Map<number, string>();
-  for (const sessionId of new Set(items.map((item) => item.sessionId))) {
-    const condition = discounts
-      .filter((discount) => discount.sessionId === sessionId)
-      .map((discount) => [
-        discount.discountType,
-        discount.label,
-        Number(discount.discountAmount),
-        discount.discountRate,
-      ])
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    discountsBySession.set(sessionId, JSON.stringify(condition));
-  }
-
   const grouped = new Map<string, SummaryRow>();
   for (const parent of activeParents) {
     const childItems = componentsByParent.get(parent.orderItemId) ?? [];
-    const childGroups = new Map<string, { item: PartySummarySourceItem; qty: number }>();
+    const childGroups = new Map<string, { item: PartySummarySourceItem; qty: number; total: number }>();
     for (const child of childItems) {
-      const childDiscountPerUnit = Number(child.discountAmount) / Math.max(1, child.effectiveQty);
-      const childKey = `${child.menuId}:${Number(child.unitPrice)}:${childDiscountPerUnit}`;
-      const current = childGroups.get(childKey) ?? { item: child, qty: 0 };
+      const childKey = JSON.stringify([child.menuId, Number(child.unitPrice)]);
+      const current = childGroups.get(childKey) ?? { item: child, qty: 0, total: 0 };
       current.qty += child.effectiveQty;
+      current.total += effectiveSourceAmount(child);
       childGroups.set(childKey, current);
     }
-    const componentState = [...childGroups.values()]
-      .map(({ item, qty }) => {
-        const divisor = gcd(qty, parent.effectiveQty);
-        const discountPerUnit = Number(item.discountAmount) / Math.max(1, item.effectiveQty);
-        return [item.menuId, Number(item.unitPrice), discountPerUnit, qty / divisor, parent.effectiveQty / divisor];
-      })
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-    const options = parent.options
-      .map((option) => [option.modifierOptionId, option.optionName, option.qty, Number(option.unitPrice)])
-      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     const unitPrice = Number(parent.unitPrice);
-    const perUnitDiscount = Number(parent.discountAmount) / parent.effectiveQty;
-    const rowKey = JSON.stringify([
-      parent.itemType,
-      parent.menuId,
-      parent.itemName,
-      unitPrice,
-      perUnitDiscount,
-      discountsBySession.get(parent.sessionId) ?? "[]",
-      options,
-      componentState,
-    ]);
-    const optionLabel = parent.options
-      .slice()
-      .sort(
-        (a, b) =>
-          (a.modifierOptionId ?? 0) - (b.modifierOptionId ?? 0) ||
-          a.optionName.localeCompare(b.optionName, "ko"),
-      )
-      .map((option) => option.optionName)
-      .join(", ");
+    const rowKey = JSON.stringify([parent.menuId, unitPrice]);
     const row = grouped.get(rowKey) ?? {
       rowKey,
       orderSequence: { orderId: parent.orderId, orderItemId: parent.orderItemId },
@@ -139,7 +87,6 @@ export function buildPartyOrderRows(
       unitPrice,
       itemType: parent.itemType,
       components: [],
-      optionLabel,
     };
     if (
       compareOrderSequence(
@@ -150,21 +97,20 @@ export function buildPartyOrderRows(
       row.orderSequence = { orderId: parent.orderId, orderItemId: parent.orderItemId };
     }
     row.qty += parent.effectiveQty;
-    row.total += (parent.itemType === "SERVICE" ? 0 : unitPrice) * parent.effectiveQty;
-    for (const { item, qty } of childGroups.values()) {
-      const discountPerUnit = Number(item.discountAmount) / Math.max(1, item.effectiveQty);
-      const childKey = `component:${item.menuId}:${Number(item.unitPrice)}:${discountPerUnit}`;
+    row.total += effectiveSourceAmount(parent);
+    for (const { item, qty, total } of childGroups.values()) {
+      const childKey = `component:${JSON.stringify([item.menuId, Number(item.unitPrice)])}`;
       const childRow = row.components.find((component) => component.rowKey === childKey);
       if (childRow) {
         childRow.qty += qty;
-        childRow.total += Number(item.unitPrice) * qty;
+        childRow.total += total;
       } else {
         row.components.push({
           rowKey: childKey,
           orderSequence: { orderId: item.orderId, orderItemId: item.orderItemId },
           name: item.itemName,
           qty,
-          total: Number(item.unitPrice) * qty,
+          total,
           unitPrice: Number(item.unitPrice),
           components: [],
         });

@@ -37,6 +37,7 @@ export type SaleDetail = {
   approvedAmount: number;
   items: Array<{
     orderItemId: number;
+    menuId: number;
     itemName: string;
     unitPrice: number;
     originalUnitPrice?: number;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
+import { aggregateSalesDisplayItems, salesItemAggregationKey } from "@/lib/sales-item-aggregation";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import PosSubHeader from "@/app/pos/PosSubHeader";
 import styles from "./admin.module.css";
@@ -159,7 +160,8 @@ export default function AdminDashboard() {
       {detail && <><PosSubHeader backLabel="판매내역으로 돌아가기" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={readOnly ? null : <button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
         <div className={styles.dashboardDetailBody}>
           <dl className={styles.dashboardFacts}><div><dt>테이블</dt><dd>{detail.tableLabel}</dd></div><div><dt>주문시간</dt><dd>{dateTime(detail.orderedAt)}</dd></div><div><dt>결제상태</dt><dd>{labels[detail.displayStatus]}</dd></div></dl>
-          <h3>메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>수량</th><th>금액</th></tr></thead><tbody>{detail.items.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
+          <h3>합산 메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>단가</th><th>수량</th><th>금액</th></tr></thead><tbody>{aggregateSalesDisplayItems(detail.items).map(item => <tr key={salesItemAggregationKey(item.menuId, item.unitPrice)}><td>{item.itemName}</td><td>{money(item.unitPrice)}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
+          <h3>주문별 원본 항목</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>수량</th><th>금액</th></tr></thead><tbody>{detail.items.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
           <dl className={styles.dashboardAmounts}><div><dt>주문금액</dt><dd>{money(detail.subtotalAmount)}</dd></div>{detail.discounts.map((discount, index) => <div key={index}><dt>{discount.label}</dt><dd>-{money(discount.amount)}</dd></div>)}{detail.discountAmount > 0 && <div><dt>할인금액</dt><dd>-{money(detail.discountAmount)}</dd></div>}<div><dt>최종 결제금액</dt><dd>{money(detail.totalAmount)}</dd></div></dl>
           <h3>결제수단</h3><div className={styles.dashboardPayments}>{detail.payments.map(payment => <div key={payment.paymentId}><span>{payment.method}{payment.customerDisplayName ? `(${payment.customerDisplayName})` : ""} · {payment.status === "APPROVED" ? "결제완료" : "취소"}</span><strong>{money(payment.appliedAmount)}</strong>{!readOnly && payment.status === "APPROVED" && <button type="button" className={styles.staffEditButton} disabled={busy} onClick={() => void openMethodEditor(payment.paymentId, payment.paymentMethodId)}>수정</button>}</div>)}</div>
         </div></>}

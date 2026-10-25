@@ -1534,3 +1534,81 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   align-self: stretch;
   justify-self: stretch;
 }
+
+/* Keep the shared table text readable without changing saved table geometry. */
+.pos-table-unit-fixed {
+  container-type: size;
+}
+.pos-table-unit-fixed .pos-table-occupied-content {
+  grid-template-rows: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+  row-gap: 1px;
+  padding-block: 4px;
+}
+.pos-table-unit-fixed.pos-table-fixed-size .text-2xl {
+  font-size: min(39px, 17cqw, 20cqh);
+  line-height: 1;
+}
+.pos-table-unit-fixed .pos-table-info-slot {
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  padding-inline: 2px;
+}
+.pos-table-unit-fixed .pos-table-slot-received {
+  font-size: min(26px, 11.5cqw, 13cqh);
+}
+.pos-table-unit-fixed .pos-table-slot-prepaid {
+  font-size: min(22.1px, 9.7cqw, 11cqh);
+}
+.pos-table-unit-fixed .pos-table-slot-usage,
+.pos-table-unit-fixed .pos-table-slot-customer {
+  font-size: min(20.8px, 9.2cqw, 10.4cqh);
+}
+.pos-table-unit-fixed .pos-table-relation-label {
+  font-size: min(19.5px, 8.6cqw, 9.75cqh);
+  line-height: 1.1;
+}
+.pos-table-unit-fixed .pos-table-qr-marker {
+  font-size: min(11.7px, 5.2cqw, 6cqh);
+}
+.pos-table-unit-fixed [aria-label^="일행 그룹"] {
+  font-size: min(23.4px, 10cqw);
+}
+.pos-table-unit-fixed > span > span.rounded-full.font-bold {
+  font-size: min(10.4px, 5cqw);
+  line-height: 1.1;
+}
+
+/* Request/message text follows the POS table typography; rows remain scrollable. */
+.pos-message-area {
+  --pos-message-large: 18.2px;
+  --pos-message-medium: 15.6px;
+  --pos-message-small: 13px;
+  --pos-message-description: 14.3px;
+}
+@media (min-width: 1600px) and (min-height: 900px) {
+  .pos-message-area {
+    --pos-message-large: 20.8px;
+    --pos-message-medium: 18.2px;
+    --pos-message-small: 15.6px;
+    --pos-message-description: 16.9px;
+  }
+}
+.pos-message-area .pos-message-header h2,
+.pos-message-area .pos-message-list > p {
+  font-size: var(--pos-message-large);
+  line-height: 1.2;
+}
+.pos-message-area .pos-message-header > span,
+.pos-message-area .pos-message-list li > div > p:first-child,
+.pos-message-area .pos-message-list li > button {
+  font-size: var(--pos-message-medium);
+  line-height: 1.2;
+}
+.pos-message-area .pos-message-list li > div > p + p {
+  font-size: var(--pos-message-description);
+  line-height: 1.2;
+}
+.pos-message-area .pos-message-list li > span {
+  font-size: var(--pos-message-small);
+  line-height: 1.2;
+}

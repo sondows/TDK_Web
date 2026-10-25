@@ -24,6 +24,7 @@ import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
 import { buildCustomerConfirmationPrintDocument, buildSalePrintDocument } from "@/lib/print-document";
+import { aggregateSalesDisplayItems, salesItemAggregationKey } from "@/lib/sales-item-aggregation";
 import { isSaleLookupCode } from "@/lib/lookup-code";
 import { salePlaceLabel } from "@/lib/sale-place-label";
 import type { SaleDetail, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
@@ -209,7 +210,7 @@ export async function POST(request: Request) {
         orderedAt: sale.orderedAt.slice(0, 16).replace("T", " "),
         transactionAt: sale.occurredAt.slice(0, 16).replace("T", " "),
         tableNos: sale.tableNos,
-        items: sale.items.filter(item => item.printOnReceipt && (customerConfirmation ? !(item.itemType === "COMPONENT" && item.unitPrice === 0) : true)),
+        items: aggregateSalesDisplayItems(sale.items.filter(item => item.printOnReceipt && (customerConfirmation ? !(item.itemType === "COMPONENT" && item.unitPrice === 0) : true))),
         subtotalAmount: sale.subtotalAmount,
         discountAmount: sale.discountAmount,
         discounts: itemizedDiscounts,
@@ -294,6 +295,7 @@ async function listResponse(startDate: string, endDate: string) {
       checkoutId: checkoutItems.checkoutId,
       checkoutItemId: checkoutItems.checkoutItemId,
       tableNo: sql<string>`COALESCE(${tableSessions.displayName}, ${diningTables.tableNo})`,
+      menuId: orderItems.menuId,
       itemName: orderItems.itemName,
       itemType: orderItems.itemType,
       unitPrice: checkoutItems.unitPrice,
@@ -342,7 +344,14 @@ async function listResponse(startDate: string, endDate: string) {
       .sort((a, b) => a.checkoutItemId - b.checkoutItemId);
     const tables = [...new Set(checkoutTransactionRows.map((row) => row.tableNo))]
       .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
-    const menuNames = [...new Set(checkoutTransactionRows.filter(row => !(row.itemType === "COMPONENT" && Number(row.unitPrice) === 0)).map((row) => row.itemName))];
+    const menuRows = new Map<string, string>();
+    checkoutTransactionRows
+      .filter(row => !(row.itemType === "COMPONENT" && Number(row.unitPrice) === 0))
+      .forEach(row => {
+        const key = salesItemAggregationKey(row.menuId, row.unitPrice);
+        if (!menuRows.has(key)) menuRows.set(key, row.itemName);
+      });
+    const menuNames = [...menuRows.values()];
     const firstOrderedAt = checkoutTransactionRows.reduce<string | null>((earliest, row) => !earliest || row.orderedAt < earliest ? row.orderedAt : earliest, null);
     const methods = [...new Set(transactionPayments.map(paymentLabel))];
     const latestPaymentAt = transactionPayments.reduce<string | null>((latest, payment) => !latest || payment.paidAt > latest ? payment.paidAt : latest, null);
@@ -394,6 +403,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
   const itemRows = await db.select({
     checkoutItemId: checkoutItems.checkoutItemId,
     orderItemId: checkoutItems.orderItemId,
+    menuId: orderItems.menuId,
     itemName: orderItems.itemName,
     itemType: orderItems.itemType,
     originalUnitPrice: orderItems.unitPrice,
@@ -488,7 +498,7 @@ async function loadSaleDetail(checkoutId: number): Promise<SaleDetail | null> {
     discountAmount: won(checkout.discountAmount),
     totalAmount: won(checkout.totalAmount),
     approvedAmount: relevantPayments.filter((payment) => payment.status === "APPROVED").reduce((sum, payment) => sum + won(payment.appliedAmount), 0),
-    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, itemName: item.itemName, unitPrice: won(item.unitPrice), originalUnitPrice: won(item.originalUnitPrice), qty: item.qty, amount: won(item.amount), itemType: item.itemType, printOnReceipt: item.printOnReceipt === 1 })),
+    items: itemRows.sort((a, b) => a.checkoutItemId - b.checkoutItemId).map((item) => ({ orderItemId: item.orderItemId, menuId: item.menuId, itemName: item.itemName, unitPrice: won(item.unitPrice), originalUnitPrice: won(item.originalUnitPrice), qty: item.qty, amount: won(item.amount), itemType: item.itemType, printOnReceipt: item.printOnReceipt === 1 })),
     discounts: discountRows
       .filter(discount => !checkout.completedAt || discount.createdAt <= checkout.completedAt)
       .map(discount => ({ label: discount.label, amount: won(discount.amount) })),

@@ -10,6 +10,30 @@ export type KdsPartyTask = {
 export type KdsTableGroup<T> = { sessionId: number; tasks: T[] };
 export type KdsPartyCard<T> = { key: string; tables: KdsTableGroup<T>[] };
 
+/** Only tasks with the same pot recipe and identical cooking state share one control. */
+export function groupKdsPotDisplayRows<T extends {
+  sessionId: number; kind: "POT" | "SOLO"; sessionKind: KdsPartyTask["sessionKind"];
+  compatibilityKey: string; status: "WAITING" | "COOKING" | "DONE";
+  startedAtMs: number | null; completedAtMs: number | null; completionRequestId: string | null;
+  completionRequestScope: "TASK" | "TABLE" | null; completionRequestedAtMs: number | null; cancelled: boolean;
+  items: Array<{ name: string; kind: string }>;
+}>(tasks: T[]): T[][] {
+  const rows: T[][] = [];
+  const keys = new Map<string, T[]>();
+  for (const task of tasks) {
+    if (task.kind !== "POT" || task.sessionKind !== "DINE_IN" || task.cancelled) { rows.push([task]); continue; }
+    const key = [task.sessionId, task.compatibilityKey, task.status, task.startedAtMs, task.completedAtMs,
+      task.completionRequestScope, task.completionRequestId, task.completionRequestedAtMs].join(":");
+    let row = keys.get(key);
+    if (!row) { row = []; keys.set(key, row); rows.push(row); }
+    row.push(task);
+  }
+  for (const row of rows) if (row.length > 1) row.sort((a, b) =>
+    Number(b.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")) -
+    Number(a.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")));
+  return rows;
+}
+
 export function activeKdsTableTasks<T extends KdsPartyTask>(tasks: T[]) {
   return tasks.filter(task => !task.cancelled && task.status !== "DONE");
 }
@@ -43,10 +67,8 @@ export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[]): KdsPar
 export function preparingKdsPartyCards<T extends KdsPartyTask>(cards: KdsPartyCard<T>[]): KdsPartyCard<T>[] {
   return cards.flatMap(card => {
     const tables = card.tables.flatMap(table => {
-      if (!table.tasks.some(task => task.status !== "DONE" || task.cancelled)) return [];
-      // Keep completed items from this open table session as context when a later
-      // order reopens the preparing card. Closed sessions are excluded by listKdsTasks.
-      return [table];
+      const tasks = table.tasks.filter(task => task.status !== "DONE" || task.cancelled);
+      return tasks.length ? [{ ...table, tasks }] : [];
     });
     return tables.length ? [{ ...card, tables }] : [];
   });

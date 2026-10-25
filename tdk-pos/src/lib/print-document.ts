@@ -1,3 +1,5 @@
+import { aggregateSalesDisplayItems } from "./sales-item-aggregation";
+
 // Printer-independent layout. The Device Agent only interprets these primitives.
 export type PrintLogo = { width: number; height: number; pixelsBase64: string };
 export type PrintCell = { value: string; width: number; align: "left" | "center" | "right" };
@@ -21,7 +23,7 @@ export type SalePrintInput = {
   orderedAt: string;
   transactionAt: string;
   tableNos: string[];
-  items: { itemName: string; itemType?: string; unitPrice: number; qty: number; amount: number }[];
+  items: { menuId: number; itemName: string; itemType?: string; unitPrice: number; qty: number; amount: number }[];
   totalAmount: number;
   payments: {
     paymentId: number;
@@ -101,7 +103,7 @@ export function buildSalePrintDocument(input: SalePrintInput): PrintDocument {
     { value: "수량", width: 14, align: "right" },
     { value: "금액", width: 24, align: "right" },
   ], size: 24 }, { type: "line" });
-  for (const item of input.items) commands.push({ type: "row", cells: [
+  for (const item of aggregateSalesDisplayItems(input.items.map(item => ({ ...item, itemType: item.itemType ?? "NORMAL" })))) commands.push({ type: "row", cells: [
     { value: item.itemType === "COMPONENT" ? `  └ ${item.itemName}` : item.itemName, width: 43, align: "left" },
     { value: money(item.unitPrice), width: 19, align: "right" },
     { value: String(item.qty), width: 14, align: "right" },
@@ -128,7 +130,7 @@ export function buildCustomerConfirmationPrintDocument(input: SalePrintInput): P
       { value: "상품명", width: 43, align: "left" }, { value: "단가", width: 19, align: "right" },
       { value: "수량", width: 14, align: "right" }, { value: "금액", width: 24, align: "right" },
     ], size: 24 }, { type: "line" }];
-  for (const item of input.items) commands.push({ type: "row", cells: [
+  for (const item of aggregateSalesDisplayItems(input.items.map(item => ({ ...item, itemType: item.itemType ?? "NORMAL" })))) commands.push({ type: "row", cells: [
     { value: item.itemName, width: 43, align: "left" }, { value: money(item.unitPrice), width: 19, align: "right" },
     { value: String(item.qty), width: 14, align: "right" }, { value: money(item.amount), width: 24, align: "right" },
   ], size: 24 });

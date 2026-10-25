@@ -2,11 +2,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 
 import { db } from "@/db";
-import { menuComponents, menuModifierGroups, menus, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
+import { menuComponents, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
+import { hasConsistentPotSpiciness } from "@/lib/pos-pot-spiciness";
 
 type RequestedItem = { menuId: number; qty: number; isComplimentary: boolean; components: Array<{ menuComponentId: number; qty: number }>; options: Array<{ modifierOptionId: number; qty: number }> };
 const CENTS_PER_UNIT = BigInt(100);
@@ -68,7 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       if (!session) throw new OrderValidationError("테이블 세션이 종료되었거나 존재하지 않습니다.");
 
       const menuIds = [...new Set(requestedItems.map(item => item.menuId))];
-      const availableMenus = await tx.select({ menuId: menus.menuId, posName: menus.posName, price: menus.price, prepStationId: menus.prepStationId }).from(menus).where(and(inArray(menus.menuId, menuIds), eq(menus.isActive, 1)));
+      const availableMenus = await tx.select({ menuId: menus.menuId, posName: menus.posName, price: menus.price, prepStationId: menus.prepStationId, kdsKind: menus.kdsKind, kdsGroupKey: menus.kdsGroupKey }).from(menus).where(and(inArray(menus.menuId, menuIds), eq(menus.isActive, 1)));
       if (availableMenus.length !== menuIds.length) throw new OrderValidationError("판매할 수 없는 메뉴가 포함되어 있습니다.");
       const menuById = new Map(availableMenus.map(menu => [menu.menuId, menu]));
 
@@ -76,10 +77,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       const availableOptions = optionIds.length ? await tx.select({
         menuId: menuModifierGroups.menuId,
         modifierGroupId: menuModifierGroups.modifierGroupId,
+        groupName: modifierGroups.posName,
         modifierOptionId: modifierOptions.modifierOptionId,
         optionName: modifierOptions.posName,
         priceDelta: modifierOptions.priceDelta,
-      }).from(menuModifierGroups).innerJoin(modifierOptions, eq(modifierOptions.modifierGroupId, menuModifierGroups.modifierGroupId))
+      }).from(menuModifierGroups).innerJoin(modifierGroups, eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId)).innerJoin(modifierOptions, eq(modifierOptions.modifierGroupId, menuModifierGroups.modifierGroupId))
         .where(and(inArray(menuModifierGroups.menuId, menuIds), inArray(modifierOptions.modifierOptionId, optionIds), eq(modifierOptions.isActive, 1))) : [];
       const optionByMenuAndId = new Map(availableOptions.map(option => [`${option.menuId}:${option.modifierOptionId}`, option]));
 
@@ -124,6 +126,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         });
         return { menu, qty: requested.qty, isComplimentary: requested.isComplimentary, unitPrice: centsToDecimal(unitPriceCents), menuAmount: centsToDecimal(menuAmountCents), components, options };
       });
+
+      if (!hasConsistentPotSpiciness(snapshots.flatMap(snapshot => {
+        if (snapshot.menu.kdsKind !== "POT") return [];
+        const taste = snapshot.options.find(option => option.groupName === "매운맛" || /^\s*\d+\s*[.번)]/.test(option.optionName));
+        return [{ potKey: snapshot.menu.kdsGroupKey?.trim() || "POT", optionName: taste?.optionName ?? null }];
+      }))) throw new OrderValidationError("같은 냄비 메뉴의 매운맛을 동일하게 선택해 주세요.");
 
       const totalAmount = centsToDecimal(orderTotalCents);
       const [orderInsert] = await tx.insert(orders).values({

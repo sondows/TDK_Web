@@ -7,6 +7,8 @@ export type KdsPostCookTimerMinutes = number;
 export const isKdsPostCookTimerMinutes = (value: unknown): value is KdsPostCookTimerMinutes =>
   typeof value === "number" && Number.isInteger(value) &&
   value >= KDS_POST_COOK_TIMER_MINUTES_RANGE.min && value <= KDS_POST_COOK_TIMER_MINUTES_RANGE.max;
+export const isKdsSelectedPotTasks = (value: unknown): value is boolean | undefined =>
+  value === undefined || typeof value === "boolean";
 export type KdsCookingSettings = { boilTimeOptions: [number, number, number]; defaultBoilTimeMinutes: number };
 export const DEFAULT_KDS_COOKING_SETTINGS: KdsCookingSettings = {
   boilTimeOptions: [...DEFAULT_KDS_BOIL_TIME_OPTIONS],
@@ -20,7 +22,14 @@ export function isKdsCookingSettings(value: unknown): value is KdsCookingSetting
     isKdsPostCookTimerMinutes(settings.defaultBoilTimeMinutes) && settings.boilTimeOptions.includes(settings.defaultBoilTimeMinutes);
 }
 export type KdsMemberKind = "POT" | "ADDON" | "SOLO" | "COMPONENT";
-export type KdsMember = { itemId: number; kind: KdsMemberKind };
+export type KdsMember = { itemId: number; kind: KdsMemberKind; completionTimer?: boolean };
+
+/** A shared pot has one status control, while each cooked menu keeps its own display setting. */
+export function kdsCompletedTimerDisplay(items: Array<{ name: string; kind: KdsMemberKind; completionTimer: boolean }>, kind: "POT" | "SOLO") {
+  const cookedItems = items.filter(item => item.kind === "POT" || item.kind === "SOLO" || (kind === "SOLO" && item.kind === "ADDON"));
+  const enabledNames = [...new Set(cookedItems.filter(item => item.completionTimer).map(item => item.name))];
+  return { enabledNames, mixed: enabledNames.length > 0 && cookedItems.some(item => !item.completionTimer) };
+}
 
 export type KdsDisplayItem = {
   name: string; qty: number; kind: KdsMemberKind;
@@ -33,19 +42,23 @@ export function formatKdsTaskDisplay(kind: "POT" | "SOLO", items: KdsDisplayItem
     items.find(item => item.kind !== "COMPONENT");
   if (!primary) return { name: "주문 항목", qty: 0, details: [] as string[] };
   const qty = kind === "POT"
-    ? items.filter(item => item.kind === "POT").reduce((sum, item) => sum + item.qty, 0)
+    ? items.filter(item => item.kind === "POT" && item.name === primary.name).reduce((sum, item) => sum + item.qty, 0)
     : primary.qty;
-  const members = new Map<string, number>();
+  const members = new Map<string, { qty: number; kind: KdsMemberKind }>();
   for (const item of items) {
     if (item === primary || (kind === "POT" && item.kind === "POT" && item.name === primary.name)) continue;
-    members.set(item.name, (members.get(item.name) ?? 0) + item.qty);
+    members.set(item.name, { qty: (members.get(item.name)?.qty ?? 0) + item.qty, kind: item.kind });
   }
   const options = new Map<string, number>();
   for (const item of items) for (const option of item.options) {
     if (/(?:매운맛|순한맛|안매움)/.test(option.name) || members.has(option.name)) continue;
     options.set(option.name, (options.get(option.name) ?? 0) + option.qty);
   }
-  const details = [...members, ...options].map(([name, count]) => count > 1 ? `${name} ×${count}` : name);
+  const details = [
+    ...[...members].map(([name, member]) => member.kind === "POT"
+      ? `${name}${member.qty > 1 ? member.qty : ""}` : member.qty > 1 ? `${name} ×${member.qty}` : name),
+    ...[...options].map(([name, count]) => count > 1 ? `${name} ×${count}` : name),
+  ];
   return { name: primary.name, qty, details };
 }
 
@@ -93,10 +106,11 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
     drafts.push({
       orderId,
       taskKey: `pot:${orderId}:${first.itemId}`,
-      members: [...group.map(item => ({ itemId: item.itemId, kind: "POT" as const })),
-        ...groupAddons.map(item => ({ itemId: item.itemId, kind: "ADDON" as const }))].sort((a, b) => a.itemId - b.itemId),
+      members: [...group.map(item => ({ itemId: item.itemId, kind: "POT" as const, completionTimer: item.kdsCompletionTimer })),
+        ...groupAddons.map(item => ({ itemId: item.itemId, kind: "ADDON" as const, completionTimer: item.kdsCompletionTimer }))].sort((a, b) => a.itemId - b.itemId),
       kind: "POT",
       compatibilityKey: key,
+      // Retain the task-level flag for older readers; member snapshots control the display.
       completionTimer: group.some(item => item.kdsCompletionTimer),
     });
   }
@@ -105,7 +119,7 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
     drafts.push({
       orderId,
       taskKey: `item:${item.itemId}`,
-      members: [{ itemId: item.itemId, kind: item.kdsKind === "ADDON" ? "ADDON" : "SOLO" }],
+      members: [{ itemId: item.itemId, kind: item.kdsKind === "ADDON" ? "ADDON" : "SOLO", completionTimer: item.kdsCompletionTimer }],
       kind: "SOLO",
       compatibilityKey: item.kdsGroupKey?.trim() ? `SOLO:${item.kdsGroupKey.trim()}` : `MENU:${item.menuId}`,
       completionTimer: item.kdsCompletionTimer,
@@ -154,9 +168,20 @@ export function kdsCompletedTimeShrinkStage(completedAtMs: number | null, nowMs:
   if (elapsed === null || !isKdsCompletedTimeShrinkStartMinutes(startMinutes)) return 0;
   return Math.max(0, Math.min(5, elapsed - startMinutes));
 }
+/** Countdown color takes priority over cooking state and table card color. */
+export function kdsTimeNumberColor(status: KdsTaskStatus, isDisplayedCountdown: boolean) {
+  if (isDisplayedCountdown) return "#7C3AED";
+  return status === "WAITING" ? "#111827" : "#2563EB";
+}
 export const MIN_KDS_COMPLETION_COUNTDOWN_SECONDS = 1;
 export const MAX_KDS_COMPLETION_COUNTDOWN_SECONDS = 30;
 export const KDS_COMPLETION_COUNTDOWN_MS = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS * 1000;
+// Keep the cancellation window open briefly after the visible countdown so a tap near zero
+// can reach the server before any client or refresh-triggered finalizer commits completion.
+export const KDS_TABLE_COMPLETION_FINALIZE_GRACE_MS = 1000;
+// A cancel tap can arrive just after another KDS client commits the same table completion.
+// Keep a short server-side rollback window for that exact request to resolve the race safely.
+export const KDS_TABLE_COMPLETION_LATE_CANCEL_RECOVERY_MS = 5000;
 export function isKdsCompletionCountdownSeconds(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) &&
     value >= MIN_KDS_COMPLETION_COUNTDOWN_SECONDS && value <= MAX_KDS_COMPLETION_COUNTDOWN_SECONDS;
@@ -183,25 +208,72 @@ export function remainingKdsCompletionSeconds(requestedAtMs: number, now: number
   const durationSeconds = isKdsCompletionCountdownSeconds(countdownSeconds) ? countdownSeconds : DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS;
   return Math.min(durationSeconds, Math.max(1, durationSeconds - elapsedSeconds));
 }
+export function kdsTableCompletionFinalizeAtMs(requestedAtMs: number, countdownSeconds = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) {
+  const durationSeconds = isKdsCompletionCountdownSeconds(countdownSeconds) ? countdownSeconds : DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS;
+  return requestedAtMs + durationSeconds * 1000 + KDS_TABLE_COMPLETION_FINALIZE_GRACE_MS;
+}
+export function canCancelKdsTableCompletion(requestedAtMs: number, now: number, countdownSeconds = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) {
+  return now < kdsTableCompletionFinalizeAtMs(requestedAtMs, countdownSeconds);
+}
+export function canFinalizeKdsTableCompletion(requestedAtMs: number, now: number, countdownSeconds = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS) {
+  return now >= kdsTableCompletionFinalizeAtMs(requestedAtMs, countdownSeconds);
+}
+export function canRecoverKdsTableCompletionCancellation(completedAtMs: number, nowMs: number) {
+  return nowMs >= completedAtMs && nowMs - completedAtMs <= KDS_TABLE_COMPLETION_LATE_CANCEL_RECOVERY_MS;
+}
+export async function honorQueuedKdsTableCompletionCancel<T>(
+  request: Promise<T>, cancelRequested: () => boolean, cancel: (result: T) => Promise<void>,
+) {
+  const result = await request;
+  if (!cancelRequested()) return { result, cancelled: false } as const;
+  await cancel(result);
+  return { result, cancelled: true } as const;
+}
 export type KdsTableButtonTask = {
   status: KdsTaskStatus; changedAtMs: number | null; bulkStartId?: string | null;
   completionRequestId?: string | null; completionRequestScope?: "TASK" | "TABLE" | null;
   completionRequestedAtMs?: number | null; taskId?: number; cancelled?: boolean;
 };
 export function getKdsTableButtonAction(tasks: KdsTableButtonTask[], now: number, localBatchStartId?: string | null) {
+  const tableCompletion = tasks.find(task => !task.cancelled && task.completionRequestScope === "TABLE" && task.completionRequestId);
+  if (tableCompletion?.completionRequestId) return { action: "CANCEL_TABLE_COMPLETION" as const, requestId: tableCompletion.completionRequestId };
+  // A table tap during a task-scoped countdown is a cancel gesture. It must
+  // take precedence over both the recent-start undo window and force-finalize.
+  const taskCompletions = tasks.filter(task => !task.cancelled && task.status === "COOKING" &&
+    task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null && task.completionRequestedAtMs !== undefined);
+  if (taskCompletions.length) return {
+    action: "CANCEL_TASK_COMPLETIONS" as const,
+    taskIds: taskCompletions.flatMap(task => task.taskId === undefined ? [] : [task.taskId]),
+  };
   const recentBatch = tasks.filter(task => !task.cancelled && task.status === "COOKING" && task.bulkStartId &&
     task.changedAtMs !== null && now >= task.changedAtMs && now - task.changedAtMs <= KDS_WINDOW_MS)
     .sort((a, b) => (b.changedAtMs ?? 0) - (a.changedAtMs ?? 0))[0];
   if (recentBatch?.bulkStartId) return { action: "UNDO_START" as const, batchStartId: recentBatch.bulkStartId };
   if (localBatchStartId) return { action: "UNDO_START" as const, batchStartId: localBatchStartId };
-  const tableCompletion = tasks.find(task => !task.cancelled && task.completionRequestScope === "TABLE" && task.completionRequestId);
-  if (tableCompletion?.completionRequestId) return { action: "FINALIZE_TABLE_COMPLETION" as const, requestId: tableCompletion.completionRequestId };
-  const taskCompletions = tasks.filter(task => !task.cancelled && task.status === "COOKING" &&
-    task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null && task.completionRequestedAtMs !== undefined);
-  if (taskCompletions.length) return { action: "FINALIZE_TASK_COMPLETIONS" as const, taskIds: taskCompletions.flatMap(task => task.taskId === undefined ? [] : [task.taskId]) };
   if (tasks.some(task => !task.cancelled && task.status === "COOKING")) return { action: "REQUEST_COMPLETION" as const };
   if (tasks.some(task => !task.cancelled && task.status === "WAITING")) return { action: "START" as const };
   return { action: "NOOP" as const };
+}
+export function clearCancelledKdsTableCompletionRequests<T extends {
+  sessionId: number;
+  completionRequestId: string | null;
+  completionRequestScope: "TASK" | "TABLE" | null;
+  completionRequestedAtMs: number | null;
+  completionCountdownSeconds?: number | null;
+  pendingPostCookTimerMinutes?: number | null;
+}>(tasks: T[], cancelledRequestKeys: ReadonlySet<string>) {
+  return tasks.map(task => task.completionRequestScope === "TABLE" && task.completionRequestId &&
+    cancelledRequestKeys.has(`${task.sessionId}:${task.completionRequestId}`)
+    ? { ...task, completionRequestedAtMs: null, completionRequestId: null, completionRequestScope: null,
+        completionCountdownSeconds: null, pendingPostCookTimerMinutes: null } as T
+    : task);
+}
+/** Clear each task's scheduled finalizer before sending its matching cancel request. */
+export async function cancelKdsTaskCompletionRequests<T extends { taskId: number }>(
+  tasks: T[], cancelRequest: (task: T) => Promise<void>, clearTimer: (taskId: number) => void,
+) {
+  for (const task of tasks) clearTimer(task.taskId);
+  await Promise.all(tasks.map(cancelRequest));
 }
 export function matchesKdsTableStartBatch(expectedTaskIds: number[], actualTaskIds: number[]) {
   if (!expectedTaskIds.length || expectedTaskIds.length !== actualTaskIds.length ||
@@ -220,14 +292,20 @@ export function canUndoKdsStatusStart(status: KdsTaskStatus, previousStatus: Kds
 }
 export function remainingKdsStartUndoSeconds(
   status: KdsTaskStatus, previousStatus: KdsTaskStatus | null, changedAtMs: number | null, now: number,
-  startSource?: "MENU" | "STATUS" | "TABLE" | null, bulkStartId?: string | null,
+  startSource?: "MENU" | "STATUS" | "TABLE" | null, bulkStartId?: string | null, pendingTableStart = false,
 ) {
   if (status !== "COOKING" || previousStatus !== "WAITING" || changedAtMs === null ||
     now < changedAtMs || now - changedAtMs > KDS_WINDOW_MS) return null;
   const canUndo = canUseKdsMenuAction(status, previousStatus, changedAtMs, now, startSource) ||
     canUndoKdsStatusStart(status, previousStatus, changedAtMs, now, startSource) ||
-    (startSource === "TABLE" && Boolean(bulkStartId));
+    (startSource === "TABLE" && (Boolean(bulkStartId) || pendingTableStart));
   return canUndo ? Math.max(1, Math.ceil((changedAtMs + KDS_WINDOW_MS - now) / 1000)) : null;
+}
+/** Uses the initiating device's monotonic clock so server clock resyncs cannot restart or flash the undo countdown. */
+export function remainingKdsStartUndoSecondsFromClick(clickedAtMonoMs: number, nowMonoMs: number) {
+  const elapsedMs = nowMonoMs - clickedAtMonoMs;
+  if (elapsedMs < 0 || elapsedMs > KDS_WINDOW_MS) return null;
+  return Math.max(1, Math.ceil((KDS_WINDOW_MS - elapsedMs) / 1000));
 }
 export function remainingKdsQuantity(originalQty: number, cancelledQty: number, cancelled: boolean) {
   return cancelled ? 0 : Math.max(0, originalQty - cancelledQty);

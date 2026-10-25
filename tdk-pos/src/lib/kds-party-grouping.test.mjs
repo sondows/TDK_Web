@@ -1,10 +1,34 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder } from "./kds-party-grouping.ts";
+import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder } from "./kds-party-grouping.ts";
+import { formatKdsTaskDisplay } from "./kds-model.ts";
 
 const task = (taskId, sessionId, groupId, status = "WAITING", sessionKind = "DINE_IN") =>
   ({ taskId, orderId: sessionId, orderedAtMs: 1_000, completedAtMs: status === "DONE" ? 2_000 : null,
     sessionId, groupId, sessionKind, status, cancelled: false });
+
+test("same-session compatible stews from separate orders share one row without changing task IDs", () => {
+  const pot = (taskId, name, status = "WAITING", sessionKind = "DINE_IN") => ({
+    ...task(taskId, 11, null, status, sessionKind), kind: "POT", compatibilityKey: "STEW",
+    startedAtMs: null, completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ name, kind: "POT", qty: 1, options: [] }],
+  });
+  const rows = groupKdsPotDisplayRows([
+    pot(188, "불고기김치찌개"), pot(186, "흑돼지김치찌개"),
+    { ...pot(189, "참치김치찌개"), compatibilityKey: "OTHER" },
+  ]);
+  assert.deepEqual(rows.map(row => row.map(item => item.taskId)), [[186, 188], [189]]);
+  assert.deepEqual(formatKdsTaskDisplay("POT", rows[0].flatMap(member => member.items)), {
+    name: "흑돼지김치찌개", qty: 1, details: ["불고기김치찌개"],
+  });
+  assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개"), pot(2, "불고기김치찌개", "COOKING")]).length, 2);
+  assert.equal(groupKdsPotDisplayRows([
+    { ...pot(1, "흑돼지김치찌개", "COOKING"), startedAtMs: 1000 },
+    { ...pot(2, "불고기김치찌개", "COOKING"), startedAtMs: 2000 },
+  ]).length, 2);
+  assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개"), { ...pot(2, "불고기김치찌개"), sessionId: 12 }]).length, 2);
+  assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개", "WAITING", "TAKEOUT_PHONE"), pot(2, "불고기김치찌개", "WAITING", "TAKEOUT_PHONE")]).length, 2);
+});
 
 test("standalone tables stay in separate cards and party tables share one card", () => {
   const cards = groupKdsTasksByParty([
@@ -89,26 +113,26 @@ test("a cooking completion request counts as unfinished until server confirmatio
   assert.equal(countKdsTablesByStatus(cards, "completed"), 1);
 });
 
-test("preparing retains completed work until the table's current work is all confirmed", () => {
+test("preparing hides confirmed items but keeps unfinished work and completed tab data", () => {
   const finished = task(1, 11, 7, "DONE");
   const waiting = task(2, 11, 7);
   const counting = { ...task(3, 11, 7, "COOKING"), completionRequestedAtMs: 123_000 };
   const otherFinished = task(4, 12, 7, "DONE");
   const cards = groupKdsTasksByParty([finished, waiting, counting, otherFinished]);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1, 2, 3]]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables.map(table => table.tasks.map(item => item.taskId)), [[2, 3]]);
   assert.deepEqual(cards[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1, 2, 3], [4]]);
   waiting.status = "DONE";
   waiting.completedAtMs = 2_100;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [3]);
   counting.status = "DONE";
   counting.completedAtMs = 2_200;
   assert.deepEqual(preparingKdsPartyCards(cards), []);
   const additional = { ...task(5, 11, 7), orderId: 13, orderedAtMs: 3_000 };
   cards[0].tables[0].tasks.push(additional);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [5]);
   waiting.status = "COOKING";
   waiting.completedAtMs = null;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [2, 5]);
   waiting.status = "DONE";
   waiting.completedAtMs = 3_100;
   additional.status = "DONE";
@@ -116,7 +140,7 @@ test("preparing retains completed work until the table's current work is all con
   assert.deepEqual(preparingKdsPartyCards(cards), []);
   const nextAdditional = { ...task(6, 11, 7), orderId: 14, orderedAtMs: 4_000 };
   cards[0].tables[0].tasks.push(nextAdditional);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5, 6]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [6]);
 });
 
 test("preparing keeps reopened work isolated by table session", () => {
@@ -128,15 +152,16 @@ test("preparing keeps reopened work isolated by table session", () => {
   assert.deepEqual(visible[0].tables[0].tasks.map(item => item.taskId), [2]);
 });
 
-test("an additional order joins the same work when an earlier menu was still unfinished", () => {
+test("additional orders keep earlier confirmed items only in the completed view", () => {
   const finished = { ...task(1, 11, null, "DONE"), completedAtMs: 2_000 };
   const cooking = { ...task(2, 11, null, "COOKING"), completedAtMs: null };
   const additional = { ...task(3, 11, null), orderId: 12, orderedAtMs: 3_000 };
   const cards = groupKdsTasksByParty([finished, cooking, additional]);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [2, 3]);
   cooking.status = "DONE";
   cooking.completedAtMs = 4_000;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [3]);
+  assert.deepEqual(cards[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
 });
 
 test("an unacknowledged cancelled task remains visible for existing cancellation handling", () => {

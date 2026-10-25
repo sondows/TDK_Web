@@ -521,7 +521,6 @@ export default function OrderSummaryPanel({
         orderDetails
           .filter((order) => party.sessionIds.includes(order.sessionId))
           .flatMap((order) => order.items.map((item) => ({ ...item, orderId: order.orderId, sessionId: order.sessionId }))),
-        discounts,
       )
     : [];
   const orderGrossTotal =
@@ -780,7 +779,8 @@ export default function OrderSummaryPanel({
                 취소
               </button>
               <button
-                className="min-h-14 rounded-xl bg-blue-600 font-bold text-white"
+                className="min-h-14 rounded-xl font-bold text-white"
+                style={{ backgroundColor: styles[tab].color }}
                 disabled={!cart.length || submitting}
                 onClick={submitCart}
                 type="button"

@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cashOpeningFundTotal, type CashOpeningFund } from "@/lib/cash-opening-fund";
+import { confirmedClosing, validClosing } from "@/lib/business-closing-confirmation";
+import { createRequestId } from "@/lib/request-id";
 import OpeningFundModal from "./OpeningFundModal";
 import PosSubHeader from "./PosSubHeader";
 
 const money = (value: number) => value.toLocaleString("ko-KR");
+const PENDING_CLOSING_KEY = "tdk-pos-pending-business-closing";
 const signed = (value: number) => `${value > 0 ? "+" : ""}${money(value)}`;
 const formatReferenceSettlementTime = (value: Date) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -46,6 +49,13 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
   const completionButton = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (completed) completionButton.current?.focus(); }, [completed]);
   useEffect(() => { setReferenceSettlementTime(formatReferenceSettlementTime(new Date())); }, []);
+  function rememberRequest(date: string, key: string) {
+    try { window.sessionStorage.setItem(PENDING_CLOSING_KEY, JSON.stringify({ date, key })); } catch { /* The ref still keeps this request key. */ }
+  }
+  function showCompleted(closing: Pick<Preview, "businessDate" | "totalSales" | "saleCount">) {
+    try { window.sessionStorage.removeItem(PENDING_CLOSING_KEY); } catch { /* The server has confirmed completion. */ }
+    setCompleted(closing);
+  }
   async function refresh(clearError = true) {
     if (clearError) setError("");
     try {
@@ -57,19 +67,49 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
     finally { setLoaded(true); }
   }
   useEffect(() => { const timer = window.setTimeout(() => { void refresh(); }, 0); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => {
+    if (!preview || completed) return;
+    let stored: unknown = null;
+    try { stored = JSON.parse(window.sessionStorage.getItem(PENDING_CLOSING_KEY) ?? "null"); } catch { /* Ignore malformed browser storage. */ }
+    if (!stored || typeof stored !== "object") return;
+    const pending = stored as { date?: unknown; key?: unknown };
+    if (pending.date !== preview.businessDate || typeof pending.key !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pending.key)) return;
+    requestKey.current = pending.key;
+    let active = true;
+    void confirmedClosing(pending.key).then(closing => { if (active && closing) showCompleted(closing); });
+    return () => { active = false; };
+  }, [preview, completed]);
   async function close() {
     if (!preview || closingRequest.current) return;
     const actualCash = actualFund === null ? null : cashOpeningFundTotal(actualFund);
     if (preview.openingCashEnabled && (actualCash === null || !Number.isSafeInteger(actualCash) || actualCash < 0)) { setError("시재 확인에서 실제 현금을 입력해 주세요."); return; }
     closingRequest.current = true; setBusy(true); setError("");
     try {
-      requestKey.current ??= crypto.randomUUID();
+      const retrying = requestKey.current !== null;
+      requestKey.current ??= createRequestId();
+      const key = requestKey.current;
+      rememberRequest(preview.businessDate, key);
+      if (retrying) {
+        const confirmed = await confirmedClosing(key);
+        if (confirmed) { showCompleted(confirmed); return; }
+      }
       const response = await fetch("/api/pos/business-session/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ businessDate: preview.businessDate, previousClosingCount: preview.previousClosingCount, requestKey: requestKey.current, actualCash: preview.openingCashEnabled ? actualCash : null, actualCashFund: preview.openingCashEnabled ? actualFund : null }) });
       const result = await response.json() as { success?: boolean; message?: string; closing?: Pick<Preview, "businessDate" | "totalSales" | "saleCount"> };
-      if (!response.ok || !result.success) { requestKey.current = null; setError(result.message ?? "영업마감에 실패했습니다. 다시 확인해 주세요."); await refresh(false); return; }
-      if (!result.closing) { setError("영업마감 결과를 확인하지 못했습니다. 영업 상태를 다시 확인해 주세요."); await refresh(false); return; }
-      setCompleted(result.closing);
-    } catch { setError("영업마감 결과를 확인하지 못했습니다. 영업 상태를 다시 확인해 주세요."); }
+      if (response.ok && result.success && validClosing(result.closing)) { showCompleted(result.closing); return; }
+      const confirmed = await confirmedClosing(key);
+      if (confirmed) { showCompleted(confirmed); return; }
+      if ((response.status === 400 || response.status === 409) && result.success === false) {
+        requestKey.current = null;
+        try { window.sessionStorage.removeItem(PENDING_CLOSING_KEY); } catch { /* No persisted request key to clear. */ }
+      }
+      setError(result.message ?? "마감 결과를 확인하지 못했습니다. 같은 요청으로 다시 확인해 주세요.");
+      await refresh(false);
+    } catch (error) {
+      console.error("Business closing request failed", { requestKey: requestKey.current }, error);
+      const confirmed = requestKey.current ? await confirmedClosing(requestKey.current) : null;
+      if (confirmed) showCompleted(confirmed);
+      else setError("마감 결과를 확인하지 못했습니다. 같은 요청으로 다시 확인해 주세요.");
+    }
     finally { closingRequest.current = false; setBusy(false); }
   }
   const line = (label: string, value: string) => <div className="flex items-center justify-between gap-3 py-1"><span>{label}</span><strong className="whitespace-nowrap text-right tabular-nums">{value}</strong></div>;
