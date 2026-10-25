@@ -1188,10 +1188,10 @@ main.h-dvh > div > section:nth-child(3) {
   position: absolute;
   top: 0;
   left: 0;
-  width: 10px;
-  height: 10px;
+  width: 16px;
+  height: 16px;
   pointer-events: none;
-  clip-path: polygon(0 0, 100% 0, 0 100%);
+  border-bottom-right-radius: 2rem;
   filter: brightness(0.78);
 }
 

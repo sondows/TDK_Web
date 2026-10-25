@@ -171,7 +171,7 @@ export function kdsCompletedTimeShrinkStage(completedAtMs: number | null, nowMs:
 /** Countdown color takes priority over cooking state and table card color. */
 export function kdsTimeNumberColor(status: KdsTaskStatus, isDisplayedCountdown: boolean) {
   if (isDisplayedCountdown) return "#7C3AED";
-  return status === "WAITING" ? "#111827" : "#2563EB";
+  return status === "COOKING" ? "#2563EB" : "#111827";
 }
 export const MIN_KDS_COMPLETION_COUNTDOWN_SECONDS = 1;
 export const MAX_KDS_COMPLETION_COUNTDOWN_SECONDS = 30;

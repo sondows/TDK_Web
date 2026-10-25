@@ -113,26 +113,28 @@ test("a cooking completion request counts as unfinished until server confirmatio
   assert.equal(countKdsTablesByStatus(cards, "completed"), 1);
 });
 
-test("preparing hides confirmed items but keeps unfinished work and completed tab data", () => {
+test("preparing keeps completed context while current-session work remains", () => {
   const finished = task(1, 11, 7, "DONE");
   const waiting = task(2, 11, 7);
   const counting = { ...task(3, 11, 7, "COOKING"), completionRequestedAtMs: 123_000 };
   const otherFinished = task(4, 12, 7, "DONE");
   const cards = groupKdsTasksByParty([finished, waiting, counting, otherFinished]);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables.map(table => table.tasks.map(item => item.taskId)), [[2, 3]]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1, 2, 3]]);
   assert.deepEqual(cards[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1, 2, 3], [4]]);
   waiting.status = "DONE";
   waiting.completedAtMs = 2_100;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
   counting.status = "DONE";
   counting.completedAtMs = 2_200;
   assert.deepEqual(preparingKdsPartyCards(cards), []);
   const additional = { ...task(5, 11, 7), orderId: 13, orderedAtMs: 3_000 };
   cards[0].tables[0].tasks.push(additional);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [5]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5]);
+  assert.deepEqual(activeKdsTableTasks(preparingKdsPartyCards(cards)[0].tables[0].tasks)
+    .map(item => item.taskId), [5]);
   waiting.status = "COOKING";
   waiting.completedAtMs = null;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [2, 5]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5]);
   waiting.status = "DONE";
   waiting.completedAtMs = 3_100;
   additional.status = "DONE";
@@ -140,7 +142,7 @@ test("preparing hides confirmed items but keeps unfinished work and completed ta
   assert.deepEqual(preparingKdsPartyCards(cards), []);
   const nextAdditional = { ...task(6, 11, 7), orderId: 14, orderedAtMs: 4_000 };
   cards[0].tables[0].tasks.push(nextAdditional);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [6]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3, 5, 6]);
 });
 
 test("preparing keeps reopened work isolated by table session", () => {
@@ -152,15 +154,15 @@ test("preparing keeps reopened work isolated by table session", () => {
   assert.deepEqual(visible[0].tables[0].tasks.map(item => item.taskId), [2]);
 });
 
-test("additional orders keep earlier confirmed items only in the completed view", () => {
+test("additional orders show earlier completed items as context in preparing", () => {
   const finished = { ...task(1, 11, null, "DONE"), completedAtMs: 2_000 };
   const cooking = { ...task(2, 11, null, "COOKING"), completedAtMs: null };
   const additional = { ...task(3, 11, null), orderId: 12, orderedAtMs: 3_000 };
   const cards = groupKdsTasksByParty([finished, cooking, additional]);
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [2, 3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
   cooking.status = "DONE";
   cooking.completedAtMs = 4_000;
-  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [3]);
+  assert.deepEqual(preparingKdsPartyCards(cards)[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
   assert.deepEqual(cards[0].tables[0].tasks.map(item => item.taskId), [1, 2, 3]);
 });
 

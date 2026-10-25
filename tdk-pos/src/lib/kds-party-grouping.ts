@@ -66,10 +66,7 @@ export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[]): KdsPar
 
 export function preparingKdsPartyCards<T extends KdsPartyTask>(cards: KdsPartyCard<T>[]): KdsPartyCard<T>[] {
   return cards.flatMap(card => {
-    const tables = card.tables.flatMap(table => {
-      const tasks = table.tasks.filter(task => task.status !== "DONE" || task.cancelled);
-      return tasks.length ? [{ ...table, tasks }] : [];
-    });
+    const tables = card.tables.filter(table => table.tasks.some(task => task.status !== "DONE" || task.cancelled));
     return tables.length ? [{ ...card, tables }] : [];
   });
 }

@@ -9,7 +9,7 @@ require.extensions[".ts"] = (module, filename) => {
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   module._compile(output, filename);
 };
-const { inheritedPotSpicyChoice, synchronizePendingPotSpiciness, hasConsistentPotSpiciness, posPotKey } = require("./pos-pot-spiciness.ts");
+const { inheritedPotSpicyChoice, inheritedTableSpicyChoice, synchronizePendingPotSpiciness, hasConsistentPotSpiciness, posPotKey } = require("./pos-pot-spiciness.ts");
 
 const menus = [
   { menuId: 1, kdsKind: "POT", kdsGroupKey: "STEW" },
@@ -53,6 +53,13 @@ test("separate pots and separate pending orders do not inherit another taste", (
   assert.equal(inheritedPotSpicyChoice(menus[3], cart, menus, modifiers), null);
   assert.equal(inheritedPotSpicyChoice(menus[1], [], menus, modifiers), null);
   assert.equal(posPotKey(menus[4]), null);
+});
+
+test("new table stew inherits the current session's taste across separate pot keys", () => {
+  assert.equal(inheritedTableSpicyChoice(menus[3], [cartItem(1, 0)], menus, modifiers)?.modifierOptionId, 400);
+  assert.equal(inheritedTableSpicyChoice(menus[2], [cartItem(4, 2)], menus, modifiers)?.modifierOptionId, 302);
+  assert.equal(inheritedTableSpicyChoice(menus[4], [cartItem(1, 0)], menus, modifiers), null);
+  assert.equal(inheritedTableSpicyChoice(menus[3], [], menus, modifiers), null);
 });
 
 test("server-side order check accepts shared level zero and rejects mixed levels", () => {

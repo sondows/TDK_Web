@@ -1,13 +1,16 @@
 import { formatMoney } from "@/lib/format-money";
 import type { SummaryRow } from "@/lib/pos-order-summary-rows";
 
-export default function OrderSummaryRows({ items }: { items: SummaryRow[] }) {
+export default function OrderSummaryRows({ items, onOptionClick, canEditOption }: {
+  items: SummaryRow[]; onOptionClick?: (item: SummaryRow) => void; canEditOption?: (item: SummaryRow) => boolean;
+}) {
   const renderRow = (item: SummaryRow, component = false) => (
     <div className={`grid grid-cols-[minmax(0,1fr)_52px_76px_58px] gap-1 text-sm ${component ? "pl-3 text-slate-600" : ""}`} key={item.rowKey}>
       <span className="min-w-0 truncate font-medium" title={item.name}>
         {component && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
         {item.name}
-        {item.optionLabel && <small className="ml-1 text-[10px] font-normal text-slate-500">({item.optionLabel})</small>}
+        {item.optionLabel && (onOptionClick && canEditOption?.(item) ? <button className="ml-1 text-[10px] font-normal text-blue-700 underline-offset-2 hover:underline" onClick={() => onOptionClick(item)} type="button">({item.optionLabel})</button>
+          : <small className="ml-1 text-[10px] font-normal text-slate-500">({item.optionLabel})</small>)}
         {item.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
       </span>
       <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(item.itemType === "SERVICE" ? 0 : item.unitPrice)}</span>

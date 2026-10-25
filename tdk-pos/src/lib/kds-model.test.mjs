@@ -25,7 +25,7 @@ test("KDS waiting, elapsed, and active countdown numbers use their own colors", 
   assert.equal(kdsTimeNumberColor("WAITING", true), "#7C3AED");
   assert.equal(kdsTimeNumberColor("COOKING", false), "#2563EB");
   assert.equal(kdsTimeNumberColor("COOKING", true), "#7C3AED");
-  assert.equal(kdsTimeNumberColor("DONE", false), "#2563EB");
+  assert.equal(kdsTimeNumberColor("DONE", false), "#111827");
 });
 
 test("one persisted pot task keeps each stew's servings and real components once", () => {

@@ -8,6 +8,9 @@ import { salePlaceLabel } from "@/lib/sale-place-label";
 import { PIN_LENGTH } from "@/lib/pin";
 import type { TableFinancials } from "@/lib/table-session-financials";
 import { buildPartyOrderRows, type SummaryRow } from "@/lib/pos-order-summary-rows";
+import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
+import { getMenuChoice, type MenuChoiceModifier } from "@/lib/menu-choice-selection";
+import { spicyChoiceKey } from "@/lib/pos-pot-spiciness";
 import PaymentModal from "./PaymentModal";
 import CustomerSelectDialog, { type SelectedCustomer } from "./CustomerSelectDialog";
 import PosSubHeader from "./PosSubHeader";
@@ -190,6 +193,9 @@ export default function OrderSummaryPanel({
   physicalSessionIds,
   sessionTableNos,
   discounts,
+  menuModifiers,
+  potMenuIds,
+  onOptionSaved,
 }: {
   selected: Table | null;
   customerSelectOpen: boolean;
@@ -225,15 +231,37 @@ export default function OrderSummaryPanel({
   physicalSessionIds: number[];
   sessionTableNos: Record<number, string>;
   discounts: SessionDiscount[];
+  menuModifiers: Array<MenuChoiceModifier & { menuId: number; priceDelta: string }>;
+  potMenuIds: number[];
+  onOptionSaved: (sessionId: number, optionName: string, orderItemId: number) => void;
 }) {
+  type SpicyOverride = { optionId: number; optionName: string; groupId: number; previousOptionId: number | null };
+  const [spicyOverrides, setSpicyOverrides] = useState<Record<number, SpicyOverride>>({});
+  const [spicyEdit, setSpicyEdit] = useState<{
+    sourceOrderItemId: number; sessionId: number; selectionKey: string; title: string;
+    choices: Array<MenuChoiceModifier & { menuId: number; priceDelta: string }>;
+    selectedId: number;
+  } | null>(null);
+  const [spicyBusy, setSpicyBusy] = useState(false);
+  const [spicyError, setSpicyError] = useState<{ key: string; message: string } | null>(null);
+  const displayOrderDetails = orderDetails.map(order => ({ ...order, items: order.items.map(item => {
+    const override = spicyOverrides[item.orderItemId];
+    if (!override || !item.options.some(option => option.modifierOptionId === override.previousOptionId)) return item;
+    return { ...item, options: item.options.map(option => {
+      const configured = menuModifiers.find(choice => choice.menuId === item.menuId && choice.modifierOptionId === option.modifierOptionId);
+      return configured?.modifierGroupId === override.groupId
+        ? { ...option, modifierOptionId: override.optionId, optionName: override.optionName } : option;
+    }) };
+  }) }));
   const sessionId = selected?.sessionId ?? null,
     key = `${workspaceResetVersion}:${selectionVersion}:${sessionId ?? "none"}:${tab}`,
     [state, setState] = useState<CancelState>(() => empty(key));
   const c = state.key === key ? state : empty(key);
+  const activeSpicyEdit = spicyEdit?.selectionKey === key ? spicyEdit : null;
   const details =
     sessionId === null
       ? []
-      : orderDetails
+      : displayOrderDetails
           .filter((o) => o.sessionId === sessionId)
           .slice()
           .sort((a, b) => a.orderId - b.orderId);
@@ -276,10 +304,90 @@ export default function OrderSummaryPanel({
   const selectCustomer = (customer: SelectedCustomer | null) => {
     if (customerScopeKey !== null) setCustomersByScope(current => ({ ...current, [customerScopeKey]: customer }));
   };
-  const blockingUiOpen = paymentOpen || customerSelectOpen || c.confirm || c.reauth;
+  const blockingUiOpen = paymentOpen || customerSelectOpen || c.confirm || c.reauth || activeSpicyEdit !== null;
   useEffect(() => {
     onBlockingUiChange(blockingUiOpen);
   }, [blockingUiOpen, onBlockingUiChange]);
+  const spicyEditSource = (row: SummaryRow) => {
+    if (spicyBusy || sessionId === null) return null;
+    const tableRows = buildOrderSummaryRows(details.flatMap(order =>
+      order.items.map(item => ({ ...item, orderId: order.orderId }))));
+    const tableRow = tableRows.find(candidate => candidate.rowKey === row.rowKey);
+    if (!tableRow) return null;
+    const source = details.flatMap(order => order.items.map(item => ({ item, order })))
+      .find(entry => entry.item.orderItemId === tableRow.orderSequence.orderItemId);
+    if (!source || !["OPEN", "ACCEPTED"].includes(source.order.status) ||
+      source.item.status === "CANCELLED" || !potMenuIds.includes(source.item.menuId)) return null;
+    const choice = getMenuChoice(menuModifiers.filter(option => option.menuId === source.item.menuId));
+    if (!choice.options.length || !(choice.title === "매운맛" || choice.options.some(option => /^\s*\d+\s*[.번)].*(?:매운맛|순한맛|안매움)/.test(option.optionName)))) return null;
+    const current = source.item.options.find(option => choice.options.some(candidate => candidate.modifierOptionId === option.modifierOptionId));
+    if (!current?.modifierOptionId) return null;
+    return { source, choice, current };
+  };
+  const openSpicyEdit = async (row: SummaryRow) => {
+    const found = spicyEditSource(row);
+    if (!found || sessionId === null) return;
+    const { source, choice, current } = found;
+    const requestKey = key;
+    setSpicyError(null);
+    setSpicyBusy(true);
+    try {
+      const response = await fetch(`/api/table-sessions/${sessionId}/spiciness?sourceOrderItemId=${source.item.orderItemId}`, { cache: "no-store" });
+      const result = await response.json() as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "매운맛 변경 가능 여부를 확인하지 못했습니다.");
+      setSpicyEdit({ sourceOrderItemId: source.item.orderItemId, sessionId, selectionKey: requestKey,
+        title: choice.title.trim() || "옵션 변경", choices: choice.options, selectedId: current.modifierOptionId! });
+    } catch (error) {
+      setSpicyError({ key: requestKey, message: error instanceof Error ? error.message : "매운맛 변경 가능 여부를 확인하지 못했습니다." });
+    } finally { setSpicyBusy(false); }
+  };
+  const selectSpicy = async (selectedOption: MenuChoiceModifier & { menuId: number; priceDelta: string }) => {
+    const edit = activeSpicyEdit;
+    if (!edit || spicyBusy) return;
+    const requestKey = key;
+    setSpicyEdit(null);
+    if (selectedOption.modifierOptionId === edit.selectedId) return;
+    const previous = spicyOverrides;
+    const stage = spicyChoiceKey(selectedOption.optionName);
+    const projected = { ...previous };
+    for (const order of details) {
+      if (order.sessionId !== edit.sessionId || !["OPEN", "ACCEPTED"].includes(order.status)) continue;
+      for (const item of order.items) {
+        if (!potMenuIds.includes(item.menuId) || item.status === "CANCELLED" || item.status === "READY" || item.status === "SERVED") continue;
+        const choice = getMenuChoice(menuModifiers.filter(option => option.menuId === item.menuId));
+        const current = item.options.find(option => choice.options.some(candidate => candidate.modifierOptionId === option.modifierOptionId));
+        const next = choice.options.find(option => spicyChoiceKey(option.optionName) === stage);
+        if (current && next) projected[item.orderItemId] = { optionId: next.modifierOptionId,
+          optionName: next.optionName, groupId: next.modifierGroupId,
+          previousOptionId: previous[item.orderItemId]?.previousOptionId ?? current.modifierOptionId };
+      }
+    }
+    setSpicyOverrides(projected);
+    setSpicyBusy(true);
+    setSpicyError(null);
+    try {
+      const response = await fetch(`/api/table-sessions/${edit.sessionId}/spiciness`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceOrderItemId: edit.sourceOrderItemId, modifierOptionId: selectedOption.modifierOptionId }),
+      });
+      const result = await response.json() as { success?: boolean; message?: string;
+        changes?: Array<{ itemId: number; optionId: number; optionName: string }> };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "매운맛을 변경하지 못했습니다.");
+      const confirmed = { ...previous };
+      for (const change of result.changes ?? []) {
+        const configured = menuModifiers.find(option => option.modifierOptionId === change.optionId);
+        if (configured) confirmed[change.itemId] = { optionId: change.optionId,
+          optionName: change.optionName, groupId: configured.modifierGroupId,
+          previousOptionId: projected[change.itemId]?.previousOptionId ?? null };
+      }
+      setSpicyOverrides(confirmed);
+      onOptionSaved(edit.sessionId, selectedOption.optionName,
+        result.changes?.at(-1)?.itemId ?? edit.sourceOrderItemId);
+    } catch (error) {
+      setSpicyOverrides(previous);
+      setSpicyError({ key: requestKey, message: error instanceof Error ? error.message : "매운맛을 변경하지 못했습니다." });
+    } finally { setSpicyBusy(false); }
+  };
   useEffect(() => {
     const tick = () => setNow(Date.now());
     const frame = window.requestAnimationFrame(tick);
@@ -623,12 +731,17 @@ export default function OrderSummaryPanel({
         </div>
       </section>
     ) : null;
+  const displaySummaryItems = Object.keys(spicyOverrides).length
+    ? buildOrderSummaryRows(displayOrderDetails.filter(order => physicalSessionIds.includes(order.sessionId))
+      .flatMap(order => order.items.map(item => ({ ...item, orderId: order.orderId }))))
+    : items;
   const renderOrderContent = (viewTab: "summary" | "detail", readOnly = false) => (
     <div className={readOnly ? (viewTab === "summary" ? "py-3" : "py-2") : viewTab === "summary" ? "pos-order-content" : "pos-order-items-scroll min-h-0 flex-1 overflow-y-auto py-2"}>
       <div className={!readOnly && viewTab === "summary" ? "pos-order-items-scroll py-3" : ""}>
         {viewTab === "summary"
-          ? items.length
-            ? <OrderSummaryRows items={items} />
+          ? displaySummaryItems.length
+            ? <OrderSummaryRows items={displaySummaryItems} onOptionClick={!readOnly ? openSpicyEdit : undefined}
+                canEditOption={!readOnly ? row => spicyEditSource(row) !== null : undefined} />
             : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>
           : details.length
             ? readOnly ? renderDetailRows(true) : rows
@@ -663,10 +776,11 @@ export default function OrderSummaryPanel({
             type="button"
           >
             <i
-              className="absolute left-0 top-0 size-3 brightness-75 [clip-path:polygon(0_0,100%_0,0_100%)]"
+              aria-hidden="true"
+              className="pointer-events-none absolute left-0 top-0 size-4 rounded-br-[2rem] brightness-75"
               style={{ backgroundColor: styles[k].color }}
             />
-            {l}
+            <span className="relative">{l}</span>
           </button>
         ))}
       </nav>
@@ -842,6 +956,18 @@ export default function OrderSummaryPanel({
           tableNo={selected.sessionKind && selected.sessionKind !== "DINE_IN" ? "포장" : selected.tableNo}
         />
       )}
+      {spicyError?.key === key && <p className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-700" role="alert">{spicyError.message}</p>}
+      {activeSpicyEdit && <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/45 p-4" onClick={() => setSpicyEdit(null)}>
+        <section aria-modal="true" className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl" onClick={event => event.stopPropagation()} role="dialog">
+          <PosSubHeader backLabel="옵션 변경 닫기" onBack={() => setSpicyEdit(null)} title={activeSpicyEdit.title} />
+          <div className="grid gap-2 p-5" style={{ gridTemplateColumns: `repeat(${activeSpicyEdit.choices.length}, minmax(0, 1fr))` }}>
+            {activeSpicyEdit.choices.map(option => <button aria-pressed={option.modifierOptionId === activeSpicyEdit.selectedId}
+              className={`flex min-h-[78px] items-center justify-center rounded-lg px-2 text-xs font-bold ${option.modifierOptionId === activeSpicyEdit.selectedId
+                ? "border border-blue-600 bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}
+              key={option.modifierOptionId} onClick={() => void selectSpicy(option)} type="button">{option.optionName}</button>)}
+          </div>
+        </section>
+      </div>}
       {customerSelectOpen && selected?.sessionId && (
         <CustomerSelectDialog
           selected={selectedCustomer}

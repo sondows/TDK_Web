@@ -27,7 +27,7 @@ export function hasConsistentPotSpiciness(rows: Array<{ potKey: string; optionNa
 
 function spicyChoices(menuId: number, modifiers: ChoiceModifier[]) {
   const choice = getMenuChoice(modifiers.filter(modifier => modifier.menuId === menuId));
-  return choice.title === "매운맛" || choice.options.some(option => /^\s*\d+\s*[.번)]/.test(option.optionName))
+  return choice.title === "매운맛" || choice.options.some(option => /^\s*\d+\s*[.번)].*(?:매운맛|순한맛|안매움)/.test(option.optionName))
     ? choice.options : [];
 }
 
@@ -42,6 +42,21 @@ export function inheritedPotSpicyChoice<T extends PotMenu>(menu: T, cart: CartIt
   for (const item of cart) {
     const source = menus.find(candidate => candidate.menuId === item.menuId);
     if (posPotKey(source) !== key) continue;
+    const sourceChoices = spicyChoices(item.menuId, modifiers);
+    const selected = item.options?.find(option => sourceChoices.some(choice => choice.modifierOptionId === option.modifierOptionId));
+    if (selected) return matchingChoice(menu.menuId, selected.optionName, modifiers) ?? null;
+  }
+  return null;
+}
+
+/** The current physical table's most recent stew choice is the default for a new stew. */
+export function inheritedTableSpicyChoice<T extends PotMenu>(
+  menu: T, items: Array<{ menuId: number; options?: Array<{ modifierOptionId: number | null; optionName: string }> }>,
+  menus: T[], modifiers: ChoiceModifier[],
+) {
+  if (menu.kdsKind !== "POT") return null;
+  for (const item of items) {
+    if (menus.find(candidate => candidate.menuId === item.menuId)?.kdsKind !== "POT") continue;
     const sourceChoices = spicyChoices(item.menuId, modifiers);
     const selected = item.options?.find(option => sourceChoices.some(choice => choice.modifierOptionId === option.modifierOptionId));
     if (selected) return matchingChoice(menu.menuId, selected.optionName, modifiers) ?? null;
