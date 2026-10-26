@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerSummary } from "@/lib/customer";
 import { formatTradeBalance, tradeDescription, type CustomerTradeResponse, type CustomerTradeRow } from "@/lib/customer-trade";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid-sort";
 import CustomerTradeDetailModal from "./CustomerTradeDetailModal";
 import CustomerTradeEntryModal, { type TradeAction } from "./CustomerTradeEntryModal";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
@@ -41,6 +43,8 @@ function currentMonthRange() {
   return { start: `${today.slice(0, 7)}-01`, end: today };
 }
 
+type LedgerSortKey = "date" | "description" | "deposit" | "withdraw" | "balance";
+
 export default function CustomerTradeModal({ customer, onChanged, onClose }: {
   customer: CustomerSummary;
   onChanged: () => void;
@@ -62,6 +66,7 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sort, setSort] = useState<GridSortState<LedgerSortKey>>({ key: "date", direction: "desc" });
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -123,6 +128,12 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
           : null;
   const hiddenIds = new Set(hideCancelled ? hideableLedgerIds : []);
   const visibleEntries = entries.filter(entry => !hiddenIds.has(entry.ledgerId));
+  const sortedEntries = useMemo(() => sortGridRows(visibleEntries, sort,
+    { date: "date", description: "text", deposit: "number", withdraw: "number", balance: "number" },
+    (entry, key) => key === "date" ? entry.transactionAt : key === "description" ? tradeDescription(entry)
+      : key === "deposit" ? entry.amount > 0 ? entry.amount : null : key === "withdraw" ? entry.amount < 0 ? Math.abs(entry.amount) : null : entry.balance,
+  ), [visibleEntries, sort]);
+  const changeSort = (key: LedgerSortKey) => setSort(current => nextGridSort(current, key, key === "description" ? "asc" : "desc"));
 
   return (
     <dialog aria-labelledby="customer-trade-title" className={styles.customerTradeModal}
@@ -169,9 +180,15 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
         {error && <p className={styles.customerTradeError} role="alert">{error}</p>}
         <div className={styles.customerTradeTableScroll}>
           <table className={styles.customerTradeTable}>
-            <thead><tr><th>날짜/시간</th><th>내용</th><th>입금</th><th>출금</th><th>잔액</th></tr></thead>
+            <thead><tr>
+              <SortableHeader active={sort.key === "date"} direction={sort.direction} onClick={() => changeSort("date")}>날짜/시간</SortableHeader>
+              <SortableHeader active={sort.key === "description"} direction={sort.direction} onClick={() => changeSort("description")}>내용</SortableHeader>
+              <SortableHeader active={sort.key === "deposit"} direction={sort.direction} onClick={() => changeSort("deposit")}>입금</SortableHeader>
+              <SortableHeader active={sort.key === "withdraw"} direction={sort.direction} onClick={() => changeSort("withdraw")}>출금</SortableHeader>
+              <SortableHeader active={sort.key === "balance"} direction={sort.direction} onClick={() => changeSort("balance")}>잔액</SortableHeader>
+            </tr></thead>
             <tbody>
-              {loading || error || !visibleEntries.length ? <tr><td className={styles.customerTradeEmpty} colSpan={5}>{loading ? "거래내역을 불러오는 중입니다." : error || "표시할 거래내역이 없습니다."}</td></tr> : visibleEntries.map(entry => (
+              {loading || error || !visibleEntries.length ? <tr><td className={styles.customerTradeEmpty} colSpan={5}>{loading ? "거래내역을 불러오는 중입니다." : error || "표시할 거래내역이 없습니다."}</td></tr> : sortedEntries.map(entry => (
                 <tr aria-label={`${tradeTime(entry.transactionAt)} ${tradeDescription(entry)} 거래 상세 보기`}
                   className={styles.customerTradeRow} key={entry.ledgerId}
                   onClick={() => setSelectedLedgerId(entry.ledgerId)}

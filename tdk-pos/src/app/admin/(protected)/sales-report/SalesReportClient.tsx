@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SaleDetailDialog } from "@/app/pos/sales/SalesHistoryClient";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid-sort";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus } from "@/lib/sales-types";
 import { defaultSalesReportRange, salesReportPresets, type SalesReportPreset, type SalesReportRange } from "@/lib/sales-report-period";
 import admin from "../../admin.module.css";
@@ -52,6 +54,9 @@ const DAILY_COLUMN_WIDTHS = {
   guests: 100,
 } as const;
 type ReportColumn = keyof typeof COLUMN_WIDTHS;
+type SortColumn = "period" | "sales" | "salesDays" | "dailyAverage" | "saleCount" | "discount" | "customerAverage" | "tableAverage" | "duration" | "guests";
+type DetailSortColumn = "occurredAt" | "tableLabel" | "amount" | "paymentMethods" | "status";
+const reportSortTypes = { period: "date", sales: "number", salesDays: "number", dailyAverage: "number", saleCount: "number", discount: "number", customerAverage: "number", tableAverage: "number", duration: "number", guests: "number" } as const;
 const summaryColumns: ReportColumn[] = ["period", "sales", "salesDays", "dailyAverage", "saleCount", "discount", "customerAverage", "tableAverage", "duration", "guests"];
 const dailyColumns: ReportColumn[] = summaryColumns.filter(column => column !== "salesDays" && column !== "dailyAverage");
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -74,6 +79,8 @@ export default function SalesReportClient() {
   const [report, setReport] = useState<Report | null>(null);
   const [details, setDetails] = useState<Details | null>(null);
   const [page, setPage] = useState(1);
+  const [reportSort, setReportSort] = useState<GridSortState<SortColumn>>({ key: "period", direction: "desc" });
+  const [detailSort, setDetailSort] = useState<GridSortState<DetailSortColumn>>({ key: "occurredAt", direction: "desc" });
   const [sale, setSale] = useState<SaleDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -126,7 +133,7 @@ export default function SalesReportClient() {
   useEffect(() => {
     if (view !== "detail" || !validRange) return;
     const controller = new AbortController();
-    const query = new URLSearchParams({ startDate, endDate, page: String(page) });
+    const query = new URLSearchParams({ startDate, endDate, page: String(page), sortBy: detailSort.key, sortDirection: detailSort.direction });
     fetch(`/api/admin/sales-report/details?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const body = await response.json() as Details;
@@ -136,7 +143,7 @@ export default function SalesReportClient() {
       .catch(cause => { if (!controller.signal.aborted) setDetailError(cause instanceof Error ? cause.message : "판매건 목록을 불러오지 못했습니다."); })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
-  }, [view, startDate, endDate, page, validRange]);
+  }, [view, startDate, endDate, page, validRange, detailSort]);
 
   const updateRange = (start: string, end: string, target: View = view, preset?: SalesReportPreset["id"]) => {
     setRanges(current => ({ ...current, [target]: { startDate: start, endDate: end } }));
@@ -163,6 +170,25 @@ export default function SalesReportClient() {
   const drillDay = (date: string) => { updateRange(date, date, "detail"); setView("detail"); };
   const showSalesDays = view === "yearly" || view === "monthly";
   const visibleColumns = showSalesDays ? summaryColumns : dailyColumns;
+  const sortedReportRows = useMemo(() => {
+    const rows = sortGridRows(report?.rows ?? [], reportSort, reportSortTypes, (row, key) => {
+      if (key === "period") return row.date;
+      if (key === "sales") return row.salesAmount;
+      if (key === "salesDays") return row.salesDayCount;
+      if (key === "dailyAverage") return row.dailySalesAverage;
+      if (key === "saleCount") return row.saleCount;
+      if (key === "discount") return row.discountAmount;
+      if (key === "customerAverage") return row.customerAverage;
+      if (key === "tableAverage") return row.tableAverage;
+      if (key === "duration") return row.durationMinutes;
+      return row.tableGuestAverage;
+    });
+    // Today is still accumulating. Keep its partial row visible, but after the newest completed day.
+    if (view === "daily" && reportSort.key === "period" && reportSort.direction === "desc") {
+      return [...rows.filter(row => row.date !== today), ...rows.filter(row => row.date === today)];
+    }
+    return rows;
+  }, [report?.rows, reportSort, view, today]);
   const columnWidths: Record<ReportColumn, number> = {
     ...COLUMN_WIDTHS,
     ...(view === "monthly" ? { period: 130 } : {}),
@@ -170,6 +196,11 @@ export default function SalesReportClient() {
   };
   const reportTableWidth = visibleColumns.reduce((total, column) => total + columnWidths[column], 0);
   const detailTableWidth = Object.values(DETAIL_COLUMN_WIDTHS).reduce((total, width) => total + width, 0) + DETAIL_COLUMN_GAP;
+  const sortReport = (key: SortColumn) => setReportSort(current => nextGridSort(current, key, key === "period" || key === "sales" || reportSortTypes[key] === "number" ? "desc" : "asc"));
+  const sortDetails = (key: DetailSortColumn) => {
+    setPage(1); setDetails(null); setDetailLoading(true);
+    setDetailSort(current => nextGridSort(current, key, key === "occurredAt" || key === "amount" ? "desc" : "asc"));
+  };
   const totals = report?.totals;
   const summary = [
     ["총매출", totals ? `${amount(totals.salesAmount)}원 (${amount(totals.saleCount)}건)` : "-"],
@@ -210,7 +241,15 @@ export default function SalesReportClient() {
       {detailError && <p className={styles.error} role="alert">{detailError}</p>}
       <div className={styles.tableScroll}><table className={`${styles.table} ${styles.detailTable}`} style={{ minWidth: detailTableWidth }}>
         <colgroup><col style={{ width: DETAIL_COLUMN_WIDTHS.occurredAt }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.tableLabel }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.amount }} /><col style={{ width: DETAIL_COLUMN_GAP }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.paymentMethods }} /><col style={{ width: DETAIL_COLUMN_WIDTHS.status }} /><col /></colgroup>
-        <thead><tr><th className={styles.dateCell}>일시</th><th className={styles.dateCell}>테이블/구분</th><th>금액</th><th className={styles.detailGapCell}></th><th className={styles.dateCell}>결제수단</th><th className={styles.dateCell}>상태</th><th className={styles.trailingSpaceHeader}></th></tr></thead>
+        <thead><tr>
+          <SortableHeader active={detailSort.key === "occurredAt"} className={styles.dateCell} direction={detailSort.direction} onClick={() => sortDetails("occurredAt")}>일시</SortableHeader>
+          <SortableHeader active={detailSort.key === "tableLabel"} className={styles.dateCell} direction={detailSort.direction} onClick={() => sortDetails("tableLabel")}>테이블/구분</SortableHeader>
+          <SortableHeader active={detailSort.key === "amount"} direction={detailSort.direction} onClick={() => sortDetails("amount")}>금액</SortableHeader>
+          <th className={styles.detailGapCell}></th>
+          <SortableHeader active={detailSort.key === "paymentMethods"} className={styles.dateCell} direction={detailSort.direction} onClick={() => sortDetails("paymentMethods")}>결제수단</SortableHeader>
+          <SortableHeader active={detailSort.key === "status"} className={styles.dateCell} direction={detailSort.direction} onClick={() => sortDetails("status")}>상태</SortableHeader>
+          <th className={styles.trailingSpaceHeader}></th>
+        </tr></thead>
         <tbody>{details?.rows.map(row => <tr className={styles.clickable} key={row.checkoutId} onClick={() => void openDetail(row.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(row.checkoutId); } }} role="button" tabIndex={0}><td className={styles.dateCell}>{row.occurredAt.slice(0, 16).replace("T", " ")}</td><td className={styles.dateCell}>{row.tableLabel}</td><td className={styles.mainAmount}>{amount(row.salesAmount)}</td><td className={styles.detailGapCell}></td><td className={styles.dateCell}>{row.paymentMethods}</td><td className={styles.dateCell}>{statusName[row.status]}</td><td className={styles.trailingSpaceCell}></td></tr>)}</tbody></table>
         {detailLoading && <p className={styles.empty}>불러오는 중...</p>}
         {!detailLoading && !details?.rows.length && <p className={styles.empty}>표시할 TDK-POS 판매건이 없습니다.</p>}
@@ -218,8 +257,19 @@ export default function SalesReportClient() {
       {details && details.totalCount > details.pageSize && <div className={styles.pagination}><button disabled={page <= 1 || detailLoading} onClick={() => { setPage(value => value - 1); setDetails(null); setDetailLoading(true); }} type="button">이전</button><span>{page} / {Math.ceil(details.totalCount / details.pageSize)}</span><button disabled={page * details.pageSize >= details.totalCount || detailLoading} onClick={() => { setPage(value => value + 1); setDetails(null); setDetailLoading(true); }} type="button">다음</button></div>}
     </> : <div className={styles.tableScroll}><table className={`${styles.table} ${styles.reportTable}`} style={{ minWidth: reportTableWidth }}>
       <colgroup>{visibleColumns.map(column => <col key={column} style={{ width: columnWidths[column] }} />)}<col /></colgroup>
-      <thead><tr><th className={styles.dateCell}>{view === "yearly" ? "연도" : view === "monthly" ? "월" : "날짜"}</th><th>매출</th>{showSalesDays && <><th>영업일수</th><th>일매출평균</th></>}<th>판매건수</th><th>할인</th><th>객단가</th><th>테이블단가</th><th>평균 이용시간</th><th>평균 인원</th><th className={styles.trailingSpaceHeader}></th></tr></thead>
-      <tbody>{report?.rows.map(row => <tr className={view === "daily" ? styles.clickable : ""} key={row.date} onClick={view === "daily" ? () => drillDay(row.date) : undefined} onKeyDown={view === "daily" ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); drillDay(row.date); } } : undefined} role={view === "daily" ? "button" : undefined} tabIndex={view === "daily" ? 0 : undefined}><th className={styles.dateCell}>{view === "daily" ? dailyDateLabel(row.date) : row.label}</th><td className={styles.mainAmount}>{amount(row.salesAmount)}</td>{showSalesDays && <><td>{amount(row.salesDayCount)}일</td><td>{row.dailySalesAverage == null ? "-" : `${amount(row.dailySalesAverage)}원`}</td></>}<td>{amount(row.saleCount)}</td><td>{amount(row.discountAmount)}</td><td>{amount(row.customerAverage)}</td><td>{amount(row.tableAverage)}</td><td>{amount(row.durationMinutes)}</td><td>{row.tableGuestAverage == null ? "-" : row.tableGuestAverage.toFixed(1)}</td><td className={styles.trailingSpaceCell}></td></tr>)}</tbody>
+      <thead><tr>
+        <SortableHeader active={reportSort.key === "period"} className={styles.dateCell} direction={reportSort.direction} onClick={() => sortReport("period")}>{view === "yearly" ? "연도" : view === "monthly" ? "월" : "날짜"}</SortableHeader>
+        <SortableHeader active={reportSort.key === "sales"} direction={reportSort.direction} onClick={() => sortReport("sales")}>매출</SortableHeader>
+        {showSalesDays && <><SortableHeader active={reportSort.key === "salesDays"} direction={reportSort.direction} onClick={() => sortReport("salesDays")}>영업일수</SortableHeader><SortableHeader active={reportSort.key === "dailyAverage"} direction={reportSort.direction} onClick={() => sortReport("dailyAverage")}>일매출평균</SortableHeader></>}
+        <SortableHeader active={reportSort.key === "saleCount"} direction={reportSort.direction} onClick={() => sortReport("saleCount")}>판매건수</SortableHeader>
+        <SortableHeader active={reportSort.key === "discount"} direction={reportSort.direction} onClick={() => sortReport("discount")}>할인</SortableHeader>
+        <SortableHeader active={reportSort.key === "customerAverage"} direction={reportSort.direction} onClick={() => sortReport("customerAverage")}>객단가</SortableHeader>
+        <SortableHeader active={reportSort.key === "tableAverage"} direction={reportSort.direction} onClick={() => sortReport("tableAverage")}>테이블단가</SortableHeader>
+        <SortableHeader active={reportSort.key === "duration"} direction={reportSort.direction} onClick={() => sortReport("duration")}>평균 이용시간</SortableHeader>
+        <SortableHeader active={reportSort.key === "guests"} direction={reportSort.direction} onClick={() => sortReport("guests")}>평균 인원</SortableHeader>
+        <th className={styles.trailingSpaceHeader}></th>
+      </tr></thead>
+      <tbody>{sortedReportRows.map(row => <tr className={view === "daily" ? styles.clickable : ""} key={row.date} onClick={view === "daily" ? () => drillDay(row.date) : undefined} onKeyDown={view === "daily" ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); drillDay(row.date); } } : undefined} role={view === "daily" ? "button" : undefined} tabIndex={view === "daily" ? 0 : undefined}><th className={styles.dateCell}>{view === "daily" ? dailyDateLabel(row.date) : row.label}</th><td className={styles.mainAmount}>{amount(row.salesAmount)}</td>{showSalesDays && <><td>{amount(row.salesDayCount)}일</td><td>{row.dailySalesAverage == null ? "-" : `${amount(row.dailySalesAverage)}원`}</td></>}<td>{amount(row.saleCount)}</td><td>{amount(row.discountAmount)}</td><td>{amount(row.customerAverage)}</td><td>{amount(row.tableAverage)}</td><td>{amount(row.durationMinutes)}</td><td>{row.tableGuestAverage == null ? "-" : row.tableGuestAverage.toFixed(1)}</td><td className={styles.trailingSpaceCell}></td></tr>)}</tbody>
       {totals && <tfoot><tr><th className={styles.dateCell}>합계</th><td>{amount(totals.salesAmount)}</td>{showSalesDays && <><td>{amount(totals.salesDayCount)}일</td><td>{totals.dailySalesAverage == null ? "-" : `${amount(totals.dailySalesAverage)}원`}</td></>}<td>{amount(totals.saleCount)}</td><td>{amount(totals.discountAmount)}</td><td>{amount(totals.customerAverage)}</td><td>{amount(totals.tableAverage)}</td><td>{amount(totals.durationMinutes)}</td><td>{totals.tableGuestAverage == null ? "-" : totals.tableGuestAverage.toFixed(1)}</td><td className={styles.trailingSpaceCell}></td></tr></tfoot>}
       </table>{loading && <p className={styles.empty}>불러오는 중...</p>}</div>}
     {sale && <SaleDetailDialog close={() => setSale(null)} sale={sale} />}

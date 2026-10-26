@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
 import { aggregateSalesDisplayItems, salesItemAggregationKey } from "@/lib/sales-item-aggregation";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid-sort";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import PosSubHeader from "@/app/pos/PosSubHeader";
 import styles from "./admin.module.css";
@@ -13,6 +15,7 @@ type PaymentMethodOption = { paymentMethodId: number; methodName: string; method
 type CorrectionCustomer = { customerId: number; displayName: string };
 type DashboardResponse = { success: boolean; date?: string; summary?: Summary; sales?: SaleListItem[]; availableMethods?: PaymentMethodOption[]; customerPaymentMethodId?: number | null; correctionCustomers?: CorrectionCustomer[]; message?: string };
 type PaymentOptionsResponse = Pick<DashboardResponse, "success" | "availableMethods" | "customerPaymentMethodId" | "correctionCustomers" | "message">;
+type SaleSortKey = "occurredAt" | "tableLabel" | "menuSummary" | "amount" | "paymentMethods" | "status";
 const money = (value: number) => Math.round(value).toLocaleString("ko-KR");
 const labels: Record<SaleDisplayStatus, string> = { COMPLETED: "결제완료", PARTIALLY_CANCELLED: "일부취소", CANCELLED: "전체취소", IN_PROGRESS: "진행중" };
 const dateTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
@@ -30,6 +33,9 @@ export default function AdminDashboard() {
   const [selectedMethodId, setSelectedMethodId] = useState<number | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [correctionError, setCorrectionError] = useState("");
+  const [salesSort, setSalesSort] = useState<GridSortState<SaleSortKey>>({ key: "occurredAt", direction: "desc" });
+  const [aggregateSort, setAggregateSort] = useState<GridSortState<"name" | "unitPrice" | "qty" | "amount">>({ key: "name", direction: "asc" });
+  const [originalSort, setOriginalSort] = useState<GridSortState<"name" | "qty" | "amount">>({ key: "name", direction: "asc" });
   const detailDialog = useRef<HTMLDialogElement>(null);
   const confirmDialog = useRef<HTMLDialogElement>(null);
   const methodDialog = useRef<HTMLDialogElement>(null);
@@ -46,6 +52,22 @@ export default function AdminDashboard() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  const sortedSales = useMemo(() => sortGridRows(data?.sales ?? [], salesSort,
+    { occurredAt: "date", tableLabel: "text", menuSummary: "text", amount: "number", paymentMethods: "text", status: "text" },
+    (sale, key) => key === "occurredAt" ? sale.occurredAt : key === "tableLabel" ? sale.tableLabel : key === "menuSummary" ? sale.menuSummary
+      : key === "amount" ? sale.totalAmount : key === "paymentMethods" ? sale.paymentMethods : labels[sale.status],
+  ), [data?.sales, salesSort]);
+  const aggregateItems = useMemo(() => detail ? aggregateSalesDisplayItems(detail.items) : [], [detail]);
+  const sortedAggregateItems = useMemo(() => sortGridRows(aggregateItems, aggregateSort,
+    { name: "text", unitPrice: "number", qty: "number", amount: "number" },
+    (item, key) => key === "name" ? item.itemName : key === "unitPrice" ? item.unitPrice : key === "qty" ? item.qty : item.amount,
+  ), [aggregateItems, aggregateSort]);
+  const sortedOriginalItems = useMemo(() => sortGridRows(detail?.items ?? [], originalSort,
+    { name: "text", qty: "number", amount: "number" },
+    (item, key) => key === "name" ? item.itemName : key === "qty" ? item.qty : item.amount,
+  ), [detail?.items, originalSort]);
+  const changeSalesSort = (key: SaleSortKey) => setSalesSort(current => nextGridSort(current, key, key === "occurredAt" || key === "amount" ? "desc" : "asc"));
 
   const openDetail = async (checkoutId: number) => {
     if (busy) return;
@@ -142,13 +164,19 @@ export default function AdminDashboard() {
     </section>
     <section className={styles.dashboardSales} aria-labelledby="today-sales-title">
       <div className={styles.dashboardSalesHeading}><h2 id="today-sales-title">오늘 판매내역</h2><span>{data?.date ?? ""}</span></div>
-      <div className={`${styles.customerTableScroll} ${styles.dashboardSalesTableWrap}`}><table className={`${styles.customerTable} ${styles.dashboardSalesTable}`}><thead><tr><th>시간</th><th>테이블</th><th>메뉴</th><th>결제금액</th><th>결제수단</th><th>거래상태</th></tr></thead>
-        <tbody>{!loading && !data?.sales?.length ? <tr><td colSpan={6} className={styles.customerEmpty}>오늘 판매내역이 없습니다.</td></tr> : data?.sales?.map(sale =>
+      <div className={`${styles.customerTableScroll} ${styles.dashboardSalesTableWrap}`}><table className={`${styles.customerTable} ${styles.dashboardSalesTable}`}><thead><tr>
+        <SortableHeader active={salesSort.key === "occurredAt"} direction={salesSort.direction} onClick={() => changeSalesSort("occurredAt")}>시간</SortableHeader>
+        <SortableHeader active={salesSort.key === "tableLabel"} direction={salesSort.direction} onClick={() => changeSalesSort("tableLabel")}>테이블</SortableHeader>
+        <SortableHeader active={salesSort.key === "menuSummary"} direction={salesSort.direction} onClick={() => changeSalesSort("menuSummary")}>메뉴</SortableHeader>
+        <SortableHeader active={salesSort.key === "amount"} direction={salesSort.direction} onClick={() => changeSalesSort("amount")}>결제금액</SortableHeader>
+        <SortableHeader active={salesSort.key === "paymentMethods"} direction={salesSort.direction} onClick={() => changeSalesSort("paymentMethods")}>결제수단</SortableHeader>
+        <SortableHeader active={salesSort.key === "status"} direction={salesSort.direction} onClick={() => changeSalesSort("status")}>거래상태</SortableHeader></tr></thead>
+        <tbody>{!loading && !data?.sales?.length ? <tr><td colSpan={6} className={styles.customerEmpty}>오늘 판매내역이 없습니다.</td></tr> : sortedSales.map(sale =>
           <tr key={sale.checkoutId} className={styles.dashboardSaleRow} onClick={() => void openDetail(sale.checkoutId)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); void openDetail(sale.checkoutId); } }} role="button" tabIndex={0} aria-label={`${sale.tableLabel} ${sale.menuSummary} 거래 상세 보기`}>
             <td>{clockTime(sale.occurredAt)}</td><td>{sale.tableLabel}</td><td>{sale.menuSummary.replace(/ 외 (\d+)건$/, " 외 $1")}</td><td>{money(sale.totalAmount)}</td><td>{sale.paymentMethods}</td><td>{labels[sale.status]}</td>
           </tr>)}</tbody></table></div>
       <div className={styles.dashboardMobileSales} aria-label="오늘 판매내역 목록">
-        {!loading && !data?.sales?.length ? <p className={styles.dashboardMobileEmpty}>오늘 판매내역이 없습니다.</p> : data?.sales?.map(sale => <button type="button" key={sale.checkoutId} className={styles.dashboardSaleCard} onClick={() => void openDetail(sale.checkoutId)} aria-label={`${sale.tableLabel}, ${sale.menuSummary}, ${labels[sale.status]} 거래 상세 보기`}>
+        {!loading && !data?.sales?.length ? <p className={styles.dashboardMobileEmpty}>오늘 판매내역이 없습니다.</p> : sortedSales.map(sale => <button type="button" key={sale.checkoutId} className={styles.dashboardSaleCard} onClick={() => void openDetail(sale.checkoutId)} aria-label={`${sale.tableLabel}, ${sale.menuSummary}, ${labels[sale.status]} 거래 상세 보기`}>
           <span className={styles.dashboardSaleCardTop}><time>{clockTime(sale.occurredAt)}</time><span>{labels[sale.status]}</span></span>
           <strong className={styles.dashboardSalePlace}>{sale.tableLabel}</strong>
           <span className={styles.dashboardSaleMenu}>{sale.menuSummary.replace(/ 외 (\d+)건$/, " 외 $1")}</span>
@@ -160,8 +188,17 @@ export default function AdminDashboard() {
       {detail && <><PosSubHeader backLabel="판매내역으로 돌아가기" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={readOnly ? null : <button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
         <div className={styles.dashboardDetailBody}>
           <dl className={styles.dashboardFacts}><div><dt>테이블</dt><dd>{detail.tableLabel}</dd></div><div><dt>주문시간</dt><dd>{dateTime(detail.orderedAt)}</dd></div><div><dt>결제상태</dt><dd>{labels[detail.displayStatus]}</dd></div></dl>
-          <h3>합산 메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>단가</th><th>수량</th><th>금액</th></tr></thead><tbody>{aggregateSalesDisplayItems(detail.items).map(item => <tr key={salesItemAggregationKey(item.menuId, item.unitPrice)}><td>{item.itemName}</td><td>{money(item.unitPrice)}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
-          <h3>주문별 원본 항목</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr><th>메뉴명</th><th>수량</th><th>금액</th></tr></thead><tbody>{detail.items.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
+          <h3>합산 메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr>
+            <SortableHeader active={aggregateSort.key === "name"} direction={aggregateSort.direction} onClick={() => setAggregateSort(current => nextGridSort(current, "name", "asc"))}>메뉴명</SortableHeader>
+            <SortableHeader active={aggregateSort.key === "unitPrice"} direction={aggregateSort.direction} onClick={() => setAggregateSort(current => nextGridSort(current, "unitPrice", "desc"))}>단가</SortableHeader>
+            <SortableHeader active={aggregateSort.key === "qty"} direction={aggregateSort.direction} onClick={() => setAggregateSort(current => nextGridSort(current, "qty", "desc"))}>수량</SortableHeader>
+            <SortableHeader active={aggregateSort.key === "amount"} direction={aggregateSort.direction} onClick={() => setAggregateSort(current => nextGridSort(current, "amount", "desc"))}>금액</SortableHeader>
+          </tr></thead><tbody>{sortedAggregateItems.map(item => <tr key={salesItemAggregationKey(item.menuId, item.unitPrice)}><td>{item.itemName}</td><td>{money(item.unitPrice)}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
+          <h3>주문별 원본 항목</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr>
+            <SortableHeader active={originalSort.key === "name"} direction={originalSort.direction} onClick={() => setOriginalSort(current => nextGridSort(current, "name", "asc"))}>메뉴명</SortableHeader>
+            <SortableHeader active={originalSort.key === "qty"} direction={originalSort.direction} onClick={() => setOriginalSort(current => nextGridSort(current, "qty", "desc"))}>수량</SortableHeader>
+            <SortableHeader active={originalSort.key === "amount"} direction={originalSort.direction} onClick={() => setOriginalSort(current => nextGridSort(current, "amount", "desc"))}>금액</SortableHeader>
+          </tr></thead><tbody>{sortedOriginalItems.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
           <dl className={styles.dashboardAmounts}><div><dt>주문금액</dt><dd>{money(detail.subtotalAmount)}</dd></div>{detail.discounts.map((discount, index) => <div key={index}><dt>{discount.label}</dt><dd>-{money(discount.amount)}</dd></div>)}{detail.discountAmount > 0 && <div><dt>할인금액</dt><dd>-{money(detail.discountAmount)}</dd></div>}<div><dt>최종 결제금액</dt><dd>{money(detail.totalAmount)}</dd></div></dl>
           <h3>결제수단</h3><div className={styles.dashboardPayments}>{detail.payments.map(payment => <div key={payment.paymentId}><span>{payment.method}{payment.customerDisplayName ? `(${payment.customerDisplayName})` : ""} · {payment.status === "APPROVED" ? "결제완료" : "취소"}</span><strong>{money(payment.appliedAmount)}</strong>{!readOnly && payment.status === "APPROVED" && <button type="button" className={styles.staffEditButton} disabled={busy} onClick={() => void openMethodEditor(payment.paymentId, payment.paymentMethodId)}>수정</button>}</div>)}</div>
         </div></>}

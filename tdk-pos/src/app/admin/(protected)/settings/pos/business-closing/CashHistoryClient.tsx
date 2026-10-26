@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { CASH_DENOMINATIONS, type CashOpeningFund } from "@/lib/cash-opening-fund";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, type GridSortState } from "@/lib/admin-grid-sort";
 import reportStyles from "../../../sales-report/sales-report.module.css";
 import closingStyles from "../../../business-closings/business-closings.module.css";
 
@@ -12,6 +14,7 @@ type CashEvent = {
   fund: CashOpeningFund | null;
 };
 type HistoryResult = { success?: boolean; message?: string; rows?: CashEvent[]; total?: number; page?: number; pageSize?: number };
+type CashSortColumn = "occurredAt" | "type" | "amount" | "expectedCash" | "actualCash" | "difference";
 
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
@@ -29,6 +32,7 @@ export default function CashHistoryClient() {
   const [rows, setRows] = useState<CashEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(20);
+  const [sort, setSort] = useState<GridSortState<CashSortColumn>>({ key: "occurredAt", direction: "desc" });
   const [selected, setSelected] = useState<CashEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -38,7 +42,7 @@ export default function CashHistoryClient() {
     async function load() {
       setLoading(true); setError("");
       try {
-        const params = new URLSearchParams({ from: query.from, to: query.to, page: String(query.page) });
+        const params = new URLSearchParams({ from: query.from, to: query.to, page: String(query.page), sortBy: sort.key, sortDirection: sort.direction });
         const response = await fetch(`/api/admin/cash-history?${params}`, { cache: "no-store", signal: controller.signal });
         const result = await response.json() as HistoryResult;
         if (!response.ok || !result.success) throw new Error(result.message ?? "시재 내역을 불러오지 못했습니다.");
@@ -51,9 +55,13 @@ export default function CashHistoryClient() {
     }
     void load();
     return () => controller.abort();
-  }, [query]);
+  }, [query, sort]);
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  const changeSort = (key: CashSortColumn) => {
+    setQuery(current => ({ ...current, page: 1 }));
+    setSort(current => nextGridSort(current, key, key === "occurredAt" || key !== "type" ? "desc" : "asc"));
+  };
   const line = (label: string, value: string) => <div className={closingStyles.detailLine}><span>{label}</span><strong>{value}</strong></div>;
 
   return <section className="mt-8">
@@ -76,7 +84,14 @@ export default function CashHistoryClient() {
       ? <p className={closingStyles.empty}>시재 내역이 없습니다.</p>
       : <div className={reportStyles.tableScroll}>
         <table className={reportStyles.table}>
-          <thead><tr><th className={reportStyles.dateCell}>일시</th><th className={reportStyles.dateCell}>항목</th><th>금액</th><th>예상 시재</th><th>실제 시재</th><th>오차</th></tr></thead>
+          <thead><tr>
+            <SortableHeader active={sort.key === "occurredAt"} className={reportStyles.dateCell} direction={sort.direction} onClick={() => changeSort("occurredAt")}>일시</SortableHeader>
+            <SortableHeader active={sort.key === "type"} className={reportStyles.dateCell} direction={sort.direction} onClick={() => changeSort("type")}>항목</SortableHeader>
+            <SortableHeader active={sort.key === "amount"} direction={sort.direction} onClick={() => changeSort("amount")}>금액</SortableHeader>
+            <SortableHeader active={sort.key === "expectedCash"} direction={sort.direction} onClick={() => changeSort("expectedCash")}>예상 시재</SortableHeader>
+            <SortableHeader active={sort.key === "actualCash"} direction={sort.direction} onClick={() => changeSort("actualCash")}>실제 시재</SortableHeader>
+            <SortableHeader active={sort.key === "difference"} direction={sort.direction} onClick={() => changeSort("difference")}>오차</SortableHeader>
+          </tr></thead>
           <tbody>{rows.map(row => <tr className={`${reportStyles.clickable} focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-slate-600`} key={row.id}
             onClick={() => setSelected(row)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(row); } }} tabIndex={0}>
             <td className={reportStyles.dateCell}>{occurred(row.occurredAt)}</td>

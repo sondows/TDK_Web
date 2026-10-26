@@ -1,10 +1,18 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { CustomerSummary } from "@/lib/customer";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, sortGridRows, type GridSortDirection, type GridSortState } from "@/lib/admin-grid-sort";
 import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 const columns = ["이름", "전화", "이메일", "거래잔액", "거래관리", "수정"];
+type CustomerSortKey = "name" | "phone" | "email" | "balance";
 const emptyValue = "—";
+const customerLabelValue = (customer: CustomerSummary) => {
+  const name = customer.name?.trim() ?? "";
+  const contact = customer.contactName?.trim() ?? "";
+  return name ? contact ? `${name} (${contact})` : name : customer.phone ?? "";
+};
 
 export default function CustomerList({
   customers,
@@ -30,6 +38,7 @@ export default function CustomerList({
   const [draggingCustomerId, setDraggingCustomerId] = useState<number | null>(null);
   const [dropHint, setDropHint] = useState<{ customerId: number; before: boolean } | null>(null);
   const [orderError, setOrderError] = useState("");
+  const [sort, setSort] = useState<GridSortState<CustomerSortKey> | null>(null);
   const orderedRef = useRef(orderedCustomers);
   const pointerRef = useRef<{ pointerId: number; customerId: number } | null>(null);
   const didMoveRef = useRef(false);
@@ -102,6 +111,12 @@ export default function CustomerList({
   const emptyMessage = loading
     ? "고객 목록을 불러오는 중입니다."
     : error || (search.trim() ? "검색 결과가 없습니다." : "등록된 고객이 없습니다.");
+  const displayCustomers = useMemo(() => sort ? sortGridRows(orderedCustomers, sort,
+    { name: "text", phone: "text", email: "text", balance: "number" },
+    (customer, key) => key === "name" ? customerLabelValue(customer) : key === "phone" ? customer.phone : key === "email" ? customer.email : customer.tradeBalance,
+  ) : orderedCustomers, [orderedCustomers, sort]);
+  const toggleSort = (key: CustomerSortKey) => setSort(current => current ? nextGridSort(current, key, key === "balance" ? "desc" : "asc") : { key, direction: key === "balance" ? "desc" : "asc" });
+  const sortDirection = (key: CustomerSortKey): GridSortDirection => sort?.key === key ? sort.direction : "desc";
 
   return (
     <div className={styles.customerTableScroll}>
@@ -118,14 +133,20 @@ export default function CustomerList({
           <col />
         </colgroup>
         <thead>
-          <tr><th aria-label="순서" />{columns.map(column => <th key={column}>{column}</th>)}<th aria-hidden="true" /></tr>
+          <tr><th aria-label="순서" />
+            <SortableHeader active={sort?.key === "name"} direction={sortDirection("name")} onClick={() => toggleSort("name")}>{columns[0]}</SortableHeader>
+            <SortableHeader active={sort?.key === "phone"} direction={sortDirection("phone")} onClick={() => toggleSort("phone")}>{columns[1]}</SortableHeader>
+            <SortableHeader active={sort?.key === "email"} direction={sortDirection("email")} onClick={() => toggleSort("email")}>{columns[2]}</SortableHeader>
+            <SortableHeader active={sort?.key === "balance"} direction={sortDirection("balance")} onClick={() => toggleSort("balance")}>{columns[3]}</SortableHeader>
+            <th>{columns[4]}</th><th>{columns[5]}</th><th aria-hidden="true" />
+          </tr>
         </thead>
         <tbody>
           {loading || error || customers.length === 0 ? (
             <tr>
               <td className={styles.customerEmpty} colSpan={columns.length + 2}>{emptyMessage}</td>
             </tr>
-          ) : orderedCustomers.map(customer => {
+          ) : displayCustomers.map(customer => {
             const name = customer.name?.trim() ?? "";
             const contactName = customer.contactName?.trim() ?? "";
             const phone = customer.phone?.trim() ?? "";
@@ -147,7 +168,7 @@ export default function CustomerList({
                     disabled={!canReorder || loading || Boolean(error)}
                     aria-pressed={draggingCustomerId === customer.customerId}
                     onPointerCancel={event => { void finishDrag(event, true); }}
-                    onPointerDown={event => startDrag(event, customer.customerId)}
+                    onPointerDown={event => { setSort(null); startDrag(event, customer.customerId); }}
                     onPointerMove={moveDraggedCustomer}
                     onPointerUp={event => { void finishDrag(event, false); }}
                     title={canReorder ? "드래그하여 순서 변경" : search.trim() ? "검색 중에는 순서를 바꿀 수 없습니다" : "미사용 포함을 켜면 전체 고객 순서를 바꿀 수 있습니다"}

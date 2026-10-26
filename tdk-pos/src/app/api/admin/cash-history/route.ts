@@ -81,6 +81,12 @@ export async function GET(request: Request) {
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
   const page = Number(params.get("page") ?? "1");
+  const sortColumns: Record<string, string> = {
+    occurredAt: "occurredAt", type: "type", amount: "amount",
+    expectedCash: "expectedCash", actualCash: "actualCash", difference: "difference",
+  };
+  const sortExpression = sortColumns[params.get("sortBy") ?? "occurredAt"] ?? "occurredAt";
+  const sortDirection = params.get("sortDirection") === "asc" ? "ASC" : "DESC";
   if (!isDate(from) || !isDate(to) || from > to || !Number.isSafeInteger(page) || page < 1 || page > 100000)
     return Response.json({ success: false, message: "조회기간 또는 페이지를 확인해 주세요." }, { status: 400 });
 
@@ -91,7 +97,7 @@ export async function GET(request: Request) {
       `SELECT COUNT(*) AS total FROM (${eventsSql}) AS events`, values);
     const total = Number(countRows[0]?.total ?? 0);
     const [rows] = await pool.query<CashHistoryRow[]>(
-      `SELECT * FROM (${eventsSql}) AS events ORDER BY occurredAt DESC, id DESC LIMIT ? OFFSET ?`,
+      `SELECT * FROM (${eventsSql}) AS events ORDER BY CASE WHEN ${sortExpression} IS NULL THEN 1 ELSE 0 END ASC, ${sortExpression} ${sortDirection}, occurredAt DESC, id DESC LIMIT ? OFFSET ?`,
       [...values, pageSize, (page - 1) * pageSize]);
     return Response.json({ success: true, total, page, pageSize, rows: rows.map(row => ({
       id: row.id, occurredAt: row.occurredAt, type: row.type, source: row.source,

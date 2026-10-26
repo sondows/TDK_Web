@@ -27,6 +27,16 @@ export async function GET(request: Request) {
   const startDate = params.get("startDate") ?? "";
   const endDate = params.get("endDate") ?? "";
   const page = Number(params.get("page") ?? "1");
+  const requestedSort = params.get("sortBy") ?? "occurredAt";
+  const sortDirection = params.get("sortDirection") === "asc" ? "ASC" : "DESC";
+  const sortColumns: Record<string, string> = {
+    occurredAt: "c.completed_at",
+    tableLabel: `(SELECT MIN(COALESCE(ts.display_name, dt.table_no)) FROM checkout_items ci JOIN order_items oi ON oi.order_item_id = ci.order_item_id JOIN orders o ON o.order_id = oi.order_id JOIN table_sessions ts ON ts.session_id = o.session_id LEFT JOIN dining_tables dt ON dt.table_id = ts.table_id WHERE ci.checkout_id = c.checkout_id)`,
+    amount: `(SELECT COALESCE(SUM(p.applied_amount), 0) FROM payments p WHERE p.checkout_id = c.checkout_id AND p.status = 'APPROVED')`,
+    paymentMethods: `(SELECT GROUP_CONCAT(DISTINCT pm.method_name ORDER BY pm.method_name SEPARATOR '+') FROM payments p JOIN payment_methods pm ON pm.payment_method_id = p.payment_method_id WHERE p.checkout_id = c.checkout_id AND p.status IN ('APPROVED', 'CANCELLED', 'REFUNDED'))`,
+    status: `CASE WHEN c.status IN ('CANCELLED', 'REFUNDED') THEN 2 WHEN c.status <> 'PAID' THEN 1 WHEN EXISTS (SELECT 1 FROM payments p WHERE p.checkout_id = c.checkout_id AND p.status IN ('CANCELLED', 'REFUNDED')) THEN 3 ELSE 0 END`,
+  };
+  const sortExpression = sortColumns[requestedSort] ?? sortColumns.occurredAt;
   if (!validDate(startDate) || !validDate(endDate) || startDate > endDate ||
       (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86_400_000 > 3_660 ||
       !Number.isSafeInteger(page) || page < 1 || page > 100_000)
@@ -39,7 +49,7 @@ export async function GET(request: Request) {
     const [counts] = await connection.query<CountRow[]>(`SELECT COUNT(*) AS count FROM checkouts c WHERE ${condition}`, args);
     const pageSize = 50;
     const [checkouts] = await connection.query<CheckoutRow[]>(
-      `SELECT c.checkout_id AS checkoutId, CONCAT(DATE_FORMAT(c.completed_at, '%Y-%m-%dT%H:%i:%s'), '+09:00') AS occurredAt, c.status FROM checkouts c WHERE ${condition} ORDER BY c.completed_at ASC, c.checkout_id ASC LIMIT ? OFFSET ?`,
+      `SELECT c.checkout_id AS checkoutId, CONCAT(DATE_FORMAT(c.completed_at, '%Y-%m-%dT%H:%i:%s'), '+09:00') AS occurredAt, c.status FROM checkouts c WHERE ${condition} ORDER BY ${sortExpression} ${sortDirection}, c.completed_at DESC, c.checkout_id DESC LIMIT ? OFFSET ?`,
       [...args, pageSize, (page - 1) * pageSize],
     );
     const ids = checkouts.map(row => row.checkoutId);

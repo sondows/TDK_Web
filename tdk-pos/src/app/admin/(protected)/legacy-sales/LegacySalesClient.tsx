@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import SortableHeader from "@/app/admin/SortableHeader";
+import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid-sort";
 
 type Row = {
   business_date: string; sale_count: number; gross_sales: number; discount_amount: number; net_sales: number;
@@ -8,12 +10,15 @@ type Row = {
   cancelled_count: number; cancelled_amount: number; source: "LEGACY_POS";
 };
 type Result = { success: boolean; startDate: string | null; endDate: string | null; rows: Row[]; totals: Omit<Row, "business_date" | "source"> | null; message?: string };
+type SortColumn = "date" | "count" | "gross" | "discount" | "net" | "card" | "cash" | "transfer" | "other" | "cancelled";
+const sortTypes = { date: "date", count: "number", gross: "number", discount: "number", net: "number", card: "number", cash: "number", transfer: "number", other: "number", cancelled: "number" } as const;
 const money = (value: number) => `${Math.round(value).toLocaleString("ko-KR")}원`;
 
 export default function LegacySalesClient() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+  const [sort, setSort] = useState<GridSortState<SortColumn>>({ key: "date", direction: "desc" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -44,6 +49,13 @@ export default function LegacySalesClient() {
     return () => { active = false; };
   }, []);
 
+  const rows = useMemo(() => sortGridRows(result?.rows ?? [], sort, sortTypes, (row, key) => ({
+    date: row.business_date, count: row.sale_count, gross: row.gross_sales, discount: row.discount_amount,
+    net: row.net_sales, card: row.card_amount, cash: row.cash_amount, transfer: row.bank_transfer_amount,
+    other: row.other_amount, cancelled: row.cancelled_count,
+  })[key]), [result?.rows, sort]);
+  const changeSort = (key: SortColumn) => setSort(current => nextGridSort(current, key, key === "date" ? "desc" : "desc"));
+
   return <div className="space-y-6 p-6">
     <div><h1 className="text-2xl font-extrabold text-slate-900">구 POS 일별 매출</h1><p className="mt-1 text-sm text-slate-600">구 POS 집계자료 · 현재 TDK-POS 판매와 별도 표시</p></div>
     <form className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); if (startDate && endDate) void load(startDate, endDate); }}>
@@ -63,8 +75,19 @@ export default function LegacySalesClient() {
     </section>}
     <p className="text-sm text-slate-600">결제수단 합계와 순매출은 원본 차이로 일치하지 않을 수 있습니다. 이 화면은 일별 집계만 제공하며 판매건 상세는 없습니다.</p>
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="min-w-[1120px] w-full text-right text-sm">
-      <thead className="bg-slate-50 text-slate-700"><tr><th className="px-3 py-3 text-left">영업일</th><th className="px-3 py-3">건수</th><th className="px-3 py-3">주문금액</th><th className="px-3 py-3">할인</th><th className="px-3 py-3">순매출</th><th className="px-3 py-3">카드</th><th className="px-3 py-3">현금</th><th className="px-3 py-3">계좌이체</th><th className="px-3 py-3">기타</th><th className="px-3 py-3">삭제</th></tr></thead>
-      <tbody>{result?.rows.map(row => <tr className="border-t border-slate-100" key={row.business_date}><th className="px-3 py-3 text-left font-semibold whitespace-nowrap">{row.business_date}<span className="ml-2 text-xs text-slate-500">구 POS</span></th><td className="px-3 py-3">{row.sale_count}</td><td className="px-3 py-3">{money(row.gross_sales)}</td><td className="px-3 py-3">{money(row.discount_amount)}</td><td className="px-3 py-3 font-bold">{money(row.net_sales)}</td><td className="px-3 py-3">{money(row.card_amount)}</td><td className="px-3 py-3">{money(row.cash_amount)}</td><td className="px-3 py-3">{money(row.bank_transfer_amount)}</td><td className="px-3 py-3">{money(row.other_amount)}</td><td className="px-3 py-3">{row.cancelled_count}건</td></tr>) ?? null}</tbody>
+      <thead className="bg-slate-50 text-slate-700"><tr>
+        <SortableHeader active={sort.key === "date"} className="px-3 py-3 text-left" direction={sort.direction} onClick={() => changeSort("date")}>영업일</SortableHeader>
+        <SortableHeader active={sort.key === "count"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("count")}>건수</SortableHeader>
+        <SortableHeader active={sort.key === "gross"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("gross")}>주문금액</SortableHeader>
+        <SortableHeader active={sort.key === "discount"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("discount")}>할인</SortableHeader>
+        <SortableHeader active={sort.key === "net"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("net")}>순매출</SortableHeader>
+        <SortableHeader active={sort.key === "card"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("card")}>카드</SortableHeader>
+        <SortableHeader active={sort.key === "cash"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("cash")}>현금</SortableHeader>
+        <SortableHeader active={sort.key === "transfer"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("transfer")}>계좌이체</SortableHeader>
+        <SortableHeader active={sort.key === "other"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("other")}>기타</SortableHeader>
+        <SortableHeader active={sort.key === "cancelled"} className="px-3 py-3" direction={sort.direction} onClick={() => changeSort("cancelled")}>삭제</SortableHeader>
+      </tr></thead>
+      <tbody>{rows.map(row => <tr className="border-t border-slate-100" key={row.business_date}><th className="px-3 py-3 text-left font-semibold whitespace-nowrap">{row.business_date}<span className="ml-2 text-xs text-slate-500">구 POS</span></th><td className="px-3 py-3">{row.sale_count}</td><td className="px-3 py-3">{money(row.gross_sales)}</td><td className="px-3 py-3">{money(row.discount_amount)}</td><td className="px-3 py-3 font-bold">{money(row.net_sales)}</td><td className="px-3 py-3">{money(row.card_amount)}</td><td className="px-3 py-3">{money(row.cash_amount)}</td><td className="px-3 py-3">{money(row.bank_transfer_amount)}</td><td className="px-3 py-3">{money(row.other_amount)}</td><td className="px-3 py-3">{row.cancelled_count}건</td></tr>) ?? null}</tbody>
     </table>{!loading && !result?.rows.length && <p className="p-6 text-center text-slate-500">선택한 기간의 구 POS 집계자료가 없습니다.</p>}</div>
   </div>;
 }
