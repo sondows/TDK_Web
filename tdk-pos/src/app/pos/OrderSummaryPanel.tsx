@@ -17,6 +17,7 @@ import PosSubHeader from "./PosSubHeader";
 import OrderTableInfoHeader from "./OrderTableInfoHeader";
 import OrderSummaryRows from "./OrderSummaryRows";
 import OrderSummaryColumnHeader from "./OrderSummaryColumnHeader";
+import PosKitchenAlertPanel from "./PosKitchenAlertPanel";
 import { ORDER_INFO_STYLES } from "./order-info-styles";
 type SessionDiscount = {
   sessionId: number;
@@ -789,10 +790,14 @@ export default function OrderSummaryPanel({
         className="flex min-h-0 flex-1 flex-col rounded-xl px-2.5"
         style={{ backgroundColor: styles[tab].tint }}
       >
-        <OrderTableInfoHeader selected={selected} selectedCustomer={selectedCustomer} partyTableNos={partyTableNos} partyTotals={partyTotals} now={now} onSelectCustomer={() => setCustomerSelectOpen(true)} />
-        <OrderSummaryColumnHeader className="mt-3" />
+        {tab !== "kitchen" && <>
+          <OrderTableInfoHeader selected={selected} selectedCustomer={selectedCustomer} partyTableNos={partyTableNos} partyTotals={partyTotals} now={now} onSelectCustomer={() => setCustomerSelectOpen(true)} />
+          <OrderSummaryColumnHeader className="mt-3" />
+        </>}
         <div className="min-h-0 flex flex-1 flex-col">
-          {tab === "summary" ? (
+          {tab === "kitchen" ? (
+            <PosKitchenAlertPanel />
+          ) : tab === "summary" ? (
             renderOrderContent("summary")
           ) : tab === "pending" ? (
             <div className="pos-order-content">

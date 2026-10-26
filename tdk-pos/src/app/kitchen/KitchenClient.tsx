@@ -3,13 +3,14 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { KdsViewTask } from "@/lib/kds-server";
-import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder } from "@/lib/kds-party-grouping";
-import { cancelKdsTaskCompletionRequests, canUndoKdsStatusStart, canUseKdsMenuAction, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, KDS_WINDOW_MS, kdsCompletedElapsedMinutes, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, type KdsCookingSettings } from "@/lib/kds-model";
+import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups } from "@/lib/kds-party-grouping";
+import { cancelKdsTaskCompletionRequests, canUndoKdsStatusStart, canUseKdsMenuAction, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, KDS_WINDOW_MS, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, type KdsCookingSettings } from "@/lib/kds-model";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
 import { latestKdsSpicyAlert, type KdsSpicyAlert } from "@/lib/kds-spicy-alert";
+import { kdsTaskElapsedLabel as labelFor, kdsTaskStatusLabel as statusFor } from "@/lib/kds-task-display";
 import { useScreenWakeLock } from "./useScreenWakeLock";
 
-type ApiResult = { success?: boolean; tasks?: KdsViewTask[]; spicyAlerts?: KdsSpicyAlert[]; cookingSettings?: KdsCookingSettings; completionCountdownSeconds?: number; completedTimeShrinkStartMinutes?: number; serverNowMs?: number; message?: string };
+type ApiResult = { success?: boolean; tasks?: KdsViewTask[]; tableOrder?: Record<number, number>; partyOrder?: Record<number, number>; spicyAlerts?: KdsSpicyAlert[]; cookingSettings?: KdsCookingSettings; completionCountdownSeconds?: number; completedTimeShrinkStartMinutes?: number; serverNowMs?: number; message?: string };
 type Section = "preparing" | "completed" | "settings";
 type TaskStartOperation = { action: "MENU" | "STATUS"; clickedAtMs: number; clickedAtMonoMs: number; cancelRequested: boolean; queuedUndoDelayMs?: number };
 type TableStartOperation = { clickedAtMs: number; clickedAtMonoMs: number; taskIds: number[]; cancelRequested: boolean; queuedUndoDelayMs?: number };
@@ -21,15 +22,6 @@ const CARD_PALETTES = [
 ] as const;
 const TOUCH_SOUND_STORAGE_KEY = "tdk-kds-touch-sound-enabled";
 const elapsedMinutes = (from: number, now: number) => Math.max(0, Math.floor((now - from) / 60_000));
-const labelFor = (task: KdsViewTask, now: number) => {
-  if (task.cancelled) return "주문 취소";
-  if (task.status === "WAITING") return elapsedMinutes(task.orderedAtMs, now);
-  if (task.status === "COOKING") return elapsedMinutes(task.startedAtMs ?? now, now);
-  return kdsCompletedElapsedMinutes(task.completedAtMs, now) ?? "—";
-};
-const statusFor = (task: KdsViewTask) => task.cancelled ? "주문 취소" :
-  task.completionRequestScope && task.completionRequestedAtMs !== null ? "조리완료" :
-  task.status === "WAITING" ? "대기중" : task.status === "COOKING" ? "조리중" : "조리완료";
 const spicyStage = (name: string) => /^([0-9]+)\.(?:.*매운맛|순한맛|안매움)$/.exec(name)?.[1] ?? null;
 const spicyStageFor = (task: KdsViewTask) => task.items.flatMap(item => item.options).map(option => spicyStage(option.name)).find(stage => stage !== null);
 
@@ -37,6 +29,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const router = useRouter();
   useScreenWakeLock();
   const [tasks, setTasks] = useState<KdsViewTask[]>([]);
+  const [tableOrder, setTableOrder] = useState<Record<number, number>>({});
+  const [partyOrder, setPartyOrder] = useState<Record<number, number>>({});
   const [optimisticTasks, setOptimisticTasks] = useState<Map<number, Partial<KdsViewTask>>>(() => new Map());
   const [section, setSection] = useState<Section>("preparing");
   const [now, setNow] = useState(() => Date.now());
@@ -159,6 +153,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       const refreshedTasks = clearCancelledKdsTableCompletionRequests(result.tasks, cancelledRequestKeys);
       const receivedAtMs = Date.now();
       setTasks(refreshedTasks);
+      if (result.tableOrder) setTableOrder(result.tableOrder);
+      if (result.partyOrder) setPartyOrder(result.partyOrder);
       setSpicyAlerts(result.spicyAlerts ?? []);
       setNow(receivedAtMs);
       if (result.cookingSettings) setCookingSettings(result.cookingSettings);
@@ -914,6 +910,11 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const preparingCount = countKdsTablesByStatus(grouped, "preparing");
   const completedCount = countKdsTablesByStatus(grouped, "completed");
   const visible = section === "preparing" ? preparingKdsPartyCards(grouped) : section === "completed" ? sortKdsPartyCardsByLatestOrder(grouped) : [];
+  const visibleForRender = section === "preparing"
+    ? sortKdsPartyMembers(sortKdsTableGroups(visible.flatMap((party, partyIndex) => party.tables.map(table => ({
+      sessionId: table.sessionId, groupKey: party.key, key: `${party.key}:session:${table.sessionId}`, partyIndex, table,
+    }))), tableOrder), partyOrder).map(entry => ({ key: entry.key, paletteIndex: entry.partyIndex, tables: [entry.table] }))
+      : visible.map((party, paletteIndex) => ({ ...party, paletteIndex }));
   return <main className="min-h-dvh bg-slate-50 px-3 pb-8 pt-3 text-slate-900 sm:px-5" data-kds-display onClickCapture={handleTouchSound}>
     <header className="mx-auto max-w-5xl border-b border-slate-200 pb-3">
       <div><h1 className="text-xl font-extrabold text-[#2563EB]">TDK KDS</h1><p className="text-xs text-slate-500">{staffName}</p></div>
@@ -950,10 +951,12 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         </div>
       </section>
         : loading ? <p className="p-5 text-center text-slate-500">주문을 불러오는 중입니다.</p>
-        : visible.length === 0 ? <p className="p-6 text-center text-slate-500">표시할 조리 작업이 없습니다.</p>
-        : visible.map((party, cardIndex) => {
-          const palette = CARD_PALETTES[cardIndex % CARD_PALETTES.length];
-          const oppositePalette = CARD_PALETTES[(cardIndex + 1) % CARD_PALETTES.length];
+        : visibleForRender.length === 0 ? <p className="p-6 text-center text-slate-500">표시할 조리 작업이 없습니다.</p>
+        // The card renderer reads the monotonic undo anchor to keep an active local countdown stable.
+        // eslint-disable-next-line react-hooks/refs
+        : visibleForRender.map((party) => {
+          const palette = CARD_PALETTES[party.paletteIndex % CARD_PALETTES.length];
+          const oppositePalette = CARD_PALETTES[(party.paletteIndex + 1) % CARD_PALETTES.length];
           return <section className="overflow-hidden rounded-xl border" key={party.key} style={palette.card}>
           {party.tables.map((table, tableIndex) => {
             const firstTask = table.tasks[0];

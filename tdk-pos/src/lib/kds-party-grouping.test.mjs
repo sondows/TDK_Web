@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder } from "./kds-party-grouping.ts";
+import { activeKdsTableTasks, completeKdsTableOrder, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, moveKdsPartyTable, moveKdsTableGroup, moveKdsTableToBoundary, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, reorderKdsPartyTableToTarget, reorderKdsTableGroupToTarget, reorderKdsTableIds, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups, sortKdsTableIdsByReceivedOrder } from "./kds-party-grouping.ts";
 import { formatKdsTaskDisplay } from "./kds-model.ts";
 
 const task = (taskId, sessionId, groupId, status = "WAITING", sessionKind = "DINE_IN") =>
@@ -28,6 +28,97 @@ test("same-session compatible stews from separate orders share one row without c
   ]).length, 2);
   assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개"), { ...pot(2, "불고기김치찌개"), sessionId: 12 }]).length, 2);
   assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개", "WAITING", "TAKEOUT_PHONE"), pot(2, "불고기김치찌개", "WAITING", "TAKEOUT_PHONE")]).length, 2);
+});
+
+test("KDS table order is independent of party grouping and keeps unranked new sessions at the end", () => {
+  const tables = [{ sessionId: 8, groupId: 1 }, { sessionId: 3, groupId: 1 }, { sessionId: 6, groupId: 2 }];
+  assert.deepEqual(sortKdsTableGroups(tables, { 6: 0, 8: 1 }), [tables[2], tables[0], tables[1]]);
+});
+
+test("drag and top/bottom moves address one session only", () => {
+  assert.deepEqual(reorderKdsTableIds([8, 3, 6, 1], 1, 0), [1, 8, 3, 6]);
+  assert.deepEqual(moveKdsTableToBoundary([8, 3, 6, 1], 6, "top"), [6, 8, 3, 1]);
+  assert.deepEqual(moveKdsTableToBoundary([8, 3, 6, 1], 3, "bottom"), [8, 6, 1, 3]);
+});
+
+test("manual buttons move a whole party group and swap it with adjacent groups", () => {
+  const tables = [
+    { sessionId: 8, groupKey: "party:a" },
+    { sessionId: 6, groupKey: "session:6" },
+    { sessionId: 3, groupKey: "party:a" },
+    { sessionId: 1, groupKey: "session:1" },
+  ];
+  assert.deepEqual(moveKdsTableGroup(tables, 6, "up"), [6, 8, 3, 1]);
+  assert.deepEqual(moveKdsTableGroup(tables, 6, "down"), [8, 3, 1, 6]);
+  assert.deepEqual(moveKdsTableGroup(tables, 6, "top"), [6, 8, 3, 1]);
+  assert.deepEqual(moveKdsTableGroup(tables, 8, "bottom"), [6, 1, 8, 3]);
+  assert.deepEqual(moveKdsTableGroup(tables, 8, "up"), [8, 3, 6, 1]);
+});
+
+test("party internal ranks reorder only members within their existing global slots", () => {
+  const tables = [
+    { sessionId: 8, groupKey: "party:4" },
+    { sessionId: 3, groupKey: "party:4" },
+    { sessionId: 6, groupKey: "session:6" },
+    { sessionId: 1, groupKey: "party:4" },
+    { sessionId: 7, groupKey: "party:9" },
+  ];
+  assert.deepEqual(sortKdsPartyMembers(tables, { 1: 0, 3: 1, 8: 2 }), [
+    tables[3], tables[1], tables[2], tables[0], tables[4],
+  ]);
+  assert.deepEqual(sortKdsPartyMembers(tables, {}), tables);
+});
+
+test("party internal manual and drag moves cannot reorder outside tables", () => {
+  const members = [{ sessionId: 8 }, { sessionId: 3 }, { sessionId: 1 }];
+  assert.deepEqual(moveKdsPartyTable(members, 3, "top"), [3, 8, 1]);
+  assert.deepEqual(moveKdsPartyTable(members, 8, "down"), [3, 8, 1]);
+  assert.deepEqual(moveKdsPartyTable(members, 1, "bottom"), [8, 3, 1]);
+  assert.deepEqual(reorderKdsPartyTableToTarget(members, 1, 8), [1, 8, 3]);
+  assert.deepEqual(reorderKdsPartyTableToTarget(members, 8, 1), [3, 1, 8]);
+  assert.deepEqual(reorderKdsTableGroupToTarget([
+    { sessionId: 8, groupKey: "party:4" },
+    { sessionId: 3, groupKey: "party:4" },
+    { sessionId: 6, groupKey: "session:6" },
+  ], 3, 8), [8, 3, 6]);
+});
+
+test("dragging a table moves its whole party group next to the drop target group", () => {
+  const tables = [
+    { sessionId: 8, groupKey: "party:a" },
+    { sessionId: 6, groupKey: "session:6" },
+    { sessionId: 3, groupKey: "party:a" },
+    { sessionId: 1, groupKey: "session:1" },
+  ];
+  assert.deepEqual(reorderKdsTableGroupToTarget(tables, 8, 1), [6, 1, 8, 3]);
+  assert.deepEqual(reorderKdsTableGroupToTarget(tables, 6, 8), [6, 8, 3, 1]);
+  assert.deepEqual(reorderKdsTableGroupToTarget(tables, 8, 3), [8, 3, 6, 1]);
+});
+
+test("received-order restoration keeps existing party tables contiguous and uses each table's first order", () => {
+  const groups = [
+    { key: "party:7", tables: [
+      { sessionId: 30, tasks: [{ orderedAtMs: 400 }, { orderedAtMs: 700 }] },
+      { sessionId: 50, tasks: [{ orderedAtMs: 100 }, { orderedAtMs: 900 }] },
+    ] },
+    { key: "session:60", tables: [{ sessionId: 60, tasks: [{ orderedAtMs: 200 }] }] },
+  ];
+  assert.deepEqual(sortKdsTableIdsByReceivedOrder(groups), [50, 30, 60]);
+});
+
+test("received-order restoration keeps input order when receipt times are unavailable", () => {
+  const groups = [
+    { key: "session:2", tables: [{ sessionId: 2, tasks: [{ orderedAtMs: Number.NaN }] }] },
+    { key: "session:1", tables: [{ sessionId: 1, tasks: [{ orderedAtMs: Number.NaN }] }] },
+  ];
+  assert.deepEqual(sortKdsTableIdsByReceivedOrder(groups), [2, 1]);
+});
+
+test("order saves preserve a newly arrived table after the user ordered visible tables", () => {
+  assert.deepEqual(completeKdsTableOrder([8, 3, 6], [8, 3, 6, 9], { 9: 4 }, { 9: 20 }), [8, 3, 6, 9]);
+  assert.deepEqual(completeKdsTableOrder([8, 3], [8, 3, 6, 9], { 6: 3, 9: 5 }, {}), [8, 3, 6, 9]);
+  assert.equal(completeKdsTableOrder([8, 8], [8], {}, {}), null);
+  assert.equal(completeKdsTableOrder([99], [8], {}, {}), null);
 });
 
 test("standalone tables stay in separate cards and party tables share one card", () => {

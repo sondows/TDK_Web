@@ -638,6 +638,24 @@ export const kdsTasks = mysqlTable("kds_tasks", {
   index("idx_kds_tasks_status").on(table.status, table.taskId),
 ]);
 
+/** User-controlled kitchen display order, independent of POS party groups. */
+export const kdsTableOrder = mysqlTable("kds_table_order", {
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).primaryKey(),
+  sortOrder: int("sort_order").notNull(),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+/** User-controlled ordering of tables inside one POS party, separate from global KDS order. */
+export const kdsPartyTableOrder = mysqlTable("kds_party_table_order", {
+  partyGroupId: bigint("party_group_id", { mode: "number", unsigned: true }).notNull(),
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).notNull(),
+  sortOrder: int("sort_order").notNull(),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("uq_kds_party_table_order_member").on(table.partyGroupId, table.sessionId),
+  index("idx_kds_party_table_order_sort").on(table.partyGroupId, table.sortOrder, table.sessionId),
+]);
+
 /** Existing checkout tables. A checkout is linked to its bill scope through checkout_items. */
 export const paymentMethods = mysqlTable("payment_methods", {
   paymentMethodId: bigint("payment_method_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
