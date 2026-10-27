@@ -11,6 +11,8 @@ export const staffColumns = {
   role: staff.role,
   isActive: staff.isActive,
   pinHash: staff.pinHash,
+  kdsEnabled: staff.kdsEnabled,
+  kdsPinHash: staff.kdsPinHash,
   adminLoginId: staff.adminLoginId,
   adminPinHash: staff.adminPinHash,
   adminPermission: staff.adminPermission,
@@ -18,17 +20,20 @@ export const staffColumns = {
 
 export type StaffRow = {
   staffId: number; staffCode: string; name: string; role: "OWNER" | "MANAGER" | "STAFF";
-  isActive: number; pinHash: string | null; adminLoginId: string | null; adminPinHash: string | null;
+  isActive: number; pinHash: string | null; kdsEnabled: number; kdsPinHash: string | null; adminLoginId: string | null; adminPinHash: string | null;
   adminPermission: "NONE" | "READ_ONLY" | "READ_WRITE";
 };
 
 export function toStaffSummary(row: StaffRow): StaffSummary {
   return {
     staffId: row.staffId,
+    staffCode: row.staffCode,
     name: row.staffCode === "000" ? "매장 공용" : row.name,
     role: row.role,
     isActive: row.isActive === 1,
     posEnabled: Boolean(row.pinHash),
+    kdsEnabled: row.kdsEnabled === 1 && Boolean(row.kdsPinHash),
+    hasKdsPin: Boolean(row.kdsPinHash),
     adminEnabled: Boolean(row.adminLoginId && row.adminPinHash),
     adminPermission: row.adminPermission,
     adminLoginId: row.adminLoginId,
@@ -41,12 +46,14 @@ export function parseStaffDraft(input: unknown, original?: StaffSummary) {
   const body = input as Record<string, unknown>;
   if (typeof body.name !== "string" || typeof body.role !== "string" ||
       typeof body.isActive !== "boolean" || typeof body.posEnabled !== "boolean" ||
+      typeof body.kdsEnabled !== "boolean" || typeof body.kdsPin !== "string" || typeof body.kdsPinConfirm !== "string" ||
       typeof body.adminEnabled !== "boolean" || typeof body.adminPermission !== "string" || typeof body.adminLoginId !== "string" ||
       typeof body.posPin !== "string" || typeof body.posPinConfirm !== "string" ||
       typeof body.adminPin !== "string" || typeof body.adminPinConfirm !== "string") return null;
   const draft: StaffDraft = {
     name: body.name.trim(), role: body.role as StaffDraft["role"], isActive: body.isActive,
     posEnabled: body.posEnabled, posPin: body.posPin, posPinConfirm: body.posPinConfirm,
+    kdsEnabled: body.kdsEnabled, kdsPin: body.kdsPin, kdsPinConfirm: body.kdsPinConfirm,
     adminEnabled: body.adminEnabled, adminPermission: body.adminPermission as StaffDraft["adminPermission"], adminLoginId: body.adminLoginId.trim().toLowerCase(),
     adminPin: body.adminPin, adminPinConfirm: body.adminPinConfirm,
   };

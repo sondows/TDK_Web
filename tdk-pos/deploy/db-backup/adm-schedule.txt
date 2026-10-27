@@ -1,0 +1,9 @@
+# After first-backup verification, register these under the NAS root scheduler.
+# Set NAS timezone to Asia/Seoul. Run as root for MariaDB local socket auth.
+# The script uses an atomic host-local lock directory; overlapping runs are skipped.
+0 15 * * * /volume1/tdk-pos-backup/backup-mariadb.sh morning
+0 21 * * * /volume1/tdk-pos-backup/backup-mariadb.sh evening
+0 0 * * * /volume1/tdk-pos-backup/backup-mariadb.sh daily
+15 0 1 * * /volume1/tdk-pos-backup/backup-mariadb.sh monthly
+
+# The selected install path is /volume1/tdk-pos-backup. Verify the task runs as root.

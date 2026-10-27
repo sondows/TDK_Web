@@ -84,6 +84,18 @@ export async function verifyAdminPin(pin: string, storedHash: string | null) {
   return verifyNumericPin(pin, storedHash);
 }
 
+export const isValidKdsPin = (pin: string) => /^\d{6}$/.test(pin);
+
+export async function hashKdsPin(pin: string) {
+  if (!isValidKdsPin(pin)) throw new Error("KDS PIN must contain exactly six digits.");
+  return hashNumericPin(pin);
+}
+
+export async function verifyKdsPin(pin: string, storedHash: string | null) {
+  if (!storedHash || !isValidKdsPin(pin)) return false;
+  return verifyNumericPin(pin, storedHash);
+}
+
 async function verifyNumericPin(pin: string, storedHash: string) {
 
   const [algorithm, n, r, p, salt, expectedKey] = storedHash.split("$");
@@ -130,6 +142,7 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
       and(
         eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
         eq(staffSessions.status, "ACTIVE"),
+        eq(staffSessions.sessionType, "POS"),
         eq(staff.isActive, 1),
         gt(staffSessions.loggedInAt, sessionCutoff)
       )

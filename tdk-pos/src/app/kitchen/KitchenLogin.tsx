@@ -1,105 +1,59 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import PinInput from "@/components/PinInput";
-import PinKeypad from "@/components/PinKeypad";
-import PinAuthPanel from "@/components/PinAuthPanel";
-import { PIN_LENGTH } from "@/lib/pin";
-
-type KdsStaff = { staffId: number; staffCode: string; name: string };
-const activePinStyle = "border-2 border-blue-600 ring-1 ring-blue-100";
 
 export default function KitchenLogin() {
   const router = useRouter();
-  const [staff, setStaff] = useState<KdsStaff[]>([]);
-  const [selectedStaff, setSelectedStaff] = useState<KdsStaff | null>(null);
+  const [employeeId, setEmployeeId] = useState("");
   const [pin, setPin] = useState("");
   const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const requestId = useRef(0);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/kitchen/auth/staff", { cache: "no-store" })
-      .then(async response => {
-        const result = await response.json() as { staff?: KdsStaff[]; message?: string };
-        if (!response.ok) throw new Error(result.message ?? "직원 목록을 불러올 수 없습니다.");
-        return result;
-      })
-      .then(result => { if (active) setStaff(result.staff ?? []); })
-      .catch(error => { if (active) setMessage(error instanceof Error ? error.message : "직원 목록을 불러올 수 없습니다."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  const reset = (nextPin = "") => { requestId.current += 1; setPin(nextPin); setMessage(""); };
-  const login = async (member: KdsStaff, value: string) => {
-    setSubmitting(true);
+  const login = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy || !employeeId.trim() || !/^\d{6}$/.test(pin)) return;
+    setBusy(true);
     setMessage("");
     try {
       const response = await fetch("/api/kitchen/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffCode: member.staffCode, pin: value }),
+        body: JSON.stringify({ employeeId: employeeId.trim(), pin }),
       });
       const result = await response.json() as { success?: boolean; message?: string };
+      setPin("");
       if (!response.ok || !result.success) {
-        reset();
-        setMessage(result.message ?? "로그인에 실패했습니다.");
+        setMessage(result.message ?? "Employee ID or KDS PIN is incorrect.");
         return;
       }
       router.refresh();
     } catch {
-      setMessage("로그인 요청 중 네트워크 오류가 발생했습니다.");
-    } finally { setSubmitting(false); }
+      setPin("");
+      setMessage("Could not sign in. Check the network and try again.");
+    } finally { setBusy(false); }
   };
-
-  const selectStaff = (member: KdsStaff) => {
-    if (submitting) return;
-    setSelectedStaff(current => current?.staffCode === member.staffCode ? null : member);
-    reset();
-  };
-
-  const updatePin = (value = "") => {
-    if (submitting) return;
-    reset(value);
-    if (selectedStaff && value.length === PIN_LENGTH) void login(selectedStaff, value);
-  };
-  const append = (digit: string) => {
-    if (!selectedStaff || submitting || pin.length >= PIN_LENGTH) return;
-    updatePin(`${pin}${digit}`.slice(0, PIN_LENGTH));
-  };
-  const pinEnabled = Boolean(selectedStaff);
 
   return <main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
-    <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[336px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
-      <header className="shrink-0 border-b-4 border-blue-600 px-8 py-6 text-center">
+    <section className="w-full max-w-[380px] rounded-2xl bg-white p-8 shadow-xl">
+      <header className="mb-7 text-center">
         <h1 className="text-4xl font-extrabold text-blue-600">TDK KDS</h1>
-        <p className="mt-2 text-xl font-bold text-slate-600">직원 로그인</p>
+        <p className="mt-2 text-lg font-bold text-slate-600">Employee sign in</p>
       </header>
-      <PinAuthPanel
-        scrollablePeople
-        emptyMessage={!loading && staff.length === 0 ? message || "KDS 사용 권한이 있는 직원이 없습니다." : undefined}
-        footer={message && staff.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{message}</p> : undefined}
-        keypad={<PinKeypad
-          actionDisabled={!pinEnabled || submitting || !pin}
-          digitDisabled={!pinEnabled || submitting || pin.length >= PIN_LENGTH}
-          largeKeys
-          onBackspace={() => updatePin(pin.slice(0, -1))}
-          onClear={() => updatePin()}
-          onDigit={append}
-        />}
-        label="직원"
-        onSelect={selectStaff}
-        people={staff}
-        pinInput={<PinInput ariaLabel="직원 PIN" className={pinEnabled ? activePinStyle : ""} disabled={!pinEnabled || submitting} keypadAligned onChange={updatePin} value={pin} />}
-        selectedCode={selectedStaff?.staffCode}
-        selectionDisabled={loading || submitting}
-        largePeopleButtons
-        showLabels={false}
-      />
+      <form className="space-y-5" onSubmit={event => void login(event)}>
+        <div>
+          <label className="mb-2 block text-sm font-bold text-slate-700" htmlFor="kds-employee-id">Employee ID</label>
+          <input autoComplete="username" autoCapitalize="none" className="min-h-14 w-full rounded-xl border border-slate-300 px-4 text-lg font-semibold outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" id="kds-employee-id" maxLength={30} onChange={event => setEmployeeId(event.target.value)} required value={employeeId} />
+        </div>
+        <div>
+          <label className="mb-2 block text-sm font-bold text-slate-700" htmlFor="kds-pin">6-digit KDS PIN</label>
+          <input autoComplete="current-password" className="min-h-14 w-full rounded-xl border border-slate-300 px-4 text-center text-2xl font-bold tracking-[0.5em] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" id="kds-pin" inputMode="numeric" maxLength={6} onChange={event => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" required type="password" value={pin} />
+        </div>
+        {message && <p className="text-center text-sm font-semibold text-red-600" role="alert">{message}</p>}
+        <button className="min-h-14 w-full rounded-xl bg-blue-600 text-lg font-extrabold text-white disabled:cursor-wait disabled:opacity-50" disabled={busy || !employeeId.trim() || !/^\d{6}$/.test(pin)} type="submit">
+          {busy ? "Signing in…" : "Sign in"}
+        </button>
+      </form>
     </section>
   </main>;
 }

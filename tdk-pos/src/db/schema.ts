@@ -64,6 +64,8 @@ export const staff = mysqlTable(
     staffCode: varchar("staff_code", { length: 30 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     pinHash: varchar("pin_hash", { length: 255 }),
+    kdsEnabled: tinyint("kds_enabled").notNull().default(0),
+    kdsPinHash: varchar("kds_pin_hash", { length: 255 }),
     adminLoginId: varchar("admin_login_id", { length: 32 }),
     adminPinHash: varchar("admin_pin_hash", { length: 255 }),
     adminPermission: mysqlEnum("admin_permission", ["NONE", "READ_ONLY", "READ_WRITE"])
@@ -157,9 +159,17 @@ export const staffSessions = mysqlTable("staff_sessions", {
     .default(sql`CURRENT_TIMESTAMP`),
   lastActiveAt: datetime("last_active_at"),
   loggedOutAt: datetime("logged_out_at"),
+  sessionType: mysqlEnum("session_type", ["POS", "ADMIN", "KDS"]).notNull().default("POS"),
   status: mysqlEnum("status", ["ACTIVE", "LOGGED_OUT", "EXPIRED"])
     .notNull()
     .default("ACTIVE"),
+});
+
+export const kdsLoginAttempts = mysqlTable("kds_login_attempts", {
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).primaryKey(),
+  windowStartedAt: datetime("window_started_at").notNull(),
+  attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 /** Legacy KDS-only credentials and sessions are retained for data compatibility; new KDS auth uses staff sessions. */

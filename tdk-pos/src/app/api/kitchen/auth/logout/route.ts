@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staffSessions } from "@/db/schema";
 import { hashSessionToken } from "@/lib/auth";
@@ -10,7 +10,9 @@ export async function POST() {
   const token = (await cookies()).get(KDS_SESSION_COOKIE_NAME)?.value;
   if (token) {
     const tokenHash = hashSessionToken(token);
-    await db.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(eq(staffSessions.sessionTokenHash, tokenHash));
+    await db.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
+      eq(staffSessions.sessionTokenHash, tokenHash), eq(staffSessions.sessionType, "KDS"),
+    ));
   }
   const response = NextResponse.json({ success: true });
   response.cookies.set(KDS_SESSION_COOKIE_NAME, "", { ...kdsSessionCookieOptions, maxAge: 0 });

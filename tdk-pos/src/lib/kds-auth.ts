@@ -26,8 +26,10 @@ export async function getCurrentKdsStaff() {
   }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
     eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
     eq(staffSessions.status, "ACTIVE"),
+    eq(staffSessions.sessionType, "KDS"),
     gt(staffSessions.loggedInAt, cutoff),
     eq(staff.isActive, 1),
+    eq(staff.kdsEnabled, 1),
   )).limit(1);
   return member ?? null;
 }

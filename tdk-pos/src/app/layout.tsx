@@ -8,13 +8,16 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export async function generateMetadata(): Promise<Metadata> {
-  const externalAdmin = isExternalAdminHost((await headers()).get("host"));
-  const appName = externalAdmin ? "TDK 관리" : "TDK-POS";
+  const requestHeaders = await headers();
+  const externalAdmin = isExternalAdminHost(requestHeaders.get("host"));
+  const surface = externalAdmin ? requestHeaders.get("x-tdk-external-surface") : null;
+  const appName = surface === "pos" ? "TDK-POS" : surface === "kds" ? "TDK KDS" : externalAdmin ? "TDK Admin" : "TDK-POS";
+  const manifest = surface === "pos" ? "/tdkpos/manifest.webmanifest" : surface === "admin" ? "/tdkadm/manifest.webmanifest" : "/manifest.webmanifest";
   return {
     title: appName,
     applicationName: appName,
-    description: externalAdmin ? "TDK 매장 관리센터" : "TDK-POS 매장 판매 시스템",
-    manifest: "/manifest.webmanifest",
+    description: appName,
+    manifest,
     appleWebApp: { capable: true, title: appName, statusBarStyle: "default" },
     icons: { apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }] },
     other: { google: "notranslate" },

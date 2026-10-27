@@ -4,10 +4,13 @@ export const adminPermissionLabel: Record<AdminPermission, string> = { NONE: "�
 
 export type StaffSummary = {
   staffId: number;
+  staffCode: string;
   name: string;
   role: StaffRole;
   isActive: boolean;
   posEnabled: boolean;
+  kdsEnabled: boolean;
+  hasKdsPin: boolean;
   adminEnabled: boolean;
   adminPermission: AdminPermission;
   adminLoginId: string | null;
@@ -21,6 +24,9 @@ export type StaffDraft = {
   posEnabled: boolean;
   posPin: string;
   posPinConfirm: string;
+  kdsEnabled: boolean;
+  kdsPin: string;
+  kdsPinConfirm: string;
   adminEnabled: boolean;
   adminPermission: AdminPermission;
   adminLoginId: string;
@@ -28,7 +34,7 @@ export type StaffDraft = {
   adminPinConfirm: string;
 };
 
-export type StaffErrors = Partial<Record<"name" | "role" | "posPin" | "posPinConfirm" | "adminEnabled" | "adminPermission" | "adminLoginId" | "adminPin" | "adminPinConfirm", string>>;
+export type StaffErrors = Partial<Record<"name" | "role" | "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "adminEnabled" | "adminPermission" | "adminLoginId" | "adminPin" | "adminPinConfirm", string>>;
 
 export function validateStaffDraft(draft: StaffDraft, original?: StaffSummary): StaffErrors {
   const errors: StaffErrors = {};
@@ -40,6 +46,11 @@ export function validateStaffDraft(draft: StaffDraft, original?: StaffSummary): 
     const required = !original?.posEnabled;
     if ((required || draft.posPin || draft.posPinConfirm) && !/^\d{4}$/.test(draft.posPin)) errors.posPin = "숫자 4자리 PIN을 입력해 주세요.";
     if ((required || draft.posPin || draft.posPinConfirm) && draft.posPin !== draft.posPinConfirm) errors.posPinConfirm = "PIN이 일치하지 않습니다.";
+  }
+  if (draft.kdsEnabled) {
+    const required = !original?.kdsEnabled || !original.hasKdsPin;
+    if ((required || draft.kdsPin || draft.kdsPinConfirm) && !/^\d{6}$/.test(draft.kdsPin)) errors.kdsPin = "KDS PIN must contain exactly six digits.";
+    if ((required || draft.kdsPin || draft.kdsPinConfirm) && draft.kdsPin !== draft.kdsPinConfirm) errors.kdsPinConfirm = "KDS PIN values do not match.";
   }
   if (draft.adminEnabled) {
     const loginId = draft.adminLoginId.trim().toLowerCase();

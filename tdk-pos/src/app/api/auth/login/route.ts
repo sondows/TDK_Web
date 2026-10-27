@@ -11,6 +11,7 @@ import {
   SESSION_COOKIE_NAME,
   verifyPin,
 } from "@/lib/auth";
+import { clearAdminLoginAttempts, reserveAdminLoginAttempt } from "@/lib/admin-login-limit";
 
 const LOGIN_FAILURE_MESSAGE = "직원코드 또는 PIN이 올바르지 않습니다.";
 
@@ -25,6 +26,11 @@ export async function POST(request: Request) {
         { success: false, message: LOGIN_FAILURE_MESSAGE },
         { status: 401 }
       );
+    }
+
+    const attemptKey = `pos-login:${staffCode}`;
+    if (!reserveAdminLoginAttempt(attemptKey)) {
+      return NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429, headers: { "Cache-Control": "no-store" } });
     }
 
     if (staffCode === "000" && await getConfiguredPosLoginMode() !== "SHARED") {
@@ -51,9 +57,12 @@ export async function POST(request: Request) {
     await db.insert(staffSessions).values({
       staffId: staffMember.staffId,
       sessionTokenHash: hashSessionToken(token),
+      sessionType: "POS",
       status: "ACTIVE",
     });
 
+    clearAdminLoginAttempts(attemptKey);
+    clearAdminLoginAttempts(`pos-verify:${staffCode}`);
     const response = NextResponse.json({ success: true });
     response.cookies.set(SESSION_COOKIE_NAME, token, sessionCookieOptions);
     return response;

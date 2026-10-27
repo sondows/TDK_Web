@@ -1,0 +1,22 @@
+# Install as /volume1/tdk-pos-backup/tdk-pos-backup.conf and set owner=root, mode=600.
+# Verified from the NAS operator's read-only SSH inspection.
+USB_MOUNT="/share/USB21"
+USB_UUID="341e7431-a839-41eb-91d7-ddbacc786db8"
+
+# Confirm the active DB_NAME from the running POS app container before the first dump.
+# .env.local is development/test configuration and must not be used as the NAS target.
+DB_NAME="TDK_POS"
+DB_DUMP_BIN="/volume1/.@plugins/AppCentral/mariadb/data/binary/bin/mariadb-dump"
+DB_CLIENT_BIN="/volume1/.@plugins/AppCentral/mariadb/data/binary/bin/mariadb"
+
+# Prefer local Unix-socket authentication as the NAS OS root account, when verified.
+# The backup job must run as root in this mode. If unavailable, use defaults-file
+# and a mode-600 option file; never put credentials in this file or Git.
+DB_AUTH_MODE="socket"
+DB_CLIENT_CNF=""
+
+# Must cover an uncompressed dump estimate plus headroom; also rechecked after dump.
+MIN_FREE_BYTES="1073741824"
+
+# Keep in preview until an isolated restore test passes and is documented.
+RETENTION_MODE="preview"

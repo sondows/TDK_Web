@@ -13,9 +13,11 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
   const [draft, setDraft] = useState<StaffDraft>({
     name: original?.name ?? "", role: original?.role ?? "STAFF", isActive: original?.isActive ?? true,
     posEnabled: original?.posEnabled ?? true, posPin: "", posPinConfirm: "",
+    kdsEnabled: original?.kdsEnabled ?? false, kdsPin: "", kdsPinConfirm: "",
     adminEnabled: original?.adminEnabled ?? false, adminPermission: original?.adminPermission ?? "NONE", adminLoginId: original?.adminLoginId ?? "", adminPin: "", adminPinConfirm: "",
   });
   const [changePosPin, setChangePosPin] = useState(!original?.posEnabled);
+  const [changeKdsPin, setChangeKdsPin] = useState(!original?.kdsEnabled || !original?.hasKdsPin);
   const [changeAdminPin, setChangeAdminPin] = useState(!original?.adminEnabled);
   const [errors, setErrors] = useState<StaffErrors>({});
   const [notice, setNotice] = useState("");
@@ -55,7 +57,7 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
     finally { busyRef.current = false; setBusy(false); }
   };
 
-  const input = (id: string, label: string, key: "posPin" | "posPinConfirm" | "adminPin" | "adminPinConfirm", maxLength: number) => (
+  const input = (id: string, label: string, key: "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "adminPin" | "adminPinConfirm", maxLength: number) => (
     <div className={styles.customerField}>
       <label htmlFor={id}>{label}</label>
       <input aria-invalid={Boolean(errors[key])} autoComplete="new-password" className={styles.customerFieldInput} disabled={busy} id={id} inputMode="numeric" maxLength={maxLength} onChange={event => update(key, event.target.value)} pattern={maxLength === 4 ? "[0-9]{4}" : "[0-9]{6}"} type="password" value={draft[key]} />
@@ -82,6 +84,14 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
           {errors.adminEnabled && <p className={styles.customerFieldError} role="alert">{errors.adminEnabled}</p>}
           {draft.adminEnabled && <><div className={styles.customerField}><label htmlFor="staff-admin-id">관리센터 아이디 *</label><input aria-invalid={Boolean(errors.adminLoginId)} autoCapitalize="none" autoComplete="off" className={styles.customerFieldInput} disabled={busy} id="staff-admin-id" maxLength={32} onChange={event => update("adminLoginId", event.target.value)} value={draft.adminLoginId} />{errors.adminLoginId && <p className={styles.customerFieldError} role="alert">{errors.adminLoginId}</p>}</div>
             {original?.adminEnabled && !changeAdminPin ? <button className={styles.staffChangeButton} onClick={() => setChangeAdminPin(true)} type="button">관리센터 PIN 변경</button> : <>{input("staff-admin-pin", original ? "새 관리센터 PIN" : "관리센터 PIN *", "adminPin", 6)}{input("staff-admin-confirm", "PIN 확인 *", "adminPinConfirm", 6)}</>}</>}
+        </section>
+        <section className={styles.staffFormSection}><h3>KDS access</h3>
+          {original && <div className={styles.customerField}><label htmlFor="staff-employee-id">Employee ID</label><input className={styles.customerFieldInput} id="staff-employee-id" readOnly value={original.staffCode} /></div>}
+          <StaffToggle checked={draft.kdsEnabled} disabled={busy || !original} label="Allow KDS sign-in" onChange={value => { update("kdsEnabled", value); if (value && (!original?.kdsEnabled || !original.hasKdsPin)) setChangeKdsPin(true); }} />
+          {!original && <p className={styles.customerFieldError}>Create the employee first, then enable KDS access and set its PIN.</p>}
+          {original && draft.kdsEnabled && <>{original.kdsEnabled && original.hasKdsPin && !changeKdsPin
+            ? <button className={styles.staffChangeButton} onClick={() => setChangeKdsPin(true)} type="button">Change KDS PIN</button>
+            : <>{input("staff-kds-pin", "6-digit KDS PIN *", "kdsPin", 6)}{input("staff-kds-confirm", "Confirm KDS PIN *", "kdsPinConfirm", 6)}</>}</>}
         </section>
         {notice && <p className={styles.customerFieldError} role="alert">{notice}</p>}
       </div>

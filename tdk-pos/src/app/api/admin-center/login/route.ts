@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     if (!candidate || !(await verifyAdminPin(pin, candidate.adminPinHash))) return failure();
 
     const token = createAdminSessionToken();
-    await db.insert(staffSessions).values({ staffId: candidate.staffId, sessionTokenHash: hashSessionToken(token), status: "ACTIVE" });
+    await db.insert(staffSessions).values({ staffId: candidate.staffId, sessionTokenHash: hashSessionToken(token), sessionType: "ADMIN", status: "ACTIVE" });
     clearAdminLoginAttempts(loginId);
     const response = NextResponse.json({ success: true });
     response.cookies.set(ADMIN_SESSION_COOKIE_NAME, token, adminSessionCookieOptions);

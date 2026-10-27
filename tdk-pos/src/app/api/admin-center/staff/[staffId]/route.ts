@@ -1,8 +1,8 @@
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { staff } from "@/db/schema";
+import { staff, staffSessions } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
-import { hashAdminPin, hashPin } from "@/lib/auth";
+import { hashAdminPin, hashKdsPin, hashPin } from "@/lib/auth";
 import { isDuplicateAdminLoginId, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
 import { isValidPin } from "@/lib/pin";
 
@@ -62,11 +62,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ st
       await tx.update(staff).set({
         name: draft.name, role: draft.role, isActive: draft.isActive ? 1 : 0,
         pinHash: draft.posEnabled ? (draft.posPin ? await hashPin(draft.posPin) : target.pinHash) : null,
+        kdsEnabled: draft.kdsEnabled ? 1 : 0,
+        kdsPinHash: draft.kdsEnabled ? (draft.kdsPin ? await hashKdsPin(draft.kdsPin) : target.kdsPinHash) : null,
         adminLoginId: draft.adminEnabled ? draft.adminLoginId : null,
         adminPinHash: draft.adminEnabled ? (draft.adminPin ? await hashAdminPin(draft.adminPin) : target.adminPinHash) : null,
         adminPermission: draft.adminPermission,
         updatedAt: new Date(),
       }).where(eq(staff.staffId, id));
+      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPin) {
+        await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
+          eq(staffSessions.staffId, id), eq(staffSessions.sessionType, "KDS"), eq(staffSessions.status, "ACTIVE"),
+        ));
+      }
       return { status: 200, body: { success: true } };
     });
     return Response.json(result.body, { status: result.status });
