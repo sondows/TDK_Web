@@ -66,6 +66,11 @@ export const staff = mysqlTable(
     pinHash: varchar("pin_hash", { length: 255 }),
     kdsEnabled: tinyint("kds_enabled").notNull().default(0),
     kdsPinHash: varchar("kds_pin_hash", { length: 255 }),
+    kdsPasswordHash: varchar("kds_password_hash", { length: 255 }),
+    kdsTotpSecretEnc: varchar("kds_totp_secret_enc", { length: 512 }),
+    kdsTotpPendingSecretEnc: varchar("kds_totp_pending_secret_enc", { length: 512 }),
+    kdsTotpPendingExpiresAt: datetime("kds_totp_pending_expires_at"),
+    kdsPinChangeRequired: tinyint("kds_pin_change_required").notNull().default(1),
     adminLoginId: varchar("admin_login_id", { length: 32 }),
     adminPinHash: varchar("admin_pin_hash", { length: 255 }),
     adminPermission: mysqlEnum("admin_permission", ["NONE", "READ_ONLY", "READ_WRITE"])
@@ -171,6 +176,24 @@ export const kdsLoginAttempts = mysqlTable("kds_login_attempts", {
   attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
   updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const kdsAuthIpAttempts = mysqlTable("kds_auth_ip_attempts", {
+  ipHash: varchar("ip_hash", { length: 64 }).primaryKey(),
+  windowStartedAt: datetime("window_started_at").notNull(),
+  attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [index("idx_kds_auth_ip_updated_at").on(table.updatedAt)]);
+
+export const kdsTrustedDevices = mysqlTable("kds_trusted_devices", {
+  deviceId: bigint("device_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+  deviceLabel: varchar("device_label", { length: 120 }).notNull().default("KDS device"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastUsedAt: datetime("last_used_at"),
+  expiresAt: datetime("expires_at").notNull(),
+  revokedAt: datetime("revoked_at"),
+}, table => [uniqueIndex("uq_kds_trusted_devices_token_hash").on(table.tokenHash), index("idx_kds_trusted_devices_staff").on(table.staffId, table.revokedAt)]);
 
 /** Legacy KDS-only credentials and sessions are retained for data compatibility; new KDS auth uses staff sessions. */
 export const kdsAccounts = mysqlTable("kds_accounts", {

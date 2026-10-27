@@ -29,7 +29,7 @@ export function proxy(request: NextRequest) {
   externalHeaders.delete("x-tdk-external-surface");
   const trustedNetwork = request.headers.get("x-tdk-trusted-network") === "caddy-vpn-validated";
   externalHeaders.delete("x-tdk-trusted-network");
-  const protectedSurfacePath = isExternalPosPath(pathname) || isExternalKdsPath(pathname);
+  const protectedSurfacePath = isExternalPosPath(pathname);
 
   if (protectedSurfacePath && !trustedNetwork) {
     return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
@@ -41,13 +41,12 @@ export function proxy(request: NextRequest) {
 
   const alias = externalAliasTarget(pathname);
   if (alias) {
-    const protectedAlias = alias.surface === "pos" || alias.surface === "kds";
-    const targetAllowed = protectedAlias && trustedNetwork
-      ? alias.surface === "pos"
-        ? isExternalPosPath(alias.target) || alias.target === "/manifest.webmanifest"
-        : isExternalKdsPath(alias.target) || alias.target === "/manifest.webmanifest"
-      : isExternalAdminPathAllowed(alias.target, request.method);
-    if ((protectedAlias && !trustedNetwork) || !targetAllowed) {
+    const targetAllowed = alias.surface === "pos"
+      ? trustedNetwork && (isExternalPosPath(alias.target) || alias.target === "/manifest.webmanifest")
+      : alias.surface === "kds"
+        ? isExternalKdsPath(alias.target) || alias.target === "/manifest.webmanifest"
+        : isExternalAdminPathAllowed(alias.target, request.method);
+    if (!targetAllowed) {
       return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
     }
     const forwardedHeaders = new Headers(externalHeaders);
@@ -58,13 +57,16 @@ export function proxy(request: NextRequest) {
 
   const canonicalPath = externalCanonicalPath(pathname);
   if (canonicalPath && (request.method === "GET" || request.method === "HEAD")) {
-    if ((isExternalPosPath(pathname) || isExternalKdsPath(pathname)) && !trustedNetwork) {
+    if (isExternalPosPath(pathname) && !trustedNetwork) {
       return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
     }
     return NextResponse.redirect(withSearch(canonicalPath, request), 307);
   }
 
   if (protectedSurfacePath && trustedNetwork) {
+    return NextResponse.next({ request: { headers: externalHeaders } });
+  }
+  if (isExternalKdsPath(pathname)) {
     return NextResponse.next({ request: { headers: externalHeaders } });
   }
   if (isExternalAdminPathAllowed(pathname, request.method)) {

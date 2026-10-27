@@ -37,6 +37,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const [clockOffset, setClockOffset] = useState(0);
   const serverNow = now + clockOffset;
   const [error, setError] = useState("");
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const [spicyAlerts, setSpicyAlerts] = useState<KdsSpicyAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingId, setPendingId] = useState<number | null>(null);
@@ -916,8 +917,12 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     }))), tableOrder), partyOrder).map(entry => ({ key: entry.key, paletteIndex: entry.partyIndex, tables: [entry.table] }))
       : visible.map((party, paletteIndex) => ({ ...party, paletteIndex }));
   return <main className="min-h-dvh bg-slate-50 px-3 pb-8 pt-3 text-slate-900 sm:px-5" data-kds-display onClickCapture={handleTouchSound}>
-    <header className="mx-auto max-w-5xl border-b border-slate-200 pb-3">
+    <header className="mx-auto flex max-w-5xl items-center justify-between border-b border-slate-200 pb-3">
       <div><h1 className="text-xl font-extrabold text-[#2563EB]">TDK KDS</h1><p className="text-xs text-slate-500">{staffName}</p></div>
+      <button className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-50" disabled={logoutBusy} onClick={() => {
+        setLogoutBusy(true);
+        void fetch("/api/kitchen/auth/logout", { method: "POST" }).then(() => router.refresh()).catch(() => setLogoutBusy(false));
+      }} type="button">{logoutBusy ? "Signing out…" : "Sign out"}</button>
     </header>
     <div className="mx-auto mt-3 max-w-5xl">
       <div className="grid grid-cols-3 gap-2">

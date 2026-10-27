@@ -13,6 +13,9 @@ export const staffColumns = {
   pinHash: staff.pinHash,
   kdsEnabled: staff.kdsEnabled,
   kdsPinHash: staff.kdsPinHash,
+  kdsPasswordHash: staff.kdsPasswordHash,
+  kdsTotpSecretEnc: staff.kdsTotpSecretEnc,
+  kdsPinChangeRequired: staff.kdsPinChangeRequired,
   adminLoginId: staff.adminLoginId,
   adminPinHash: staff.adminPinHash,
   adminPermission: staff.adminPermission,
@@ -20,7 +23,7 @@ export const staffColumns = {
 
 export type StaffRow = {
   staffId: number; staffCode: string; name: string; role: "OWNER" | "MANAGER" | "STAFF";
-  isActive: number; pinHash: string | null; kdsEnabled: number; kdsPinHash: string | null; adminLoginId: string | null; adminPinHash: string | null;
+  isActive: number; pinHash: string | null; kdsEnabled: number; kdsPinHash: string | null; kdsPasswordHash: string | null; kdsTotpSecretEnc: string | null; kdsPinChangeRequired: number; adminLoginId: string | null; adminPinHash: string | null;
   adminPermission: "NONE" | "READ_ONLY" | "READ_WRITE";
 };
 
@@ -34,6 +37,9 @@ export function toStaffSummary(row: StaffRow): StaffSummary {
     posEnabled: Boolean(row.pinHash),
     kdsEnabled: row.kdsEnabled === 1 && Boolean(row.kdsPinHash),
     hasKdsPin: Boolean(row.kdsPinHash),
+    hasKdsPassword: Boolean(row.kdsPasswordHash),
+    hasKdsTotp: Boolean(row.kdsTotpSecretEnc),
+    kdsPinChangeRequired: row.kdsPinChangeRequired === 1,
     adminEnabled: Boolean(row.adminLoginId && row.adminPinHash),
     adminPermission: row.adminPermission,
     adminLoginId: row.adminLoginId,
@@ -47,6 +53,7 @@ export function parseStaffDraft(input: unknown, original?: StaffSummary) {
   if (typeof body.name !== "string" || typeof body.role !== "string" ||
       typeof body.isActive !== "boolean" || typeof body.posEnabled !== "boolean" ||
       typeof body.kdsEnabled !== "boolean" || typeof body.kdsPin !== "string" || typeof body.kdsPinConfirm !== "string" ||
+      typeof body.kdsPassword !== "string" || typeof body.kdsPasswordConfirm !== "string" ||
       typeof body.adminEnabled !== "boolean" || typeof body.adminPermission !== "string" || typeof body.adminLoginId !== "string" ||
       typeof body.posPin !== "string" || typeof body.posPinConfirm !== "string" ||
       typeof body.adminPin !== "string" || typeof body.adminPinConfirm !== "string") return null;
@@ -54,6 +61,7 @@ export function parseStaffDraft(input: unknown, original?: StaffSummary) {
     name: body.name.trim(), role: body.role as StaffDraft["role"], isActive: body.isActive,
     posEnabled: body.posEnabled, posPin: body.posPin, posPinConfirm: body.posPinConfirm,
     kdsEnabled: body.kdsEnabled, kdsPin: body.kdsPin, kdsPinConfirm: body.kdsPinConfirm,
+    kdsPassword: body.kdsPassword, kdsPasswordConfirm: body.kdsPasswordConfirm,
     adminEnabled: body.adminEnabled, adminPermission: body.adminPermission as StaffDraft["adminPermission"], adminLoginId: body.adminLoginId.trim().toLowerCase(),
     adminPin: body.adminPin, adminPinConfirm: body.adminPinConfirm,
   };

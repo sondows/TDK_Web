@@ -13,16 +13,19 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
   const [draft, setDraft] = useState<StaffDraft>({
     name: original?.name ?? "", role: original?.role ?? "STAFF", isActive: original?.isActive ?? true,
     posEnabled: original?.posEnabled ?? true, posPin: "", posPinConfirm: "",
-    kdsEnabled: original?.kdsEnabled ?? false, kdsPin: "", kdsPinConfirm: "",
+    kdsEnabled: original?.kdsEnabled ?? false, kdsPin: "", kdsPinConfirm: "", kdsPassword: "", kdsPasswordConfirm: "",
     adminEnabled: original?.adminEnabled ?? false, adminPermission: original?.adminPermission ?? "NONE", adminLoginId: original?.adminLoginId ?? "", adminPin: "", adminPinConfirm: "",
   });
   const [changePosPin, setChangePosPin] = useState(!original?.posEnabled);
   const [changeKdsPin, setChangeKdsPin] = useState(!original?.kdsEnabled || !original?.hasKdsPin);
+  const [changeKdsPassword, setChangeKdsPassword] = useState(!original?.kdsEnabled || !original?.hasKdsPassword);
   const [changeAdminPin, setChangeAdminPin] = useState(!original?.adminEnabled);
   const [errors, setErrors] = useState<StaffErrors>({});
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [kdsDevices, setKdsDevices] = useState<Array<{ deviceId: number; label: string; expiresAt: string; revokedAt: string | null }>>([]);
+  const [showKdsDevices, setShowKdsDevices] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -57,6 +60,28 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
     finally { busyRef.current = false; setBusy(false); }
   };
 
+  const loadKdsDevices = async () => {
+    if (!original) return;
+    try {
+      const response = await fetch(`/api/admin-center/staff/${original.staffId}/kds-devices`, { cache: "no-store" });
+      const result = await response.json() as { success?: boolean; devices?: typeof kdsDevices };
+      if (!response.ok || !result.success) throw new Error("Could not load trusted devices.");
+      setKdsDevices(result.devices ?? []); setShowKdsDevices(true);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not load trusted devices."); }
+  };
+  const revokeKdsDevice = async (deviceId: number) => {
+    if (!original || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try {
+      const response = await fetch(`/api/admin-center/staff/${original.staffId}/kds-devices`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId }),
+      });
+      if (!response.ok) throw new Error("Could not revoke this device.");
+      await loadKdsDevices();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not revoke this device."); }
+    finally { busyRef.current = false; setBusy(false); }
+  };
+
   const input = (id: string, label: string, key: "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "adminPin" | "adminPinConfirm", maxLength: number) => (
     <div className={styles.customerField}>
       <label htmlFor={id}>{label}</label>
@@ -64,6 +89,11 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
       {errors[key] && <p className={styles.customerFieldError} role="alert">{errors[key]}</p>}
     </div>
   );
+  const kdsPasswordInput = (key: "kdsPassword" | "kdsPasswordConfirm") => <div className={styles.customerField}>
+    <label htmlFor={`staff-${key}`}>{key === "kdsPassword" ? "Initial KDS enrollment password (12+ characters)" : "Confirm KDS password"}</label>
+    <input autoComplete="new-password" className={styles.customerFieldInput} disabled={busy} id={`staff-${key}`} maxLength={128} onChange={event => update(key, event.target.value)} type="password" value={draft[key]} />
+    {errors[key] && <p className={styles.customerFieldError} role="alert">{errors[key]}</p>}
+  </div>;
 
   return <><dialog aria-labelledby="staff-modal-title" className={`${styles.customerModal} ${styles.staffModal}`} onCancel={event => { event.preventDefault(); if (!busy && !deleteOpen) onClose(); }} ref={dialogRef}>
     <div className={styles.customerModalHeader}><h2 id="staff-modal-title">{original ? "직원 수정" : "직원 등록"}</h2><button aria-label="닫기" className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button></div>
@@ -91,7 +121,20 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
           {!original && <p className={styles.customerFieldError}>Create the employee first, then enable KDS access and set its PIN.</p>}
           {original && draft.kdsEnabled && <>{original.kdsEnabled && original.hasKdsPin && !changeKdsPin
             ? <button className={styles.staffChangeButton} onClick={() => setChangeKdsPin(true)} type="button">Change KDS PIN</button>
-            : <>{input("staff-kds-pin", "6-digit KDS PIN *", "kdsPin", 6)}{input("staff-kds-confirm", "Confirm KDS PIN *", "kdsPinConfirm", 6)}</>}</>}
+            : <>{input("staff-kds-pin", "Temporary 6-digit KDS PIN *", "kdsPin", 6)}{input("staff-kds-confirm", "Confirm KDS PIN *", "kdsPinConfirm", 6)}</>}
+            {original.kdsEnabled && original.hasKdsPassword && !changeKdsPassword
+              ? <button className={styles.staffChangeButton} onClick={() => setChangeKdsPassword(true)} type="button">Reset KDS enrollment password</button>
+              : <>{kdsPasswordInput("kdsPassword")}{kdsPasswordInput("kdsPasswordConfirm")}</>}
+            <p className={styles.customerFieldError}>Provide the temporary password to the employee securely. It is used once to register Google Authenticator and this device.</p>
+            {original.hasKdsTotp && <p>KDS authenticator is enrolled. Resetting the enrollment password revokes existing KDS devices.</p>}
+            {original.hasKdsTotp && <button className={styles.staffChangeButton} disabled={busy} onClick={() => void loadKdsDevices()} type="button">Manage trusted devices</button>}
+            {showKdsDevices && <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+              {kdsDevices.length === 0 ? <p className="text-sm text-slate-600">No devices registered.</p> : kdsDevices.map(device => <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2" key={device.deviceId}>
+                <div className="min-w-0 text-sm"><p className="truncate font-semibold">{device.label}</p><p className="text-slate-500">{device.revokedAt ? "Revoked" : `Expires ${new Date(device.expiresAt).toLocaleDateString()}`}</p></div>
+                {!device.revokedAt && <button className={styles.staffDeleteButton} disabled={busy} onClick={() => void revokeKdsDevice(device.deviceId)} type="button">Revoke</button>}
+              </div>)}
+            </div>}
+          </>}
         </section>
         {notice && <p className={styles.customerFieldError} role="alert">{notice}</p>}
       </div>

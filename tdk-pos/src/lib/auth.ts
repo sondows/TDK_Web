@@ -96,6 +96,20 @@ export async function verifyKdsPin(pin: string, storedHash: string | null) {
   return verifyNumericPin(pin, storedHash);
 }
 
+export const isValidKdsPassword = (password: string) => password.length >= 12 && password.length <= 128;
+
+export async function hashKdsPassword(password: string) {
+  if (!isValidKdsPassword(password)) throw new Error("KDS onboarding password must be 12 to 128 characters.");
+  const salt = randomBytes(16).toString("hex");
+  const key = await deriveScryptKey(password, salt, 16384, 8, 1);
+  return `scrypt$16384$8$1$${salt}$${key.toString("hex")}`;
+}
+
+export async function verifyKdsPassword(password: string, storedHash: string | null) {
+  if (!storedHash || !isValidKdsPassword(password)) return false;
+  return verifyNumericPin(password, storedHash);
+}
+
 async function verifyNumericPin(pin: string, storedHash: string) {
 
   const [algorithm, n, r, p, salt, expectedKey] = storedHash.split("$");

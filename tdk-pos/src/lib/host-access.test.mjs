@@ -37,6 +37,8 @@ test("POS and KDS paths are blocked on the public Host, including old and API ro
     assert.equal(isExternalKdsPath(path), true, path);
     assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
   }
+  assert.equal(isExternalKdsPath("/api/kds/table-order"), false);
+  assert.equal(isExternalPosPath("/api/kds/table-order"), true);
 });
 
 test("external Host keeps management and read-only assets while rejecting unknown paths", () => {

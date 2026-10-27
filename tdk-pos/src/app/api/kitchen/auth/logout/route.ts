@@ -5,8 +5,10 @@ import { db } from "@/db";
 import { staffSessions } from "@/db/schema";
 import { hashSessionToken } from "@/lib/auth";
 import { KDS_SESSION_COOKIE_NAME, kdsSessionCookieOptions } from "@/lib/kds-auth";
+import { isSameOriginRequest, kdsCookieSecureForRequest } from "@/lib/kds-device";
 
-export async function POST() {
+export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ success: false }, { status: 403 });
   const token = (await cookies()).get(KDS_SESSION_COOKIE_NAME)?.value;
   if (token) {
     const tokenHash = hashSessionToken(token);
@@ -15,6 +17,6 @@ export async function POST() {
     ));
   }
   const response = NextResponse.json({ success: true });
-  response.cookies.set(KDS_SESSION_COOKIE_NAME, "", { ...kdsSessionCookieOptions, maxAge: 0 });
+  response.cookies.set(KDS_SESSION_COOKIE_NAME, "", { ...kdsSessionCookieOptions, secure: kdsCookieSecureForRequest(request), maxAge: 0 });
   return response;
 }

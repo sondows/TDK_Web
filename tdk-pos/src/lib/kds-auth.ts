@@ -5,6 +5,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
 import { hashSessionToken, sessionCookieSecure, SESSION_MAX_AGE_SECONDS } from "@/lib/auth";
+import { getCurrentKdsDevice } from "@/lib/kds-device";
 
 export const KDS_SESSION_COOKIE_NAME = "tdk_kds_session";
 export const kdsSessionCookieOptions = {
@@ -15,7 +16,7 @@ export const kdsSessionCookieOptions = {
   path: "/",
 };
 
-export async function getCurrentKdsStaff() {
+export async function getCurrentKdsStaff({ allowPinChange = false }: { allowPinChange?: boolean } = {}) {
   const token = (await cookies()).get(KDS_SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
   const cutoff = new Date(Date.now() - SESSION_MAX_AGE_SECONDS * 1000);
@@ -23,6 +24,8 @@ export async function getCurrentKdsStaff() {
     staffId: staff.staffId,
     staffCode: staff.staffCode,
     name: staff.name,
+    kdsPinChangeRequired: staff.kdsPinChangeRequired,
+    deviceId: staffSessions.deviceId,
   }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
     eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
     eq(staffSessions.status, "ACTIVE"),
@@ -31,5 +34,7 @@ export async function getCurrentKdsStaff() {
     eq(staff.isActive, 1),
     eq(staff.kdsEnabled, 1),
   )).limit(1);
-  return member ?? null;
+  if (!member || member.deviceId === null || (!allowPinChange && member.kdsPinChangeRequired === 1)) return null;
+  const device = await getCurrentKdsDevice(member.staffId);
+  return device?.deviceId === member.deviceId ? member : null;
 }

@@ -11,6 +11,9 @@ export type StaffSummary = {
   posEnabled: boolean;
   kdsEnabled: boolean;
   hasKdsPin: boolean;
+  hasKdsPassword: boolean;
+  hasKdsTotp: boolean;
+  kdsPinChangeRequired: boolean;
   adminEnabled: boolean;
   adminPermission: AdminPermission;
   adminLoginId: string | null;
@@ -27,6 +30,8 @@ export type StaffDraft = {
   kdsEnabled: boolean;
   kdsPin: string;
   kdsPinConfirm: string;
+  kdsPassword: string;
+  kdsPasswordConfirm: string;
   adminEnabled: boolean;
   adminPermission: AdminPermission;
   adminLoginId: string;
@@ -34,7 +39,7 @@ export type StaffDraft = {
   adminPinConfirm: string;
 };
 
-export type StaffErrors = Partial<Record<"name" | "role" | "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "adminEnabled" | "adminPermission" | "adminLoginId" | "adminPin" | "adminPinConfirm", string>>;
+export type StaffErrors = Partial<Record<"name" | "role" | "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "kdsPassword" | "kdsPasswordConfirm" | "adminEnabled" | "adminPermission" | "adminLoginId" | "adminPin" | "adminPinConfirm", string>>;
 
 export function validateStaffDraft(draft: StaffDraft, original?: StaffSummary): StaffErrors {
   const errors: StaffErrors = {};
@@ -51,6 +56,9 @@ export function validateStaffDraft(draft: StaffDraft, original?: StaffSummary): 
     const required = !original?.kdsEnabled || !original.hasKdsPin;
     if ((required || draft.kdsPin || draft.kdsPinConfirm) && !/^\d{6}$/.test(draft.kdsPin)) errors.kdsPin = "KDS PIN must contain exactly six digits.";
     if ((required || draft.kdsPin || draft.kdsPinConfirm) && draft.kdsPin !== draft.kdsPinConfirm) errors.kdsPinConfirm = "KDS PIN values do not match.";
+    const passwordRequired = !original?.kdsEnabled || !original.hasKdsPassword;
+    if ((passwordRequired || draft.kdsPassword || draft.kdsPasswordConfirm) && draft.kdsPassword.length < 12) errors.kdsPassword = "KDS enrollment password must be at least 12 characters.";
+    if ((passwordRequired || draft.kdsPassword || draft.kdsPasswordConfirm) && draft.kdsPassword !== draft.kdsPasswordConfirm) errors.kdsPasswordConfirm = "KDS passwords do not match.";
   }
   if (draft.adminEnabled) {
     const loginId = draft.adminLoginId.trim().toLowerCase();

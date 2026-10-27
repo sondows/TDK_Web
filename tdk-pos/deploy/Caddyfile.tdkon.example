@@ -1,6 +1,6 @@
 # Replace/merge with the existing tdkon.myasustor.com site block; do not add a duplicate block.
-# Add the exact VPN client subnet to each remote_ip matcher before enabling VPN access.
-# This example permits the restaurant LAN only: 192.168.0.0/24.
+# Public HTTPS KDS is protected by employee authentication, OTP-enrolled devices,
+# and server-side KDS API authorization. POS remains LAN-only.
 tdkon.myasustor.com {
 	@tdkpos path /tdkpos /tdkpos/*
 	handle @tdkpos {
@@ -10,6 +10,7 @@ tdkon.myasustor.com {
 				header_up Host {host}
 				header_up -X-TDK-Trusted-Network
 				header_up X-TDK-Trusted-Network caddy-vpn-validated
+				header_up X-Real-IP {remote_host}
 			}
 		}
 		respond "Forbidden" 403
@@ -17,15 +18,11 @@ tdkon.myasustor.com {
 
 	@tdkkds path /tdkkds /tdkkds/*
 	handle @tdkkds {
-		@trustedKds remote_ip 192.168.0.0/24
-		handle @trustedKds {
-			reverse_proxy 192.168.0.83:3000 {
-				header_up Host {host}
-				header_up -X-TDK-Trusted-Network
-				header_up X-TDK-Trusted-Network caddy-vpn-validated
-			}
+		reverse_proxy 192.168.0.83:3000 {
+			header_up Host {host}
+			header_up -X-TDK-Trusted-Network
+			header_up X-Real-IP {remote_host}
 		}
-		respond "Forbidden" 403
 	}
 
 	@tdkadm path /tdkadm /tdkadm/*
@@ -33,11 +30,13 @@ tdkon.myasustor.com {
 		reverse_proxy 192.168.0.83:3000 {
 			header_up Host {host}
 			header_up -X-TDK-Trusted-Network
+			header_up X-Real-IP {remote_host}
 		}
 	}
 
-	# POS/KDS browser fetches use root-level APIs; keep these behind the same network gate.
-	@protectedApis path /api/auth /api/auth/* /api/staff/active /api/table-cancellations /api/tables /api/kds/table-order /api/pos /api/pos/* /api/table-sessions* /api/table-session-merges* /api/table-layout* /api/order-items* /api/checkouts* /api/sales* /api/kitchen /api/kitchen/* /api/admin/verify /api/admin/verify-pin /api/admin/grant /api/admin/discount-rules /api/admin/menus* /api/admin/staff*
+	# POS and existing privileged APIs remain network-gated. /api/kitchen is
+	# intentionally outside this matcher; its handlers require a valid KDS session.
+	@protectedApis path /api/auth /api/auth/* /api/staff/active /api/table-cancellations /api/tables /api/kds/table-order /api/pos /api/pos/* /api/table-sessions* /api/table-session-merges* /api/table-layout* /api/order-items* /api/checkouts* /api/sales* /api/admin/verify /api/admin/verify-pin /api/admin/grant /api/admin/discount-rules /api/admin/menus* /api/admin/staff*
 	handle @protectedApis {
 		@trustedApi remote_ip 192.168.0.0/24
 		handle @trustedApi {
@@ -45,6 +44,7 @@ tdkon.myasustor.com {
 				header_up Host {host}
 				header_up -X-TDK-Trusted-Network
 				header_up X-TDK-Trusted-Network caddy-vpn-validated
+				header_up X-Real-IP {remote_host}
 			}
 		}
 		respond "Forbidden" 403
@@ -55,6 +55,7 @@ tdkon.myasustor.com {
 		reverse_proxy 192.168.0.83:3000 {
 			header_up Host {host}
 			header_up -X-TDK-Trusted-Network
+			header_up X-Real-IP {remote_host}
 		}
 	}
 }

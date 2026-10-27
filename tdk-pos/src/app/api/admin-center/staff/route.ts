@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
-import { hashAdminPin, hashKdsPin, hashPin } from "@/lib/auth";
+import { hashAdminPin, hashKdsPassword, hashKdsPin, hashPin } from "@/lib/auth";
 import { isDuplicateAdminLoginId, newInternalStaffCode, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
 
 export async function GET() {
@@ -32,12 +32,14 @@ export async function POST(request: Request) {
     }
     const pinHash = draft.posEnabled ? await hashPin(draft.posPin) : null;
     const kdsPinHash = draft.kdsEnabled ? await hashKdsPin(draft.kdsPin) : null;
+    const kdsPasswordHash = draft.kdsEnabled ? await hashKdsPassword(draft.kdsPassword) : null;
     const adminPinHash = draft.adminEnabled ? await hashAdminPin(draft.adminPin) : null;
     const staffId = await db.transaction(async tx => {
       const result = await tx.insert(staff).values({
         staffCode: newInternalStaffCode(), name: draft.name, role: draft.role,
         isActive: draft.isActive ? 1 : 0, pinHash,
-        kdsEnabled: draft.kdsEnabled ? 1 : 0, kdsPinHash,
+        kdsEnabled: draft.kdsEnabled ? 1 : 0, kdsPinHash, kdsPasswordHash,
+        kdsPinChangeRequired: draft.kdsEnabled ? 1 : 0,
         adminLoginId: draft.adminEnabled ? draft.adminLoginId : null, adminPinHash,
         adminPermission: draft.adminPermission,
       });

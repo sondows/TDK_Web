@@ -5,7 +5,7 @@ import { validateStaffDraft } from "./staff-management.ts";
 const draft = {
   name: "조회 직원", role: "STAFF", isActive: true,
   posEnabled: true, posPin: "1234", posPinConfirm: "1234",
-  kdsEnabled: false, kdsPin: "", kdsPinConfirm: "",
+  kdsEnabled: false, kdsPin: "", kdsPinConfirm: "", kdsPassword: "", kdsPasswordConfirm: "",
   adminEnabled: true, adminPermission: "READ_ONLY", adminLoginId: "readonly.user",
   adminPin: "123456", adminPinConfirm: "123456",
 };
@@ -21,7 +21,7 @@ test("management access requires its own credentials", () => {
 });
 
 test("KDS access requires a separate six-digit PIN", () => {
-  assert.deepEqual(validateStaffDraft({ ...draft, kdsEnabled: true, kdsPin: "123456", kdsPinConfirm: "123456" }), {});
+  assert.deepEqual(validateStaffDraft({ ...draft, kdsEnabled: true, kdsPin: "123456", kdsPinConfirm: "123456", kdsPassword: "valid-onboarding-password", kdsPasswordConfirm: "valid-onboarding-password" }), {});
   assert.ok(validateStaffDraft({ ...draft, kdsEnabled: true, kdsPin: "1234", kdsPinConfirm: "1234" }).kdsPin);
   assert.ok(validateStaffDraft({ ...draft, kdsEnabled: true, kdsPin: "123456", kdsPinConfirm: "654321" }).kdsPinConfirm);
 });

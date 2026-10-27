@@ -1,8 +1,8 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { staff, staffSessions } from "@/db/schema";
+import { kdsTrustedDevices, staff, staffSessions } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
-import { hashAdminPin, hashKdsPin, hashPin } from "@/lib/auth";
+import { hashAdminPin, hashKdsPassword, hashKdsPin, hashPin } from "@/lib/auth";
 import { isDuplicateAdminLoginId, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
 import { isValidPin } from "@/lib/pin";
 
@@ -64,14 +64,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ st
         pinHash: draft.posEnabled ? (draft.posPin ? await hashPin(draft.posPin) : target.pinHash) : null,
         kdsEnabled: draft.kdsEnabled ? 1 : 0,
         kdsPinHash: draft.kdsEnabled ? (draft.kdsPin ? await hashKdsPin(draft.kdsPin) : target.kdsPinHash) : null,
+        kdsPasswordHash: draft.kdsEnabled ? (draft.kdsPassword ? await hashKdsPassword(draft.kdsPassword) : target.kdsPasswordHash) : null,
+        kdsTotpSecretEnc: draft.kdsEnabled ? (draft.kdsPassword ? null : target.kdsTotpSecretEnc) : null,
+        kdsTotpPendingSecretEnc: null,
+        kdsTotpPendingExpiresAt: null,
+        kdsPinChangeRequired: draft.kdsEnabled ? (draft.kdsPin ? 1 : target.kdsPinChangeRequired) : 0,
         adminLoginId: draft.adminEnabled ? draft.adminLoginId : null,
         adminPinHash: draft.adminEnabled ? (draft.adminPin ? await hashAdminPin(draft.adminPin) : target.adminPinHash) : null,
         adminPermission: draft.adminPermission,
         updatedAt: new Date(),
       }).where(eq(staff.staffId, id));
-      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPin) {
+      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPin || draft.kdsPassword) {
         await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
           eq(staffSessions.staffId, id), eq(staffSessions.sessionType, "KDS"), eq(staffSessions.status, "ACTIVE"),
+        ));
+      }
+      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPassword) {
+        await tx.update(kdsTrustedDevices).set({ revokedAt: new Date() }).where(and(
+          eq(kdsTrustedDevices.staffId, id), isNull(kdsTrustedDevices.revokedAt),
         ));
       }
       return { status: 200, body: { success: true } };
