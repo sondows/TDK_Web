@@ -8,7 +8,6 @@ import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
 import PosSubHeader from "@/app/pos/PosSubHeader";
 import styles from "./admin.module.css";
-import { useAdminReadOnly } from "./AdminAccessContext";
 
 type Summary = { total: number; totalCount: number; pending: number; salesIncludingPending: number; card: number; cardCount: number; cash: number; cashCount: number; other: number; otherCount: number; discount: number; discountCount: number; completedCount: number; cancelledCount: number };
 type PaymentMethodOption = { paymentMethodId: number; methodName: string; methodCode: string; methodType: string };
@@ -22,7 +21,6 @@ const dateTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { timeZone:
 const clockTime = (value: string) => dateTime(value).split(" ").slice(-1)[0];
 
 export default function AdminDashboard() {
-  const readOnly = useAdminReadOnly();
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [detail, setDetail] = useState<SaleDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,7 +183,7 @@ export default function AdminDashboard() {
       </div>
     </section>
     <dialog ref={detailDialog} className={`${styles.customerModal} ${styles.dashboardDetail}`} onClose={() => setDetail(null)}>
-      {detail && <><PosSubHeader backLabel="판매내역으로 돌아가기" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={readOnly ? null : <button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
+      {detail && <><PosSubHeader backLabel="판매내역으로 돌아가기" onBack={() => detailDialog.current?.close()} title="판매 상세" trailing={<button type="button" className={styles.dashboardDetailDeleteButton} onClick={() => { setDeleteError(""); confirmDialog.current?.showModal(); }}>삭제</button>} />
         <div className={styles.dashboardDetailBody}>
           <dl className={styles.dashboardFacts}><div><dt>테이블</dt><dd>{detail.tableLabel}</dd></div><div><dt>주문시간</dt><dd>{dateTime(detail.orderedAt)}</dd></div><div><dt>결제상태</dt><dd>{labels[detail.displayStatus]}</dd></div></dl>
           <h3>합산 메뉴</h3><div className={styles.customerTableScroll}><table className={styles.customerTable}><thead><tr>
@@ -200,7 +198,7 @@ export default function AdminDashboard() {
             <SortableHeader active={originalSort.key === "amount"} direction={originalSort.direction} onClick={() => setOriginalSort(current => nextGridSort(current, "amount", "desc"))}>금액</SortableHeader>
           </tr></thead><tbody>{sortedOriginalItems.map((item, index) => <tr key={`${item.orderItemId}-${index}`}><td>{item.itemName}</td><td>{item.qty}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>
           <dl className={styles.dashboardAmounts}><div><dt>주문금액</dt><dd>{money(detail.subtotalAmount)}</dd></div>{detail.discounts.map((discount, index) => <div key={index}><dt>{discount.label}</dt><dd>-{money(discount.amount)}</dd></div>)}{detail.discountAmount > 0 && <div><dt>할인금액</dt><dd>-{money(detail.discountAmount)}</dd></div>}<div><dt>최종 결제금액</dt><dd>{money(detail.totalAmount)}</dd></div></dl>
-          <h3>결제수단</h3><div className={styles.dashboardPayments}>{detail.payments.map(payment => <div key={payment.paymentId}><span>{payment.method}{payment.customerDisplayName ? `(${payment.customerDisplayName})` : ""} · {payment.status === "APPROVED" ? "결제완료" : "취소"}</span><strong>{money(payment.appliedAmount)}</strong>{!readOnly && payment.status === "APPROVED" && <button type="button" className={styles.staffEditButton} disabled={busy} onClick={() => void openMethodEditor(payment.paymentId, payment.paymentMethodId)}>수정</button>}</div>)}</div>
+          <h3>결제수단</h3><div className={styles.dashboardPayments}>{detail.payments.map(payment => <div key={payment.paymentId}><span>{payment.method}{payment.customerDisplayName ? `(${payment.customerDisplayName})` : ""} · {payment.status === "APPROVED" ? "결제완료" : "취소"}</span><strong>{money(payment.appliedAmount)}</strong>{payment.status === "APPROVED" && <button type="button" className={styles.staffEditButton} disabled={busy} onClick={() => void openMethodEditor(payment.paymentId, payment.paymentMethodId)}>수정</button>}</div>)}</div>
         </div></>}
     </dialog>
     <dialog ref={confirmDialog} className={`${styles.customerModal} ${styles.staffDeleteConfirm}`}>

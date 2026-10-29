@@ -1,4 +1,4 @@
-import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables } from "@/db/schema";
@@ -9,7 +9,7 @@ type Layout = { tableId: number; positionX: number; positionY: number; layoutWid
 const valid = (value: unknown, min: number, max: number) => Number.isFinite(Number(value)) && Number(value) >= min && Number(value) <= max;
 
 export async function PUT(request: Request) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   const staff = await getManagementOwner();
   if (!staff) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   if (staff.role !== "OWNER") return Response.json({ success: false, message: "OWNER만 테이블 배치를 저장할 수 있습니다." }, { status: 403 });

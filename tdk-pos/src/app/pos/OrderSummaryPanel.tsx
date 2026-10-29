@@ -5,7 +5,6 @@ import PinKeypad from "@/components/PinKeypad";
 import PinInput from "@/components/PinInput";
 import { formatMoney } from "@/lib/format-money";
 import { salePlaceLabel } from "@/lib/sale-place-label";
-import { PIN_LENGTH } from "@/lib/pin";
 import type { TableFinancials } from "@/lib/table-session-financials";
 import { buildPartyOrderRows, type SummaryRow } from "@/lib/pos-order-summary-rows";
 import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
@@ -430,7 +429,7 @@ export default function OrderSummaryPanel({
         : { checked: true, keep: i.effectiveQty, touched: true },
     );
   };
-  const execute = async (credentials?: { staffCode: string; pin: string }) => {
+  const execute = async (credentials?: { loginId: string; pin: string }) => {
     update((x) => ({ ...x, busy: true, error: "", pinError: false }));
     try {
       const r = await fetch("/api/order-items/cancellations/batch", {
@@ -930,7 +929,7 @@ export default function OrderSummaryPanel({
             update((x) => ({ ...x, staffCode, pin, error: "", pinError: false }))
           }
           dismissPinError={() => update((x) => ({ ...x, error: "", pinError: false }))}
-          submit={(staffCode, pin) => void execute({ staffCode, pin })}
+          submit={(staffCode, pin) => void execute({ loginId: staffCode, pin })}
         />
       )}
       {paymentOpen && selected && (
@@ -1100,7 +1099,7 @@ function Reauth({
   submit: (staffCode: string, pin: string) => void;
 }) {
   const [employees, setEmployees] = useState<
-    Array<{ staffId: number; staffCode: string; name: string; role: string; hasPin: boolean }>
+    Array<{ loginId: string; role: string; hasPin: boolean; pinLength: 6 }>
   >([]);
   useEffect(() => {
     let mounted = true;
@@ -1109,27 +1108,27 @@ function Reauth({
         (r) =>
           r.json() as Promise<{
             staff?: Array<{
-              staffId: number;
-              staffCode: string;
-              name: string;
+              loginId: string;
               role: string;
               hasPin: boolean;
+              pinLength: 6;
             }>;
           }>,
       )
       .then((data) => {
-        if (mounted) setEmployees((data.staff ?? []).filter(employee => employee.staffCode !== "000" && employee.hasPin));
+        if (mounted) setEmployees((data.staff ?? []).filter(employee => employee.hasPin));
       })
       .catch(() => undefined);
     return () => {
       mounted = false;
     };
   }, []);
+  const selectedPinLength = employees.find(employee => employee.loginId === c.staffCode)?.pinLength ?? 6;
   const enterDigit = (digit: string) => {
-    if (!c.staffCode || c.busy || c.pin.length >= PIN_LENGTH) return;
+    if (!c.staffCode || c.busy || c.pin.length >= selectedPinLength) return;
     const pin = `${c.pin}${digit}`;
     set(c.staffCode, pin);
-    if (pin.length === PIN_LENGTH) submit(c.staffCode, pin);
+    if (pin.length === selectedPinLength) submit(c.staffCode, pin);
   };
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-3">
@@ -1139,13 +1138,13 @@ function Reauth({
         <PinAuthPanel
           label="직원 선택"
           people={employees}
-          selectedCode={c.staffCode}
+          selectedLoginId={c.staffCode}
           selectionDisabled={c.busy}
           showLabels={false}
           largePeopleButtons
           spaciousPinGap
           scrollablePeople
-          onSelect={(employee) => set(employee.staffCode, "")}
+          onSelect={(employee) => set(employee.loginId, "")}
           emptyMessage="선택할 수 있는 직원이 없습니다."
           pinInput={
             <PinInput
@@ -1153,6 +1152,7 @@ function Reauth({
               autoFocus={Boolean(c.staffCode)}
               className="!min-h-[60px]"
               disabled={!c.staffCode || c.busy}
+              maxLength={selectedPinLength}
               keypadAligned
               onChange={(pin) => set(c.staffCode, pin)}
               onComplete={(pin) => c.staffCode && submit(c.staffCode, pin)}
@@ -1161,7 +1161,7 @@ function Reauth({
           }
           keypad={
             <PinKeypad
-              digitDisabled={!c.staffCode || c.busy || c.pin.length >= PIN_LENGTH}
+              digitDisabled={!c.staffCode || c.busy || c.pin.length >= selectedPinLength}
               actionDisabled={!c.staffCode || c.busy || !c.pin.length}
               largeKeys
               onDigit={enterDigit}

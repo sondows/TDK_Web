@@ -271,10 +271,16 @@
   accent-color: #455a64;
 }
 
-.staffToolbar { flex-wrap: wrap; }
-.readOnlyBadge { border: 1px solid #b8d2f8; border-radius: 999px; background: #eff6ff; padding: 4px 8px; color: #1d4ed8; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.staffFilters { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 12px 20px; min-width: 0; }
+.staffToolbar { flex-wrap: nowrap; }
+.staffFilters { display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: 12px 20px; min-width: 0; }
 .staffFilters .customerSearch { flex: 0 1 340px; }
+.staffFilters .staffToggleEmployeeFilter { width: auto; flex: 0 0 auto; justify-content: flex-start; gap: 10px; white-space: nowrap; }
+.staffFilters .staffToggleEmployeeFilter .staffToggleControl { flex: 0 0 74px; }
+
+@media (max-width: 900px) {
+  .staffToolbar { flex-wrap: wrap; }
+  .staffFilters { flex-wrap: wrap; }
+}
 
 .customerSearch {
   width: min(100%, 340px);
@@ -588,6 +594,45 @@
   padding: 16px 24px;
 }
 
+.ownerManagement { display: grid; gap: 14px; }
+.ownerPanel, .ownerPasswordPanel { border: 1px solid #dce3e7; background: #fff; }
+.ownerPanel { padding: 18px 20px; }
+.ownerPanel h2, .ownerPasswordPanel strong { margin: 0; color: #344e5a; font-size: 16px; font-weight: 700; }
+.ownerList { margin: 14px 0 0; padding: 0; list-style: none; }
+.ownerRow { display: grid; grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.2fr) auto; min-height: 52px; align-items: center; gap: 14px; border-top: 1px solid #e7ecef; padding: 7px 2px; }
+.ownerLoginId { min-width: 0; overflow-wrap: anywhere; color: #25343b; font-weight: 600; }
+.ownerStatus { color: #52636c; font-size: 13px; }
+.ownerStatusActive { color: #276749; }
+.ownerStatusPending { color: #9a6700; }
+.ownerManageButton, .ownerActionButton, .ownerActionDanger { min-height: 36px; border: 1px solid #cbd5da; border-radius: 4px; background: #fff; padding: 0 13px; color: #344e5a; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ownerManageButton:hover, .ownerActionButton:hover { background: #f2f5f6; }
+.ownerManageButton:disabled, .ownerActionButton:disabled, .ownerActionDanger:disabled { cursor: not-allowed; opacity: 0.6; }
+.ownerAddArea { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.ownerEmpty, .ownerHint { margin: 8px 0; color: #60717a; font-size: 13px; line-height: 1.5; }
+.ownerFeedback { margin: 0; border: 1px solid #dce3e7; border-radius: 4px; background: #f7fafb; padding: 10px 12px; color: #344e5a; font-size: 13px; line-height: 1.45; }
+.ownerPasswordPanel { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; }
+.ownerDialog { width: min(460px, calc(100vw - 24px)); }
+.ownerDialogBody { display: grid; gap: 14px; padding: 20px 24px; color: #52636c; font-size: 14px; line-height: 1.5; }
+.ownerDialogBody p { margin: 0; }
+.ownerDialogBody .customerField { gap: 7px; color: #344e5a; font-weight: 600; }
+.ownerDialogBody .customerFieldInput { box-sizing: border-box; }
+.ownerPasswordFields { gap: 13px; }
+.ownerActionChoices { display: grid; justify-items: stretch; gap: 8px; }
+.ownerActionChoices button { text-align: left; }
+.ownerActionDanger { border-color: #d7b1b1; color: #9b3434; }
+.ownerActionDanger:hover { background: #fff6f6; }
+
+@media (max-width: 560px) {
+  .ownerPanel { padding: 15px 12px; }
+  .ownerRow { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 10px 0; }
+  .ownerStatus { grid-column: 1; grid-row: 2; }
+  .ownerManageButton { grid-column: 2; grid-row: 1 / span 2; }
+  .ownerAddArea { align-items: flex-start; flex-direction: column; }
+  .ownerPasswordPanel { padding: 10px 12px; }
+  .ownerDialogBody { padding: 18px 16px; }
+  .ownerDialog .customerModalFooter { padding: 13px 16px; }
+}
+
 .customerCancelButton,
 .customerSubmitButton {
   min-width: 76px;
@@ -639,17 +684,18 @@
 .customerTable th:nth-child(7), .customerTable td:nth-child(7) { width: 72px; }
 
 .staffTable {
-  min-width: 900px;
+  min-width: 1120px;
   table-layout: fixed;
 }
 
-.staffTable th:first-child, .staffTable td:first-child { width: 18%; padding-right: 12px; padding-left: 12px; }
-.staffTable th:nth-child(2), .staffTable td:nth-child(2) { width: 11%; }
-.staffTable th:nth-child(3), .staffTable td:nth-child(3) { width: 9%; }
-.staffTable th:nth-child(4), .staffTable td:nth-child(4) { width: 16%; }
-.staffTable th:nth-child(5), .staffTable td:nth-child(5) { width: 18%; }
-.staffTable th:nth-child(6), .staffTable td:nth-child(6) { width: 10%; }
-.staffTable th:nth-child(7), .staffTable td:nth-child(7) { width: 18%; }
+.staffTable th:first-child, .staffTable td:first-child { width: 20%; padding-right: 12px; padding-left: 12px; }
+.staffTable th:nth-child(2), .staffTable td:nth-child(2) { width: 14%; }
+.staffTable th:nth-child(3), .staffTable td:nth-child(3) { width: 9.5%; }
+.staffTable th:nth-child(4), .staffTable td:nth-child(4),
+.staffTable th:nth-child(5), .staffTable td:nth-child(5),
+.staffTable th:nth-child(6), .staffTable td:nth-child(6) { width: 9.5%; }
+.staffTable th:nth-child(7), .staffTable td:nth-child(7) { width: 14%; }
+.staffTable th:nth-child(8), .staffTable td:nth-child(8) { width: 14%; }
 .staffTable td { white-space: nowrap; }
 .staffTable .customerName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .staffAdminLoginId { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -913,6 +959,9 @@
 }
 
 .staffModal { width: min(560px, calc(100vw - 32px)); }
+.staffModalHeader { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; gap: 8px; }
+.staffModalHeader .staffToggle { width: auto; justify-content: center; gap: 10px; white-space: nowrap; }
+.staffModalHeader .customerModalClose { justify-self: end; }
 .staffFormSection { display: flex; flex-direction: column; gap: 12px; }
 .staffFormSection + .staffFormSection { border-top: 1px solid #e2e8eb; padding-top: 18px; }
 .staffFormSection h3 { color: #344e5a; font-size: 15px; font-weight: 700; }
@@ -956,6 +1005,12 @@
 .staffDeleteConfirmButton { min-width: 76px; min-height: 36px; border: 1px solid #ad4040; border-radius: 4px; background: #ad4040; padding: 0 14px; color: #fff; font-size: 14px; font-weight: 600; }
 .staffDeleteConfirmButton:hover { background: #973434; }
 .staffDeleteConfirmButton:disabled { cursor: not-allowed; opacity: 0.65; }
+
+@media (max-width: 480px) {
+  .staffModalHeader { grid-template-columns: minmax(0, 1fr) auto 36px; gap: 4px; padding-right: 12px; padding-left: 14px; }
+  .staffModalHeader .staffToggle { gap: 6px; font-size: 12px; }
+  .staffModalHeader .customerModalClose { width: 36px; height: 36px; flex-basis: 36px; }
+}
 
 .welcome {
   border: 1px solid #dce3e7;

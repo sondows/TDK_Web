@@ -1,0 +1,14 @@
+# Merge this small change into the active tdk-caddy site after deployment approval.
+# The actual NAS Caddyfile currently has only the site and reverse_proxy line.
+# LAN KDS on :3000 is attested by the app's socket-aware server. The proxy
+# origin header allows public HTTPS requests into the app without granting
+# internal-network status. Set the same random secret in Caddy and app env.
+tdkon.myasustor.com {
+    reverse_proxy 192.168.0.83:3000 {
+        header_up -X-TDK-Trusted-Network
+        header_up -X-TDK-KDS-Client-IP
+        header_up -X-TDK-KDS-Proxy-Secret
+        header_up X-TDK-Proxy-Client-IP {client_ip}
+        header_up X-TDK-Proxy-Origin-Secret {env.KDS_PROXY_SHARED_SECRET}
+    }
+}

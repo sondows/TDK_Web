@@ -15,7 +15,7 @@ export default function AdminLogoutButton() {
     try {
       const response = await fetch("/api/admin-center/logout", { method: "POST" });
       if (!response.ok) throw new Error("logout");
-      router.replace("/admin/login");
+      router.replace("/tdkadm/login");
       router.refresh();
     } catch {
       setError("로그아웃에 실패했습니다.");

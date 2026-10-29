@@ -1,4 +1,4 @@
-import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@/db";
@@ -22,7 +22,7 @@ const isDuplicateKeyError = (error: unknown) => typeof error === "object" && err
 const nextMenuCode = () => "M-" + randomUUID().replaceAll("-", "").toUpperCase();
 
 export async function POST(request: Request) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner(); if (auth.error) return auth.error;
   try {
     const body = await request.json() as { name?: unknown; price?: unknown; categoryId?: unknown; menuNumber?: unknown; isActive?: unknown; components?: unknown; optionConfig?: unknown; kdsKind?: unknown; kdsGroupKey?: unknown; kdsCompletionTimer?: unknown; kdsPostCookTimer?: unknown; kdsVisible?: unknown };

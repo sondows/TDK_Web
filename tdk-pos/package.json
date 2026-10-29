@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node server.cjs",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.cjs",
     "lint": "eslint"
   },
   "dependencies": {

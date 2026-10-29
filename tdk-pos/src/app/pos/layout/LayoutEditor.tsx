@@ -13,7 +13,7 @@ const LAYOUT_GRID_SIZE = 20;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const snap = (value: number) => Math.round(value / 2) * 2;
 
-export default function LayoutEditor({ tables: initial, returnPath = "/admin", embedded = false, readOnly = false }: { tables: Table[]; returnPath?: "/admin" | "/pos/admin"; embedded?: boolean; readOnly?: boolean }) {
+export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", embedded = false, readOnly = false }: { tables: Table[]; returnPath?: "/tdkadm" | "/pos/admin"; embedded?: boolean; readOnly?: boolean }) {
   const router = useRouter();
   const board = useRef<HTMLDivElement>(null);
   const [tables, setTables] = useState(initial);
@@ -86,7 +86,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/admin", e
     const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", end);
   };
-  const leave = (path: "/admin" | "/pos/admin") => {
+  const leave = (path: "/tdkadm" | "/pos/admin") => {
     if (!dirty || window.confirm("저장하지 않은 변경사항이 있습니다. 나가시겠습니까?")) router.push(path);
   };
   const save = async () => {

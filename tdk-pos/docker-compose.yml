@@ -7,8 +7,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
-    ports:
-      - "3000:3000"
+    network_mode: host
     volumes:
       - ./public/uploads/menu:/app/public/uploads/menu
       - ./storage/receipt-logo:/app/storage/receipt-logo

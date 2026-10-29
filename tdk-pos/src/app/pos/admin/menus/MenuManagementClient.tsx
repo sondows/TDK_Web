@@ -6,7 +6,6 @@ import { useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format-money";
 import PosSubHeader from "../../PosSubHeader";
 import type { MenuChoiceConfig } from "@/lib/menu-choice-options";
-import { useAdminReadOnly } from "@/app/admin/AdminAccessContext";
 import type { KdsMenuConfig } from "@/lib/kds-menu-config";
 
 type Category = { categoryId: number; name: string; sortOrder: number };
@@ -24,12 +23,10 @@ const formatPriceInput = (value: string | number) => new Intl.NumberFormat("ko-K
 const sortMenus = (items: Menu[]) => [...items].sort((a, b) => a.categorySortOrder - b.categorySortOrder || a.sortOrder - b.sortOrder || a.menuId - b.menuId);
 
 export default function MenuManagementClient({ categories, initialMenus, componentMenus }: { categories: Category[]; initialMenus: Menu[]; componentMenus: ComponentMenu[] }) {
-  const readOnly = useAdminReadOnly();
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
   const [menuRows, setMenuRows] = useState(() => sortMenus(initialMenus));
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
-  const [viewingMenu, setViewingMenu] = useState<Menu | null>(null);
   const [message, setMessage] = useState("");
   const [movingMenuId, setMovingMenuId] = useState<number | null>(null);
 
@@ -68,13 +65,10 @@ export default function MenuManagementClient({ categories, initialMenus, compone
   return <section className="mx-auto mt-6 max-w-6xl">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
       <div className="flex flex-wrap gap-2"><button className={activeCategoryId === null ? activeClass : idleClass} onClick={() => setActiveCategoryId(null)} type="button">전체</button>{categories.map(category => <button className={activeCategoryId === category.categoryId ? activeClass : idleClass} key={category.categoryId} onClick={() => setActiveCategoryId(category.categoryId)} type="button">{categoryDisplayName(category.name)}</button>)}</div>
-      {!readOnly && <div className="flex gap-2"><button className={activeClass + " disabled:bg-slate-300"} disabled={!categories.length} onClick={() => setIsCreateOpen(true)} type="button">+ 새 메뉴 추가</button></div>}
+      <div className="flex gap-2"><button className={activeClass + " disabled:bg-slate-300"} disabled={!categories.length} onClick={() => setIsCreateOpen(true)} type="button">+ 새 메뉴 추가</button></div>
     </div>
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
-    <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={readOnly ? setViewingMenu : setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} readOnly={readOnly} />)}</div>
-    {viewingMenu && <Dialog close={() => setViewingMenu(null)} saving={false} title="메뉴 정보">
-      <dl className="space-y-3 text-sm"><div><dt className="font-bold text-slate-500">메뉴명</dt><dd>{viewingMenu.name}</dd></div><div><dt className="font-bold text-slate-500">가격</dt><dd>{formatMoney(viewingMenu.price)}</dd></div><div><dt className="font-bold text-slate-500">카테고리</dt><dd>{categoryDisplayName(viewingMenu.categoryName)}</dd></div><div><dt className="font-bold text-slate-500">메뉴번호</dt><dd>{viewingMenu.menuNumber ?? "—"}</dd></div><div><dt className="font-bold text-slate-500">KDS 표시</dt><dd>{viewingMenu.kdsVisible ? "ON" : "OFF"}</dd></div><div><dt className="font-bold text-slate-500">KDS 조리분류</dt><dd>{kdsKindLabel(viewingMenu.kdsKind)}</dd></div><div><dt className="font-bold text-slate-500">조리 그룹</dt><dd>{viewingMenu.kdsGroupKey || "기본"}</dd></div><div><dt className="font-bold text-slate-500">완료 후 타이머</dt><dd>{viewingMenu.kdsCompletionTimer ? "사용" : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">조리 후 타이머 선택</dt><dd>{viewingMenu.kdsPostCookTimer ? "사용" : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">옵션</dt><dd>{viewingMenu.optionConfig.enabled ? `${viewingMenu.optionConfig.title}: ${viewingMenu.optionConfig.buttons.join(", ")}` : "미사용"}</dd></div><div><dt className="font-bold text-slate-500">구성 메뉴</dt><dd>{viewingMenu.components.map(component => `${component.itemName} × ${component.qtyPerUnit}`).join(", ") || "없음"}</dd></div></dl>
-    </Dialog>}
+    <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} />)}</div>
     {isCreateOpen && <CreateMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
     {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} sourceMenus={menuRows.filter(row => row.menuId !== editingMenu.menuId)} update={updateMenu} />}
   </section>;
@@ -83,11 +77,11 @@ export default function MenuManagementClient({ categories, initialMenus, compone
 const activeClass = "min-h-11 rounded-xl bg-blue-600 px-4 font-bold text-white";
 const idleClass = "min-h-11 rounded-xl border border-slate-300 bg-white px-4 font-bold text-slate-700";
 
-function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu, readOnly }: { category: Category; menus: Menu[]; movingMenuId: number | null; moveMenu: (menu: Menu, direction: "up" | "down") => Promise<void>; editMenu: (menu: Menu) => void; readOnly: boolean }) {
+function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu }: { category: Category; menus: Menu[]; movingMenuId: number | null; moveMenu: (menu: Menu, direction: "up" | "down") => Promise<void>; editMenu: (menu: Menu) => void }) {
   return <section className="overflow-x-auto rounded-2xl bg-white shadow-sm"><h2 className="border-b border-slate-200 px-5 py-4 text-lg font-extrabold">{categoryDisplayName(category.name)}</h2><div className="min-w-[720px]">
     <div className="grid grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-bold text-slate-500"><span>순서</span><span>메뉴명</span><span className="text-right">가격</span><span>카테고리</span><span>사용 상태</span><span className="text-center">순서 변경</span></div>
     {menus.length ? menus.map((menu, index) => <div className="grid min-h-14 cursor-pointer grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] items-center gap-3 border-b border-slate-100 px-5 py-2 last:border-b-0 hover:bg-slate-50" key={menu.menuId} onClick={() => editMenu(menu)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); editMenu(menu); } }} role="button" tabIndex={0}>
-      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{categoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span><span className="flex justify-center gap-2">{!readOnly && <><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></>}</span>
+      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{categoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span><span className="flex justify-center gap-2"><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></span>
     </div>) : <p className="px-5 py-8 text-sm text-slate-400">등록된 메뉴가 없습니다.</p>}
   </div></section>;
 }

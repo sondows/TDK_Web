@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { auditLogs, staff } from "@/db/schema";
-import { hashKdsPin, isValidKdsPin } from "@/lib/auth";
+import { auditLogs, staff, staffSessions } from "@/db/schema";
+import { hashEmployeePin, isValidKdsPin, verifyKdsPin } from "@/lib/auth";
 import { getCurrentKdsStaff } from "@/lib/kds-auth";
 import { isSameOriginRequest } from "@/lib/kds-device";
 
@@ -15,8 +15,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, message: "Enter matching 6-digit PIN values." }, { status: 400 });
   }
   try {
+    const [current] = await db.select({ pinHash: staff.kdsPinHash }).from(staff).where(eq(staff.staffId, member.staffId)).limit(1);
+    if (current?.pinHash && await verifyKdsPin(body.pin as string, current.pinHash)) {
+      return NextResponse.json({ success: false, message: "Choose a PIN different from the temporary PIN." }, { status: 400 });
+    }
     await db.transaction(async tx => {
-      await tx.update(staff).set({ kdsPinHash: await hashKdsPin(body.pin as string), kdsPinChangeRequired: 0 }).where(eq(staff.staffId, member.staffId));
+      await tx.update(staff).set({ employeePinHash: await hashEmployeePin(body.pin as string), kdsPinChangeRequired: 0 }).where(eq(staff.staffId, member.staffId));
+      await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
+        eq(staffSessions.staffId, member.staffId), eq(staffSessions.status, "ACTIVE"),
+      ));
       await tx.insert(auditLogs).values({ staffId: member.staffId, actionType: "KDS_PIN_CHANGED", entityType: "KDS_AUTH" });
     });
     return NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });

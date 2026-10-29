@@ -36,7 +36,7 @@ export async function getAdminGrantedStaff(): Promise<CurrentStaff | null> {
   if (!staffIdText || !expiryText || !signature || Date.now() > Number(expiryText)) return null;
   const expected = sign(payload);
   if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-  const [member] = await db.select({ staffId: staff.staffId, staffCode: staff.staffCode, name: staff.name, role: staff.role }).from(staff).where(and(eq(staff.staffId, Number(staffIdText)), eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
+  const [member] = await db.select({ staffId: staff.staffId, staffCode: staff.staffCode, loginId: staff.adminLoginId, name: staff.name, role: staff.role }).from(staff).where(and(eq(staff.staffId, Number(staffIdText)), eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
   return member ?? null;
 }
 

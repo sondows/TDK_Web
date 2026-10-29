@@ -1,7 +1,7 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { orderItemCancellations, orderItems, orders, staff, tableSessions } from "@/db/schema";
-import { getCurrentStaff, verifyPin } from "@/lib/auth";
+import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
 import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
   const sharedMode = await getPosLoginMode() === "SHARED";
   if (!current && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   try {
-    const orderItemId = Number((await params).orderItemId); const body = await request.json() as { qty?: unknown; reason?: unknown; detail?: unknown; staffCode?: unknown; pin?: unknown };
+    const orderItemId = Number((await params).orderItemId); const body = await request.json() as { qty?: unknown; reason?: unknown; detail?: unknown; loginId?: unknown; pin?: unknown };
     const qty = Number(body.qty); const reason = typeof body.reason === "string" ? body.reason : ""; const detail = typeof body.detail === "string" ? body.detail.trim() : "";
     if (!Number.isInteger(orderItemId) || orderItemId <= 0 || !Number.isInteger(qty) || qty <= 0 || !reasons.has(reason) || (reason === "기타" && !detail)) return Response.json({ success: false, message: "취소 정보를 확인하세요." }, { status: 400 });
     const result = await db.transaction(async tx => {
@@ -34,7 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
       const needsReauth = shouldRequireCancellationPin(fullOrderCancellation);
       const [sharedStaff] = sharedMode ? await tx.select({ staffId: staff.staffId }).from(staff).where(and(eq(staff.staffCode, "000"), eq(staff.isActive, 1))).limit(1) : [];
       let cancelledBy = sharedMode ? sharedStaff?.staffId : current?.staffId;
-      if (needsReauth) { if (typeof body.staffCode !== "string" || typeof body.pin !== "string") return { reauth: true as const }; const [checker] = await tx.select({ id: staff.staffId, pin: staff.pinHash }).from(staff).where(and(eq(staff.staffCode, body.staffCode.trim()), eq(staff.isActive, 1))).limit(1); if (!checker || body.staffCode.trim() === "000" || !(await verifyPin(body.pin, checker.pin))) throw new Error("직원번호 또는 PIN이 올바르지 않습니다."); cancelledBy = checker.id; }
+      if (needsReauth) { if (typeof body.loginId !== "string" || typeof body.pin !== "string") return { reauth: true as const }; const loginId = body.loginId.trim().toLowerCase(); const [checker] = await tx.select({ id: staff.staffId, employeePinHash: staff.employeePinHash }).from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1); if (!checker?.employeePinHash || !(await verifyEmployeePin(body.pin, checker.employeePinHash))) throw new Error("직원 ID 또는 PIN이 올바르지 않습니다."); cancelledBy = checker.id; }
       if (!cancelledBy) throw new Error(sharedMode ? "매장 공용 취소 계정을 찾을 수 없습니다." : "취소 처리 직원이 필요합니다.");
       const used = cancelled.reduce((sum, row) => sum + row.qty, 0); if (qty > item.qty - used) throw new Error("취소 가능 수량을 초과했습니다.");
       const amount = item.itemType === "SERVICE" ? 0 : cents(item.unitPrice) * qty; await tx.insert(orderItemCancellations).values({ orderItemId, cancelledQty: qty, cancelledAmount: decimal(amount), cancellationReason: reason === "기타" ? detail : reason, cancelledByStaffId: cancelledBy });

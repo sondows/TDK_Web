@@ -6,11 +6,9 @@ import type { CustomerSummary } from "@/lib/customer";
 import CustomerCreateModal from "./CustomerCreateModal";
 import CustomerList from "./CustomerList";
 import CustomerTradeModal from "./CustomerTradeModal";
-import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 export default function CustomerManagement() {
-  const readOnly = useAdminReadOnly();
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null);
@@ -46,7 +44,7 @@ export default function CustomerManagement() {
         if (controller.signal.aborted) return;
         setCustomers([]);
         if (error instanceof Error && error.message === "login") {
-          router.replace("/admin/login");
+          router.replace("/tdkadm/login");
           setListError("관리센터 로그인이 필요합니다.");
         } else {
           setListError(error instanceof Error && error.message === "forbidden" ? "고객관리 권한이 없습니다." : "고객 목록을 불러오지 못했습니다.");
@@ -117,16 +115,16 @@ export default function CustomerManagement() {
           미사용 포함
         </label>
         </div>
-        {!readOnly && <button
+        <button
           className={styles.customerAddButton}
           onClick={() => setCreateOpen(true)}
           ref={addButtonRef}
           type="button"
         >
           + 고객등록
-        </button>}
+        </button>
       </div>
-      <CustomerList canReorder={!readOnly && !loading && !search.trim()} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
+      <CustomerList canReorder={!loading && !search.trim()} customers={customers} error={listError} loading={loading} onEdit={customer => setEditingCustomer(customer)} onOrder={saveCustomerOrder} onTrade={customer => setTradingCustomer(customer)} search={search} />
       {createOpen && <CustomerCreateModal customer={null} onClose={closeCreate} onSaved={created} />}
       {editingCustomer && <CustomerCreateModal customer={editingCustomer} onClose={() => setEditingCustomer(null)} onSaved={updated} />}
       {tradingCustomer && <CustomerTradeModal customer={tradingCustomer} onChanged={() => setRefreshKey(value => value + 1)} onClose={() => setTradingCustomer(null)} />}

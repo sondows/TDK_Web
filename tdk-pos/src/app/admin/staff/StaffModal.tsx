@@ -1,43 +1,31 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { type StaffDraft, type StaffErrors, type StaffSummary, validateStaffDraft } from "@/lib/staff-management";
 import StaffToggle from "./StaffToggle";
 import StaffDeleteConfirm from "./StaffDeleteConfirm";
 import styles from "../admin.module.css";
 
-export default function StaffModal({ original, onClose, onSaved }: { original: StaffSummary | null; onClose: () => void; onSaved: () => void }) {
+export default function StaffModal({ original, onClose, onSaved, hosPermissionAvailable = true }: { original: StaffSummary | null; onClose: () => void; onSaved: () => void; hosPermissionAvailable?: boolean }) {
+  const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
   const [draft, setDraft] = useState<StaffDraft>({
-    name: original?.name ?? "", role: original?.role ?? "STAFF", isActive: original?.isActive ?? true,
-    posEnabled: original?.posEnabled ?? true, posPin: "", posPinConfirm: "",
-    kdsEnabled: original?.kdsEnabled ?? false, kdsPin: "", kdsPinConfirm: "", kdsPassword: "", kdsPasswordConfirm: "",
-    adminEnabled: original?.adminEnabled ?? false, adminPermission: original?.adminPermission ?? "NONE", adminLoginId: original?.adminLoginId ?? "", adminPin: "", adminPinConfirm: "",
+    name: original?.name ?? "", loginId: original?.loginId ?? "", role: original?.role ?? "STAFF", isActive: original?.isActive ?? true,
+    posEnabled: original?.posEnabled ?? true, kdsEnabled: original?.kdsEnabled ?? false, hosEnabled: original?.hosEnabled ?? false,
+    employeePin: "", employeePinConfirm: "",
+    adminEnabled: original?.adminEnabled ?? false,
   });
-  const [changePosPin, setChangePosPin] = useState(!original?.posEnabled);
-  const [changeKdsPin, setChangeKdsPin] = useState(!original?.kdsEnabled || !original?.hasKdsPin);
-  const [changeKdsPassword, setChangeKdsPassword] = useState(!original?.kdsEnabled || !original?.hasKdsPassword);
-  const [changeAdminPin, setChangeAdminPin] = useState(!original?.adminEnabled);
+  const [changeEmployeePin, setChangeEmployeePin] = useState(!original?.hasEmployeePin);
   const [errors, setErrors] = useState<StaffErrors>({});
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [kdsDevices, setKdsDevices] = useState<Array<{ deviceId: number; label: string; expiresAt: string; revokedAt: string | null }>>([]);
-  const [showKdsDevices, setShowKdsDevices] = useState(false);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    dialog?.showModal();
-    nameRef.current?.focus();
-    return () => dialog?.close();
-  }, []);
-
-  const update = <K extends keyof StaffDraft>(key: K, value: StaffDraft[K]) => {
-    setDraft(current => ({ ...current, [key]: value }));
-    setErrors({}); setNotice("");
-  };
+  useEffect(() => { const dialog = dialogRef.current; dialog?.showModal(); nameRef.current?.focus(); return () => dialog?.close(); }, []);
+  const update = <K extends keyof StaffDraft>(key: K, value: StaffDraft[K]) => { setDraft(current => ({ ...current, [key]: value })); setErrors({}); setNotice(""); };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -49,101 +37,41 @@ export default function StaffModal({ original, onClose, onSaved }: { original: S
       const response = await fetch(original ? `/api/admin-center/staff/${original.staffId}` : "/api/admin-center/staff", {
         method: original ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft),
       });
-      const result = await response.json() as { success?: boolean; message?: string; errors?: StaffErrors };
-      if (!response.ok || !result.success) {
-        if (result.errors) setErrors(result.errors);
-        setNotice(response.status === 401 ? "관리센터 로그인이 만료되었습니다. 다시 로그인해 주세요." : result.message ?? "직원 정보를 저장하지 못했습니다.");
-        return;
-      }
+      const result = await response.json() as { success?: boolean; message?: string; errors?: StaffErrors; reauthRequired?: boolean };
+      if (!response.ok || !result.success) { if (result.errors) setErrors(result.errors); setNotice(result.message ?? "직원 정보를 저장하지 못했습니다."); return; }
+      if (result.reauthRequired) { router.replace("/tdkadm/login"); return; }
       onSaved();
     } catch { setNotice("직원 정보를 저장하지 못했습니다."); }
     finally { busyRef.current = false; setBusy(false); }
   };
 
-  const loadKdsDevices = async () => {
-    if (!original) return;
-    try {
-      const response = await fetch(`/api/admin-center/staff/${original.staffId}/kds-devices`, { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; devices?: typeof kdsDevices };
-      if (!response.ok || !result.success) throw new Error("Could not load trusted devices.");
-      setKdsDevices(result.devices ?? []); setShowKdsDevices(true);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not load trusted devices."); }
-  };
-  const revokeKdsDevice = async (deviceId: number) => {
-    if (!original || busyRef.current) return;
-    busyRef.current = true; setBusy(true);
-    try {
-      const response = await fetch(`/api/admin-center/staff/${original.staffId}/kds-devices`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId }),
-      });
-      if (!response.ok) throw new Error("Could not revoke this device.");
-      await loadKdsDevices();
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not revoke this device."); }
-    finally { busyRef.current = false; setBusy(false); }
-  };
-
-  const input = (id: string, label: string, key: "posPin" | "posPinConfirm" | "kdsPin" | "kdsPinConfirm" | "adminPin" | "adminPinConfirm", maxLength: number) => (
-    <div className={styles.customerField}>
-      <label htmlFor={id}>{label}</label>
-      <input aria-invalid={Boolean(errors[key])} autoComplete="new-password" className={styles.customerFieldInput} disabled={busy} id={id} inputMode="numeric" maxLength={maxLength} onChange={event => update(key, event.target.value)} pattern={maxLength === 4 ? "[0-9]{4}" : "[0-9]{6}"} type="password" value={draft[key]} />
-      {errors[key] && <p className={styles.customerFieldError} role="alert">{errors[key]}</p>}
-    </div>
-  );
-  const kdsPasswordInput = (key: "kdsPassword" | "kdsPasswordConfirm") => <div className={styles.customerField}>
-    <label htmlFor={`staff-${key}`}>{key === "kdsPassword" ? "Initial KDS enrollment password (12+ characters)" : "Confirm KDS password"}</label>
-    <input autoComplete="new-password" className={styles.customerFieldInput} disabled={busy} id={`staff-${key}`} maxLength={128} onChange={event => update(key, event.target.value)} type="password" value={draft[key]} />
+  const pinInput = (id: string, label: string, key: "employeePin" | "employeePinConfirm") => <div className={styles.customerField}>
+    <label htmlFor={id}>{label}</label>
+    <input aria-invalid={Boolean(errors[key])} autoComplete="new-password" className={styles.customerFieldInput} disabled={busy} id={id} inputMode="numeric" maxLength={6} onChange={event => update(key, event.target.value.replace(/\D/g, "").slice(0, 6))} pattern="[0-9]{6}" type="password" value={draft[key]} />
     {errors[key] && <p className={styles.customerFieldError} role="alert">{errors[key]}</p>}
   </div>;
-
   return <><dialog aria-labelledby="staff-modal-title" className={`${styles.customerModal} ${styles.staffModal}`} onCancel={event => { event.preventDefault(); if (!busy && !deleteOpen) onClose(); }} ref={dialogRef}>
-    <div className={styles.customerModalHeader}><h2 id="staff-modal-title">{original ? "직원 수정" : "직원 등록"}</h2><button aria-label="닫기" className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button></div>
-    <form noValidate onSubmit={submit}>
-      <div className={styles.customerModalFields}>
-        <section className={styles.staffFormSection}><h3>기본 정보</h3>
-          <div className={styles.customerField}><label htmlFor="staff-name">이름 <span aria-hidden="true">*</span></label><input aria-invalid={Boolean(errors.name)} className={styles.customerFieldInput} disabled={busy} id="staff-name" maxLength={100} onChange={event => update("name", event.target.value)} ref={nameRef} value={draft.name} />{errors.name && <p className={styles.customerFieldError} role="alert">{errors.name}</p>}</div>
-          <div className={styles.customerField}><label htmlFor="staff-role">POS 권한 <span aria-hidden="true">*</span></label><select className={styles.customerFieldInput} disabled={busy} id="staff-role" onChange={event => update("role", event.target.value as StaffDraft["role"])} value={draft.role}><option value="STAFF">STAFF</option><option value="MANAGER">MANAGER</option><option value="OWNER">OWNER</option></select></div>
-          <StaffToggle checked={draft.isActive} disabled={busy} label="상태" onChange={value => update("isActive", value)} />
-        </section>
-        <section className={styles.staffFormSection}><h3>POS 로그인</h3>
-          <StaffToggle checked={draft.posEnabled} disabled={busy} label="POS 사용" onChange={value => { update("posEnabled", value); if (value && !original?.posEnabled) setChangePosPin(true); }} />
-          {draft.posEnabled && <>{original?.posEnabled && !changePosPin ? <button className={styles.staffChangeButton} onClick={() => setChangePosPin(true)} type="button">POS PIN 변경</button> : <>{input("staff-pos-pin", original ? "새 POS PIN" : "POS PIN *", "posPin", 4)}{input("staff-pos-confirm", "PIN 확인 *", "posPinConfirm", 4)}</>}</>}
-        </section>
-        <section className={styles.staffFormSection}><h3>관리센터 로그인</h3>
-          <StaffToggle checked={draft.adminEnabled} disabled={busy} label="관리센터 로그인" onChange={value => { setDraft(current => ({ ...current, adminEnabled: value, adminPermission: value ? current.adminPermission : "NONE" })); if (value && !original?.adminEnabled) setChangeAdminPin(true); }} />
-          <div className={styles.customerField}><label htmlFor="staff-admin-permission">관리센터 권한</label><select className={styles.customerFieldInput} disabled={busy || !draft.adminEnabled} id="staff-admin-permission" onChange={event => update("adminPermission", event.target.value as StaffDraft["adminPermission"])} value={draft.adminPermission}><option value="NONE">접근 불가</option><option value="READ_ONLY">조회 전용</option><option value="READ_WRITE">읽기·쓰기</option></select>{errors.adminPermission && <p className={styles.customerFieldError} role="alert">{errors.adminPermission}</p>}</div>
-          {errors.adminEnabled && <p className={styles.customerFieldError} role="alert">{errors.adminEnabled}</p>}
-          {draft.adminEnabled && <><div className={styles.customerField}><label htmlFor="staff-admin-id">관리센터 아이디 *</label><input aria-invalid={Boolean(errors.adminLoginId)} autoCapitalize="none" autoComplete="off" className={styles.customerFieldInput} disabled={busy} id="staff-admin-id" maxLength={32} onChange={event => update("adminLoginId", event.target.value)} value={draft.adminLoginId} />{errors.adminLoginId && <p className={styles.customerFieldError} role="alert">{errors.adminLoginId}</p>}</div>
-            {original?.adminEnabled && !changeAdminPin ? <button className={styles.staffChangeButton} onClick={() => setChangeAdminPin(true)} type="button">관리센터 PIN 변경</button> : <>{input("staff-admin-pin", original ? "새 관리센터 PIN" : "관리센터 PIN *", "adminPin", 6)}{input("staff-admin-confirm", "PIN 확인 *", "adminPinConfirm", 6)}</>}</>}
-        </section>
-        <section className={styles.staffFormSection}><h3>KDS access</h3>
-          {original && <div className={styles.customerField}><label htmlFor="staff-employee-id">Employee ID</label><input className={styles.customerFieldInput} id="staff-employee-id" readOnly value={original.staffCode} /></div>}
-          <StaffToggle checked={draft.kdsEnabled} disabled={busy || !original} label="Allow KDS sign-in" onChange={value => { update("kdsEnabled", value); if (value && (!original?.kdsEnabled || !original.hasKdsPin)) setChangeKdsPin(true); }} />
-          {!original && <p className={styles.customerFieldError}>Create the employee first, then enable KDS access and set its PIN.</p>}
-          {original && draft.kdsEnabled && <>{original.kdsEnabled && original.hasKdsPin && !changeKdsPin
-            ? <button className={styles.staffChangeButton} onClick={() => setChangeKdsPin(true)} type="button">Change KDS PIN</button>
-            : <>{input("staff-kds-pin", "Temporary 6-digit KDS PIN *", "kdsPin", 6)}{input("staff-kds-confirm", "Confirm KDS PIN *", "kdsPinConfirm", 6)}</>}
-            {original.kdsEnabled && original.hasKdsPassword && !changeKdsPassword
-              ? <button className={styles.staffChangeButton} onClick={() => setChangeKdsPassword(true)} type="button">Reset KDS enrollment password</button>
-              : <>{kdsPasswordInput("kdsPassword")}{kdsPasswordInput("kdsPasswordConfirm")}</>}
-            <p className={styles.customerFieldError}>Provide the temporary password to the employee securely. It is used once to register Google Authenticator and this device.</p>
-            {original.hasKdsTotp && <p>KDS authenticator is enrolled. Resetting the enrollment password revokes existing KDS devices.</p>}
-            {original.hasKdsTotp && <button className={styles.staffChangeButton} disabled={busy} onClick={() => void loadKdsDevices()} type="button">Manage trusted devices</button>}
-            {showKdsDevices && <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-              {kdsDevices.length === 0 ? <p className="text-sm text-slate-600">No devices registered.</p> : kdsDevices.map(device => <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2" key={device.deviceId}>
-                <div className="min-w-0 text-sm"><p className="truncate font-semibold">{device.label}</p><p className="text-slate-500">{device.revokedAt ? "Revoked" : `Expires ${new Date(device.expiresAt).toLocaleDateString()}`}</p></div>
-                {!device.revokedAt && <button className={styles.staffDeleteButton} disabled={busy} onClick={() => void revokeKdsDevice(device.deviceId)} type="button">Revoke</button>}
-              </div>)}
-            </div>}
-          </>}
-        </section>
-        {notice && <p className={styles.customerFieldError} role="alert">{notice}</p>}
-      </div>
-      <div className={`${styles.customerModalFooter} ${styles.staffModalFooter}`}>
-        {original && !original.isShared && <button className={styles.staffDeleteButton} disabled={busy} onClick={() => setDeleteOpen(true)} type="button">삭제</button>}
-        <div className={styles.staffModalFooterActions}><button className={styles.customerCancelButton} disabled={busy} onClick={onClose} type="button">취소</button><button className={styles.customerSubmitButton} disabled={busy} type="submit">{busy ? "저장 중..." : original ? "저장" : "직원 등록"}</button></div>
-      </div>
-    </form>
+    <div className={`${styles.customerModalHeader} ${styles.staffModalHeader}`}><h2 id="staff-modal-title">{original ? "직원 수정" : "직원 등록"}</h2><StaffToggle checked={draft.isActive} disabled={busy || original?.isDesignatedOwner} label="직원 활성" onChange={value => update("isActive", value)} /><button aria-label="닫기" className={styles.customerModalClose} disabled={busy} onClick={onClose} type="button">×</button></div>
+    <form noValidate onSubmit={submit}><div className={styles.customerModalFields}>
+      <section className={styles.staffFormSection}><h3>기본 정보</h3>
+        <div className={styles.customerField}><label htmlFor="staff-name">이름 *</label><input aria-invalid={Boolean(errors.name)} className={styles.customerFieldInput} disabled={busy} id="staff-name" maxLength={100} onChange={event => update("name", event.target.value)} ref={nameRef} value={draft.name} />{errors.name && <p className={styles.customerFieldError} role="alert">{errors.name}</p>}</div>
+        <div className={styles.customerField}><label htmlFor="staff-login-id">ID *</label><input aria-invalid={Boolean(errors.loginId)} autoCapitalize="none" autoComplete="off" autoCorrect="off" className={styles.customerFieldInput} disabled={busy} id="staff-login-id" maxLength={32} onChange={event => update("loginId", event.target.value.toLowerCase().replace(/\s/g, ""))} spellCheck={false} value={draft.loginId} />{errors.loginId && <p className={styles.customerFieldError} role="alert">{errors.loginId}</p>}<p className="text-xs text-slate-500">로그인에 사용하는 고유 ID입니다. 영문 소문자와 숫자 조합을 권장합니다.</p></div>
+      </section>
+      <section className={styles.staffFormSection}><h3>프로그램 접근 및 직원 PIN</h3>
+        <StaffToggle checked={draft.posEnabled} disabled={busy} label="POS 사용 권한" onChange={value => update("posEnabled", value)} />
+        <StaffToggle checked={draft.kdsEnabled} disabled={busy || !original} label="KDS 사용 권한" onChange={value => update("kdsEnabled", value)} />
+        <StaffToggle checked={draft.hosEnabled} disabled={busy || !hosPermissionAvailable} label="HOS 사용 권한" onChange={value => update("hosEnabled", value)} />
+        <StaffToggle checked={draft.adminEnabled} disabled={busy || original?.isDesignatedOwner} label="ADM 사용 권한" onChange={value => update("adminEnabled", value)} />
+        {!original && <p className={styles.customerFieldError}>직원 등록 후 KDS 권한을 설정할 수 있습니다.</p>}
+        {original?.hasEmployeePin && !changeEmployeePin ? <button className={styles.staffChangeButton} onClick={() => setChangeEmployeePin(true)} type="button">PIN 변경</button> : <>{pinInput("staff-employee-pin", original ? "새 PIN (6자리)" : "PIN (6자리) *", "employeePin")}{pinInput("staff-employee-pin-confirm", "PIN 확인", "employeePinConfirm")}</>}
+        <p>직원별 6자리 PIN 하나를 POS·KDS·ADM에서 함께 사용합니다. PIN 원문은 저장 후 조회할 수 없습니다.</p>
+      </section>
+      {notice && <p className={styles.customerFieldError} role="alert">{notice}</p>}
+    </div><div className={`${styles.customerModalFooter} ${styles.staffModalFooter}`}>
+      {original && !original.isShared && !original.isDesignatedOwner && <button className={styles.staffDeleteButton} disabled={busy} onClick={() => setDeleteOpen(true)} type="button">삭제</button>}
+      <div className={styles.staffModalFooterActions}><button className={styles.customerCancelButton} disabled={busy} onClick={onClose} type="button">취소</button><button className={styles.customerSubmitButton} disabled={busy} type="submit">{busy ? "저장 중…" : original ? "저장" : "직원 등록"}</button></div>
+    </div></form>
   </dialog>
-  {deleteOpen && original && !original.isShared && <StaffDeleteConfirm original={original} onClose={() => setDeleteOpen(false)} onSaved={onSaved} />}
+  {deleteOpen && original && !original.isShared && !original.isDesignatedOwner && <StaffDeleteConfirm original={original} onClose={() => setDeleteOpen(false)} onSaved={onSaved} />}
   </>;
 }

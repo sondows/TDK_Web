@@ -13,7 +13,6 @@ import { partyPeerTableNos } from "@/lib/pos-party-peers";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
-import { PIN_LENGTH } from "@/lib/pin";
 
 type ActiveMergeSource = { mergeId: number; sourceTableNo: string };
 type TableCancelPreview = { tableId: number; tableNos: string[]; total: number };
@@ -508,7 +507,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
   const Root = modal ? "div" : "main";
   const close = () => {
     const destination = movedDestinationId === null ? "" : `&selectedTableId=${movedDestinationId}`;
-    const returnUrl = `/pos?refreshTables=1${destination}`;
+    const returnUrl = `/tdkpos?refreshTables=1${destination}`;
     if (modal && !closeToPos) router.replace(returnUrl);
     else router.push(returnUrl);
   };
@@ -545,7 +544,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
 }
 
 function TableCancellationModal({ preview, busy, setBusy, close, complete }: { preview: TableCancelPreview; busy: boolean; setBusy: (value: boolean) => void; close: () => void; complete: (tableNos: string[]) => void }) {
-  const [employees, setEmployees] = useState<Array<{ staffId: number; staffCode: string; name: string }>>([]);
+  const [employees, setEmployees] = useState<Array<{ loginId: string; pinLength: 6 }>>([]);
   const [staffCode, setStaffCode] = useState("");
   const [pin, setPin] = useState("");
   const submittingRef = useRef(false);
@@ -558,9 +557,9 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   useEffect(() => {
     let active = true;
     void fetch("/api/staff/active")
-      .then(response => response.json() as Promise<{ staff?: Array<{ staffId: number; staffCode: string; name: string }> }>)
+      .then(response => response.json() as Promise<{ staff?: Array<{ loginId: string; pinLength: 6 }> }>)
       .then(data => {
-        if (active) setEmployees((data.staff ?? []).filter(employee => employee.staffCode !== "000"));
+        if (active) setEmployees(data.staff ?? []);
       })
       .catch(() => {
         if (active) setError("직원 목록을 불러오지 못했습니다.");
@@ -575,9 +574,10 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
     setError("");
   };
 
+  const selectedPinLength = employees.find(employee => employee.loginId === staffCode)?.pinLength ?? 6;
   const submit = async (pinValue = pin) => {
     if (!staffCode || busy || submittingRef.current) return;
-    if (pinValue.length !== PIN_LENGTH) {
+    if (pinValue.length !== selectedPinLength) {
       setPinDialogMessage("PIN 4자리를 입력해 주세요.");
       setPinDialogOpen(true);
       return;
@@ -593,7 +593,7 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
       const response = await fetch("/api/table-cancellations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tableId: preview.tableId, staffCode, pin: pinValue, reason, detail }),
+        body: JSON.stringify({ tableId: preview.tableId, loginId: staffCode, pin: pinValue, reason, detail }),
       });
       const result = await response.json() as { success?: boolean; message?: string; tableNos?: string[] };
       if (!response.ok || !result.success || !result.tableNos) {
@@ -614,10 +614,10 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   };
 
   const appendPinDigit = (digit: string) => {
-    if (!staffCode || busy || submittingRef.current || pin.length >= PIN_LENGTH) return;
+    if (!staffCode || busy || submittingRef.current || pin.length >= selectedPinLength) return;
     const nextPin = pin + digit;
     setPin(nextPin);
-    if (nextPin.length === PIN_LENGTH) void submit(nextPin);
+    if (nextPin.length === selectedPinLength) void submit(nextPin);
   };
   const removePinDigit = () => { if (staffCode && !busy && !submittingRef.current) setPin(current => current.slice(0, -1)); };
   const clearPin = () => { if (staffCode && !busy && !submittingRef.current) setPin(""); };
@@ -652,16 +652,16 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
                 footer={error ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-base font-medium text-red-700">{error}</p> : undefined}
                 keypad={<PinKeypad
                   actionDisabled={!staffCode || busy || !pin}
-                  digitDisabled={!staffCode || busy || pin.length >= PIN_LENGTH}
+                  digitDisabled={!staffCode || busy || pin.length >= selectedPinLength}
                   onBackspace={removePinDigit}
                   onClear={clearPin}
                   onDigit={appendPinDigit}
                 />}
                 label="관리자"
-                onSelect={employee => selectCancellationStaff(employee.staffCode)}
+                onSelect={employee => selectCancellationStaff(employee.loginId)}
                 people={employees}
-                pinInput={<PinInput ariaLabel="테이블 취소 PIN" autoFocus={Boolean(staffCode)} className={staffCode ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={busy || !staffCode} keypadAligned onChange={setPin} onComplete={value => void submit(value)} value={pin} />}
-                selectedCode={staffCode}
+                pinInput={<PinInput ariaLabel="테이블 취소 PIN" autoFocus={Boolean(staffCode)} className={staffCode ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={busy || !staffCode} maxLength={selectedPinLength} keypadAligned onChange={setPin} onComplete={value => void submit(value)} value={pin} />}
+                selectedLoginId={staffCode}
                 selectionDisabled={busy}
               />
             </div>

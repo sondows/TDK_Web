@@ -1,4 +1,4 @@
-import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
@@ -9,12 +9,12 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   try {
     const body = (await request.json()) as {
       mode?: unknown;
     };
-    if (body.mode !== "PERSONAL" && body.mode !== "SHARED") {
+    if (body.mode !== "PERSONAL") {
       return Response.json({ success: false, message: "로그인 방식을 확인하세요." }, { status: 400 });
     }
 
@@ -29,7 +29,7 @@ export async function PUT(request: Request) {
     }).onDuplicateKeyUpdate({
       set: { settingValue: body.mode, updatedByStaffId: approver.staffId, updatedAt: new Date() },
     });
-    return Response.json({ success: true, mode: body.mode });
+    return Response.json({ success: true, mode: "PERSONAL" });
   } catch {
     return Response.json({ success: false, message: "로그인 방식 저장에 실패했습니다." }, { status: 500 });
   }

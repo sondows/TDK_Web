@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { staff } from "@/db/schema";
-import { reserveKdsLoginAttempt } from "@/lib/kds-login-limit";
+import { reserveKdsEnrollmentAttempt } from "@/lib/kds-login-limit";
 import { verifyKdsPassword } from "@/lib/auth";
 import { encryptTotpSecret, newTotpSecret, reserveKdsIpAttempt, isSameOriginRequest } from "@/lib/kds-device";
 
@@ -19,7 +19,8 @@ export async function POST(request: Request) {
       staffId: staff.staffId, passwordHash: staff.kdsPasswordHash, active: staff.isActive,
       enabled: staff.kdsEnabled, totpSecret: staff.kdsTotpSecretEnc,
     }).from(staff).where(eq(staff.staffCode, employeeId)).limit(1);
-    if (!await reserveKdsLoginAttempt(member?.staffId ?? null, employeeId)) return fail(429);
+    if (member && !reserveKdsEnrollmentAttempt(member.staffId, employeeId)) return fail(429);
+    if (!member && !reserveKdsEnrollmentAttempt(null, employeeId)) return fail(429);
     if (!member || member.active !== 1 || member.enabled !== 1 || !await verifyKdsPassword(password, member.passwordHash)) return fail();
     if (member.totpSecret) return NextResponse.json({ success: true, mode: "approve-device" }, { headers: { "Cache-Control": "no-store" } });
     const secret = newTotpSecret();

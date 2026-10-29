@@ -1,4 +1,4 @@
-import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { menuCategories, menuComponents, menuImages, menus } from "@/db/schema";
@@ -68,7 +68,7 @@ async function parseUpdateValues(request: Request): Promise<UpdateValues | null>
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ menuId: string }> }) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner();
   if (auth.error) return auth.error;
   let generatedImages: Awaited<ReturnType<typeof generateMenuImages>> | null = null;

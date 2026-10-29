@@ -6,15 +6,13 @@ import { useRouter } from "next/navigation";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
-import { PIN_LENGTH } from "@/lib/pin";
 import PosSubHeader from "../PosSubHeader";
 
 type Owner = {
-  staffId: number;
-  staffCode: string;
-  name: string;
+  loginId: string;
   role: string;
   hasPin: boolean;
+  pinLength: 6;
 };
 
 type PinStatus = "idle" | "checking";
@@ -44,7 +42,7 @@ export default function AdminVerifyGate() {
           setMessage(result.message ?? "관리자 목록을 불러올 수 없습니다.");
           return;
         }
-        setOwners((result.staff ?? []).filter(owner => owner.role === "OWNER" && owner.hasPin && owner.staffCode !== "000"));
+        setOwners((result.staff ?? []).filter(owner => owner.role === "OWNER" && owner.hasPin));
       })
       .catch(() => {
         if (mounted) setMessage("관리자 목록을 불러올 수 없습니다.");
@@ -73,7 +71,7 @@ export default function AdminVerifyGate() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          staffCode: owner.staffCode,
+          loginId: owner.loginId,
           pin: pinValue,
           requiredRole: "OWNER",
         }),
@@ -102,7 +100,7 @@ export default function AdminVerifyGate() {
     void fetch("/api/admin/verify-pin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staffCode: owner.staffCode, pin: pinValue }),
+      body: JSON.stringify({ loginId: owner.loginId, pin: pinValue }),
     })
       .then(response => response.json() as Promise<{ success?: boolean }>)
       .then(result => {
@@ -128,7 +126,7 @@ export default function AdminVerifyGate() {
 
   const selectOwner = (owner: Owner) => {
     if (busy) return;
-    setSelectedOwner(current => current?.staffCode === owner.staffCode ? null : owner);
+    setSelectedOwner(current => current?.loginId === owner.loginId ? null : owner);
     resetPinVerification();
     setShowPinError(false);
   };
@@ -136,12 +134,12 @@ export default function AdminVerifyGate() {
   const updatePin = (nextPin = "") => {
     if (busy || pinStatus === "checking" || verificationInFlight.current) return;
     resetPinVerification(nextPin);
-    if (selectedOwner && nextPin.length === PIN_LENGTH) verifyPin(selectedOwner, nextPin);
+    if (selectedOwner && nextPin.length === selectedOwner.pinLength) verifyPin(selectedOwner, nextPin);
   };
 
   const appendPin = (digit: string) => {
-    if (!selectedOwner || busy || pinStatus === "checking" || pin.length >= PIN_LENGTH) return;
-    updatePin(`${pin}${digit}`.slice(0, PIN_LENGTH));
+    if (!selectedOwner || busy || pinStatus === "checking" || pin.length >= selectedOwner.pinLength) return;
+    updatePin(`${pin}${digit}`.slice(0, selectedOwner.pinLength));
   };
 
   const removePin = () => {
@@ -157,7 +155,7 @@ export default function AdminVerifyGate() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
       <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[336px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
-        <PosSubHeader backLabel="POS로 돌아가기" disabled={busy} level={1} onBack={() => router.push("/pos")} title="관리자 확인" />
+        <PosSubHeader backLabel="POS로 돌아가기" disabled={busy} level={1} onBack={() => router.push("/tdkpos")} title="관리자 확인" />
 
         <PinAuthPanel
           scrollablePeople
@@ -165,7 +163,7 @@ export default function AdminVerifyGate() {
           footer={message && owners.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{message}</p> : undefined}
           keypad={<PinKeypad
             actionDisabled={!pinEnabled || busy || pinStatus === "checking" || !pin}
-            digitDisabled={!pinEnabled || busy || pinStatus === "checking" || pin.length >= PIN_LENGTH}
+            digitDisabled={!pinEnabled || busy || pinStatus === "checking" || pin.length >= (selectedOwner?.pinLength ?? 6)}
             onBackspace={removePin}
             onClear={clearPin}
             onDigit={appendPin}
@@ -177,11 +175,12 @@ export default function AdminVerifyGate() {
               ariaLabel="관리자 PIN"
               className={pinEnabled ? activePinStyle : ""}
               disabled={!pinEnabled || busy || pinStatus === "checking"}
+              maxLength={selectedOwner?.pinLength ?? 6}
               keypadAligned
               onChange={updatePin}
               value={pin}
             />}
-          selectedCode={selectedOwner?.staffCode}
+          selectedLoginId={selectedOwner?.loginId}
           selectionDisabled={busy || loading}
         />
       </section>

@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
-import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminAccess } from "@/lib/admin-auth";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
   status,
@@ -9,7 +9,7 @@ const json = (body: unknown, status = 200) => Response.json(body, {
 });
 
 export async function PATCH(request: Request) {
-  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccess(); if (writeDenied) return writeDenied;
   if (!await getCurrentAdminStaff()) return json({ success: false, message: "관리자 로그인이 필요합니다." }, 401);
 
   try {

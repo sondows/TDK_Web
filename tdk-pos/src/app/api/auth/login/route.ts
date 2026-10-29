@@ -1,76 +1,49 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
-import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
-import {
-  createSessionToken,
-  hashSessionToken,
-  sessionCookieOptions,
-  SESSION_COOKIE_NAME,
-  verifyPin,
-} from "@/lib/auth";
-import { clearAdminLoginAttempts, reserveAdminLoginAttempt } from "@/lib/admin-login-limit";
+import { createSessionToken, hashSessionToken, sessionCookieOptions, SESSION_COOKIE_NAME, verifyEmployeePin } from "@/lib/auth";
+import { clearAdminLoginAttempts, isAdminLoginAttemptAllowed, reserveAdminLoginAttempt } from "@/lib/admin-login-limit";
+import { isValidEmployeePin } from "@/lib/pin";
 
-const LOGIN_FAILURE_MESSAGE = "직원코드 또는 PIN이 올바르지 않습니다.";
+const invalid = () => NextResponse.json({ success: false, message: "직원 또는 PIN을 확인해 주세요." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+const rateLimited = () => NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429, headers: { "Cache-Control": "no-store" } });
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const staffCode = typeof body.staffCode === "string" ? body.staffCode.trim() : "";
+    const body = await request.json() as { loginId?: unknown; pin?: unknown };
+    const loginId = typeof body.loginId === "string" ? body.loginId.trim().toLowerCase() : "";
     const pin = typeof body.pin === "string" ? body.pin : "";
+    if (!/^[a-z][a-z0-9._-]{2,31}$/.test(loginId) || !isValidEmployeePin(pin)) return invalid();
 
-    if (!staffCode || !pin) {
-      return NextResponse.json(
-        { success: false, message: LOGIN_FAILURE_MESSAGE },
-        { status: 401 }
-      );
+    const [member] = await db.select({ staffId: staff.staffId, staffCode: staff.staffCode, isActive: staff.isActive,
+      posEnabled: staff.posEnabled, employeePinHash: staff.employeePinHash })
+      .from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1))).limit(1);
+    const identity = member?.staffId ?? loginId;
+    const loginKey = `pos-login:${identity}`;
+    if (!isAdminLoginAttemptAllowed(loginKey)) return rateLimited();
+    if (!member) {
+      if (!reserveAdminLoginAttempt(loginKey)) return rateLimited();
+      return invalid();
     }
-
-    const attemptKey = `pos-login:${staffCode}`;
-    if (!reserveAdminLoginAttempt(attemptKey)) {
-      return NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429, headers: { "Cache-Control": "no-store" } });
-    }
-
-    if (staffCode === "000" && await getConfiguredPosLoginMode() !== "SHARED") {
-      return NextResponse.json({ success: false, message: "현재 POS 로그인 방식에서는 매장 공용 계정을 사용할 수 없습니다." }, { status: 403 });
-    }
-
-    const [staffMember] = await db
-      .select({
-        staffId: staff.staffId,
-        pinHash: staff.pinHash,
-      })
-      .from(staff)
-      .where(and(eq(staff.staffCode, staffCode), eq(staff.isActive, 1)))
-      .limit(1);
-
-    if (!staffMember || !(await verifyPin(pin, staffMember.pinHash))) {
-      return NextResponse.json(
-        { success: false, message: LOGIN_FAILURE_MESSAGE },
-        { status: 401 }
-      );
+    if (member.staffCode === "000") return NextResponse.json({ success: false, message: "개인 직원 계정으로 로그인해 주세요." }, { status: 403 });
+    if (member.posEnabled !== 1) return NextResponse.json({ success: false, message: "이 직원에게 POS 사용 권한이 없습니다." }, { status: 403 });
+    if (!member.employeePinHash) return NextResponse.json({ success: false, message: "공통 PIN이 설정되지 않았습니다. 관리자에게 문의해 주세요.", code: "EMPLOYEE_PIN_NOT_CONFIGURED" }, { status: 403 });
+    if (!await verifyEmployeePin(pin, member.employeePinHash)) {
+      if (!reserveAdminLoginAttempt(loginKey)) return rateLimited();
+      return invalid();
     }
 
     const token = createSessionToken();
-    await db.insert(staffSessions).values({
-      staffId: staffMember.staffId,
-      sessionTokenHash: hashSessionToken(token),
-      sessionType: "POS",
-      status: "ACTIVE",
-    });
-
-    clearAdminLoginAttempts(attemptKey);
-    clearAdminLoginAttempts(`pos-verify:${staffCode}`);
-    const response = NextResponse.json({ success: true });
+    await db.insert(staffSessions).values({ staffId: member.staffId, sessionTokenHash: hashSessionToken(token), sessionType: "POS", status: "ACTIVE" });
+    clearAdminLoginAttempts(loginKey);
+    clearAdminLoginAttempts(`pos-verify:${member.staffId}`);
+    const response = NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });
     response.cookies.set(SESSION_COOKIE_NAME, token, sessionCookieOptions);
     return response;
   } catch (error) {
-    console.error("직원 로그인 처리 오류:", error);
-    return NextResponse.json(
-      { success: false, message: "로그인 처리 중 오류가 발생했습니다." },
-      { status: 500 }
-    );
+    const detail = error as { code?: string; cause?: { code?: string } };
+    console.error("POS staff login unavailable", { code: detail?.code ?? detail?.cause?.code });
+    return NextResponse.json({ success: false, message: "로그인 서비스를 이용할 수 없습니다." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }

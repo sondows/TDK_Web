@@ -10,7 +10,7 @@ export default function AdminExitButton() {
     try {
       await fetch("/api/admin/grant", { method: "DELETE" });
     } finally {
-      router.push("/pos");
+      router.push("/tdkpos");
     }
   };
 

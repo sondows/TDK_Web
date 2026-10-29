@@ -11,7 +11,7 @@ import styles from "../admin.module.css";
 
 export default async function AdminMenuManagementPage() {
   const centerMember = await getCurrentAdminStaff();
-  if (!centerMember) redirect("/admin/login");
+  if (!centerMember) redirect("/tdkadm/login");
   const componentMenu = alias(menus, "component_menu");
   const [categories, menuRows, componentMenuRows, componentRows, choiceConfigs] = await Promise.all([
     db.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder }).from(menuCategories).where(eq(menuCategories.isActive, 1)).orderBy(menuCategories.sortOrder, menuCategories.categoryId),
@@ -23,7 +23,7 @@ export default async function AdminMenuManagementPage() {
   const componentsByMenu = new Map<number, typeof componentRows>();
   componentRows.forEach(component => componentsByMenu.set(component.parentMenuId, [...(componentsByMenu.get(component.parentMenuId) ?? []), component]));
   const menusWithComponents = menuRows.map(menu => ({ ...menu, components: componentsByMenu.get(menu.menuId) ?? [], optionConfig: choiceConfigs.get(menu.menuId) ?? { enabled: false, title: "", buttons: [], defaultIndex: 0 } }));
-  return <AdminWorkspaceShell permission={centerMember.adminPermission} userName={centerMember.name}>
+  return <AdminWorkspaceShell userName={centerMember.name}>
     <div className={styles.content}>
       <div className="mx-auto max-w-6xl">
         <div className={styles.pageHeading}><h1>메뉴 관리</h1><p className={styles.pageDescription}>POS 메뉴와 구성 메뉴를 관리합니다.</p></div>

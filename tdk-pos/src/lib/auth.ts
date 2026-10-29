@@ -2,11 +2,11 @@ import "server-only";
 
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
-import { isValidPin } from "@/lib/pin";
+import { isValidEmployeePin, isValidPin } from "@/lib/pin";
 
 export const SESSION_COOKIE_NAME = "tdk_pos_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
@@ -28,6 +28,7 @@ export const sessionCookieOptions = {
 export type CurrentStaff = {
   staffId: number;
   staffCode: string;
+  loginId: string | null;
   name: string;
   role: "OWNER" | "MANAGER" | "STAFF";
 };
@@ -72,6 +73,23 @@ export async function verifyPin(pin: string, storedHash: string | null) {
   return verifyNumericPin(pin, storedHash);
 }
 
+export async function hashEmployeePin(pin: string) {
+  if (!isValidEmployeePin(pin)) throw new Error("Employee PIN must contain exactly six digits.");
+  return hashNumericPin(pin);
+}
+
+export async function verifyEmployeePin(pin: string, storedHash: string | null) {
+  if (!storedHash || !isValidEmployeePin(pin)) return false;
+  return verifyNumericPin(pin, storedHash);
+}
+
+/** Unified PIN takes precedence; legacy POS hashes remain valid until that employee is migrated. */
+export async function verifyStaffPin(pin: string, employeePinHash: string | null, legacyPosPinHash: string | null) {
+  return employeePinHash
+    ? verifyEmployeePin(pin, employeePinHash)
+    : verifyPin(pin, legacyPosPinHash);
+}
+
 export const isValidAdminPin = (pin: string) => /^\d{6}$/.test(pin);
 
 export async function hashAdminPin(pin: string) {
@@ -82,6 +100,35 @@ export async function hashAdminPin(pin: string) {
 export async function verifyAdminPin(pin: string, storedHash: string | null) {
   if (!storedHash || !isValidAdminPin(pin)) return false;
   return verifyNumericPin(pin, storedHash);
+}
+
+/** The common staff PIN is authoritative; legacy ADM hashes are used only during staged migration. */
+export async function verifyAdminStaffPin(pin: string, employeePinHash: string | null, legacyAdminPinHash: string | null) {
+  return employeePinHash ? verifyEmployeePin(pin, employeePinHash) : verifyAdminPin(pin, legacyAdminPinHash);
+}
+
+export const isValidSecurityPassword = (password: string, minLength = 12) => password.length >= minLength && password.length <= 128;
+
+export const isValidOwnerSecurityPassword = (password: string) =>
+  password.length >= 10 && password.length <= 128 && /[^\p{L}\p{N}\s]/u.test(password);
+
+export async function hashSecurityPassword(password: string, minLength = 12) {
+  if (!isValidSecurityPassword(password, minLength)) throw new Error(`Security password must contain ${minLength} to 128 characters.`);
+  const salt = randomBytes(16).toString("hex");
+  const key = await deriveScryptKey(password, salt, 16384, 8, 1);
+  return `scrypt$16384$8$1$${salt}$${key.toString("hex")}`;
+}
+
+export async function hashOwnerSecurityPassword(password: string) {
+  if (!isValidOwnerSecurityPassword(password)) throw new Error("OWNER security password must be at least 10 characters and contain a special character.");
+  const salt = randomBytes(16).toString("hex");
+  const key = await deriveScryptKey(password, salt, 16384, 8, 1);
+  return `scrypt$16384$8$1$${salt}$${key.toString("hex")}`;
+}
+
+export async function verifySecurityPassword(password: string, storedHash: string | null) {
+  if (!storedHash || typeof password !== "string" || password.length > 128) return false;
+  return verifyNumericPin(password, storedHash);
 }
 
 export const isValidKdsPin = (pin: string) => /^\d{6}$/.test(pin);
@@ -147,6 +194,7 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
     .select({
       staffId: staff.staffId,
       staffCode: staff.staffCode,
+      loginId: staff.adminLoginId,
       name: staff.name,
       role: staff.role,
     })
@@ -158,6 +206,8 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
         eq(staffSessions.status, "ACTIVE"),
         eq(staffSessions.sessionType, "POS"),
         eq(staff.isActive, 1),
+        eq(staff.posEnabled, 1),
+        ne(staff.staffCode, "000"),
         gt(staffSessions.loggedInAt, sessionCutoff)
       )
     )
@@ -168,25 +218,30 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
 
 /** Verifies a real active employee without creating a browser login session. */
 export async function verifyActiveStaffCredentials(
-  staffCode: string,
+  loginId: string | number,
   pin: string,
-  { allowShared = false }: { allowShared?: boolean } = {},
+  _options: { allowShared?: boolean } = {},
 ): Promise<CurrentStaff | null> {
-  const normalizedCode = staffCode.trim();
-  if (!normalizedCode || !pin || (normalizedCode === "000" && !allowShared)) return null;
+  void _options;
+  const numericId = typeof loginId === "number" ? loginId : null;
+  const normalizedLoginId = typeof loginId === "string" ? loginId.trim().toLowerCase() : "";
+  if ((!normalizedLoginId && (numericId === null || !Number.isSafeInteger(numericId) || numericId <= 0)) || !pin) return null;
 
   const [candidate] = await db
     .select({
       staffId: staff.staffId,
       staffCode: staff.staffCode,
+      adminLoginId: staff.adminLoginId,
       name: staff.name,
       role: staff.role,
+      posEnabled: staff.posEnabled,
+      employeePinHash: staff.employeePinHash,
       pinHash: staff.pinHash,
     })
     .from(staff)
-    .where(and(eq(staff.staffCode, normalizedCode), eq(staff.isActive, 1)))
+    .where(and(numericId ? eq(staff.staffId, numericId) : sql`LOWER(${staff.adminLoginId}) = ${normalizedLoginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000")))
     .limit(1);
 
-  if (!candidate || !(await verifyPin(pin, candidate.pinHash))) return null;
-  return { staffId: candidate.staffId, staffCode: candidate.staffCode, name: candidate.name, role: candidate.role };
+  if (!candidate || candidate.posEnabled !== 1 || !candidate.employeePinHash || !(await verifyEmployeePin(pin, candidate.employeePinHash))) return null;
+  return { staffId: candidate.staffId, staffCode: candidate.staffCode, loginId: candidate.adminLoginId, name: candidate.name, role: candidate.role };
 }

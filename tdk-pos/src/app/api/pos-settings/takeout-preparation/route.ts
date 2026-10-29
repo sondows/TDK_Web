@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { getCurrentAdminStaff, requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { getCurrentStaff } from "@/lib/auth";
 import { getManagementOwner } from "@/lib/management-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
@@ -26,7 +26,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   const staff = await getManagementOwner();
   if (!staff) {
     return Response.json({ success: false, message: "관리자 인증이 필요합니다." }, { status: 401 });

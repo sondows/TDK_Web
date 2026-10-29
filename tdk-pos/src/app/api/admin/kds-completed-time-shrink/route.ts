@@ -1,4 +1,4 @@
-import { requireAdminWrite, getCurrentAdminStaff } from "@/lib/admin-auth";
+import { requireAdminAccess, getCurrentAdminStaff } from "@/lib/admin-auth";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
 import { canManageSettings } from "@/lib/permissions";
@@ -17,7 +17,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const denied = await requireAdminWrite();
+  const denied = await requireAdminAccess();
   if (denied) return denied;
   const staff = await getCurrentAdminStaff();
   if (!staff || !canManageSettings(staff.role)) return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });

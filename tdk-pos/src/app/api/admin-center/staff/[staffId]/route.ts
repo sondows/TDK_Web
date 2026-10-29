@@ -1,95 +1,82 @@
-import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { kdsTrustedDevices, staff, staffSessions } from "@/db/schema";
-import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
-import { hashAdminPin, hashKdsPassword, hashKdsPin, hashPin } from "@/lib/auth";
-import { isDuplicateAdminLoginId, parseStaffDraft, staffColumns, toStaffSummary } from "@/lib/staff-management-server";
-import { isValidPin } from "@/lib/pin";
+import { adminSecurityOwners, auditLogs, managedDevices, staff, staffSessions } from "@/db/schema";
+import { getCurrentAdminStaff, requireAdminAccess, requireOwnerSecurityAccess } from "@/lib/admin-auth";
+import { hashEmployeePin } from "@/lib/auth";
+import { isSameOriginRequest } from "@/lib/kds-device";
+import { hasHosStaffPermissionColumn, isDuplicateAdminLoginId, parseStaffDraft, staffColumns, staffColumnsWithoutHos, toStaffSummary } from "@/lib/staff-management-server";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ staffId: string }> }) {
-  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  if (!isSameOriginRequest(request)) return Response.json({ success: false }, { status: 403 });
+  const ownerDenied = await requireOwnerSecurityAccess(); if (ownerDenied) return ownerDenied;
+  const writeDenied = await requireAdminAccess(); if (writeDenied) return writeDenied;
   const actor = await getCurrentAdminStaff();
   if (!actor) return Response.json({ success: false, message: "관리센터 로그인이 필요합니다." }, { status: 401 });
   const id = Number((await params).staffId);
   if (!Number.isSafeInteger(id) || id <= 0) return Response.json({ success: false, message: "직원을 찾을 수 없습니다." }, { status: 404 });
   let input: unknown;
-  try { input = await request.json(); }
-  catch { return Response.json({ success: false, message: "요청 형식을 확인해 주세요." }, { status: 400 }); }
+  try { input = await request.json(); } catch { return Response.json({ success: false, message: "요청 형식을 확인해 주세요." }, { status: 400 }); }
+
   try {
+    const hosPermissionAvailable = await hasHosStaffPermissionColumn();
     const result = await db.transaction(async tx => {
-      const [target] = await tx.select(staffColumns).from(staff).where(eq(staff.staffId, id)).limit(1).for("update");
+      const [target] = await tx.select(hosPermissionAvailable ? staffColumns : staffColumnsWithoutHos).from(staff).where(eq(staff.staffId, id)).limit(1).for("update");
       if (!target) return { status: 404, body: { success: false, message: "직원을 찾을 수 없습니다." } };
       if (target.staffCode === "000") {
-        if (!input || typeof input !== "object" || Array.isArray(input)) return { status: 400, body: { success: false, message: "PIN을 확인해 주세요." } };
-        const sharedInput = input as Record<string, unknown>;
-        if (Object.keys(sharedInput).some(key => key !== "posPin" && key !== "posPinConfirm")) return { status: 403, body: { success: false, message: "매장 공용 계정은 POS PIN만 변경할 수 있습니다." } };
-        if (typeof sharedInput.posPin !== "string" || !isValidPin(sharedInput.posPin) || sharedInput.posPin !== sharedInput.posPinConfirm) return { status: 400, body: { success: false, message: "POS PIN은 일치하는 숫자 4자리여야 합니다." } };
-        await tx.update(staff).set({ pinHash: await hashPin(sharedInput.posPin), updatedAt: new Date() }).where(eq(staff.staffId, id));
-        return { status: 200, body: { success: true } };
-      }
-      if (input && typeof input === "object" && !Array.isArray(input) &&
-          Object.keys(input).length === 1 && (input as Record<string, unknown>).isActive === false) {
-        if (id === actor.staffId) return { status: 409, body: { success: false, message: "현재 로그인한 관리자 본인은 사용중지할 수 없습니다." } };
-        if (target.adminPermission === "READ_WRITE" && target.isActive === 1) {
-          const others = await tx.select({ id: staff.staffId }).from(staff).where(and(
-            eq(staff.adminPermission, "READ_WRITE"), eq(staff.isActive, 1), ne(staff.staffId, id),
-            isNotNull(staff.adminLoginId), isNotNull(staff.adminPinHash),
-          ));
-          if (!others.length) return { status: 409, body: { success: false, message: "마지막 읽기·쓰기 계정은 사용중지할 수 없습니다." } };
-        }
-        await tx.update(staff).set({ isActive: 0, updatedAt: new Date() }).where(eq(staff.staffId, id));
-        return { status: 200, body: { success: true } };
+        return { status: 403, body: { success: false, message: "매장 공용 계정은 직원 로그인과 직원관리에 사용할 수 없습니다." } };
       }
       const parsed = parseStaffDraft(input, toStaffSummary(target));
       if (!parsed) return { status: 400, body: { success: false, message: "요청 형식을 확인해 주세요." } };
       if (!parsed.valid) return { status: 400, body: { success: false, errors: parsed.errors, message: "입력 내용을 확인해 주세요." } };
       const { draft } = parsed;
-      if (id === actor.staffId && (!draft.isActive || !draft.adminEnabled || draft.adminPermission !== "READ_WRITE")) {
-        return { status: 409, body: { success: false, message: "현재 로그인한 관리자 본인의 사용이나 관리센터 권한을 해제할 수 없습니다." } };
+      if (draft.hosEnabled && !hosPermissionAvailable) return { status: 503, body: { success: false, code: "STAFF_HOS_SCHEMA_REQUIRED", message: "HOS 직원 권한 컬럼이 DB에 없어 HOS 권한을 저장할 수 없습니다." } };
+      if (draft.role !== target.role) return { status: 403, body: { success: false, message: "직급은 직원 수정 화면에서 변경할 수 없습니다." } };
+      const [owner] = await tx.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
+        .where(eq(adminSecurityOwners.staffId, target.staffId)).limit(1);
+      const isDesignatedOwner = owner?.staffId === target.staffId;
+      if (isDesignatedOwner && actor.staffId !== target.staffId) {
+        return { status: 403, body: { success: false, message: "지정된 최고관리자만 본인 계정을 수정할 수 있습니다." } };
       }
-      const removesWriter = target.adminPermission === "READ_WRITE" && target.isActive === 1 && (!draft.isActive || !draft.adminEnabled || draft.adminPermission !== "READ_WRITE");
-      if (removesWriter) {
-        const otherOwners = await tx.select({ id: staff.staffId }).from(staff).where(and(
-          eq(staff.adminPermission, "READ_WRITE"), eq(staff.isActive, 1), ne(staff.staffId, id),
-          isNotNull(staff.adminLoginId), isNotNull(staff.adminPinHash),
-        ));
-        if (!otherOwners.length) return { status: 409, body: { success: false, message: "마지막 읽기·쓰기 계정은 비활성화할 수 없습니다." } };
+      if (isDesignatedOwner && (!draft.isActive || !draft.adminEnabled)) {
+        return { status: 403, body: { success: false, message: "최고관리자 계정은 사용중지하거나 ADM 권한을 변경할 수 없습니다." } };
       }
-      if (draft.adminEnabled && draft.adminLoginId !== target.adminLoginId) {
-        const [duplicate] = await tx.select({ id: staff.staffId }).from(staff).where(eq(staff.adminLoginId, draft.adminLoginId)).limit(1);
-        if (duplicate) return { status: 409, body: { success: false, errors: { adminLoginId: "이미 사용 중인 관리센터 아이디입니다." } } };
-      }
+      const [duplicate] = await tx.select({ staffId: staff.staffId }).from(staff)
+        .where(and(sql`LOWER(${staff.adminLoginId}) = ${draft.loginId}`, ne(staff.staffId, id))).limit(1);
+      if (duplicate) return { status: 409, body: { success: false, errors: { loginId: "이미 사용 중인 ID입니다." }, message: "이미 사용 중인 ID입니다." } };
+      const sharedHash = draft.employeePin ? await hashEmployeePin(draft.employeePin) : target.employeePinHash;
       await tx.update(staff).set({
-        name: draft.name, role: draft.role, isActive: draft.isActive ? 1 : 0,
-        pinHash: draft.posEnabled ? (draft.posPin ? await hashPin(draft.posPin) : target.pinHash) : null,
+        name: draft.name, adminLoginId: draft.loginId, role: target.role, isActive: draft.isActive ? 1 : 0,
+        posEnabled: draft.posEnabled ? 1 : 0, employeePinHash: sharedHash,
         kdsEnabled: draft.kdsEnabled ? 1 : 0,
-        kdsPinHash: draft.kdsEnabled ? (draft.kdsPin ? await hashKdsPin(draft.kdsPin) : target.kdsPinHash) : null,
-        kdsPasswordHash: draft.kdsEnabled ? (draft.kdsPassword ? await hashKdsPassword(draft.kdsPassword) : target.kdsPasswordHash) : null,
-        kdsTotpSecretEnc: draft.kdsEnabled ? (draft.kdsPassword ? null : target.kdsTotpSecretEnc) : null,
-        kdsTotpPendingSecretEnc: null,
-        kdsTotpPendingExpiresAt: null,
-        kdsPinChangeRequired: draft.kdsEnabled ? (draft.kdsPin ? 1 : target.kdsPinChangeRequired) : 0,
-        adminLoginId: draft.adminEnabled ? draft.adminLoginId : null,
-        adminPinHash: draft.adminEnabled ? (draft.adminPin ? await hashAdminPin(draft.adminPin) : target.adminPinHash) : null,
-        adminPermission: draft.adminPermission,
+        ...(hosPermissionAvailable ? { hosEnabled: draft.hosEnabled ? 1 : 0 } : {}),
+        // Legacy KDS credentials are deliberately retained; the staff form no longer edits them.
+        kdsPinChangeRequired: draft.employeePin ? 0 : target.kdsPinChangeRequired,
+        adminEnabled: draft.adminEnabled ? 1 : 0,
         updatedAt: new Date(),
       }).where(eq(staff.staffId, id));
-      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPin || draft.kdsPassword) {
-        await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
-          eq(staffSessions.staffId, id), eq(staffSessions.sessionType, "KDS"), eq(staffSessions.status, "ACTIVE"),
+
+      const loginIdChanged = draft.loginId !== (target.adminLoginId ?? "").toLowerCase();
+      const reauthRequired = actor.staffId === id && (Boolean(draft.employeePin) || loginIdChanged);
+      if (draft.employeePin || loginIdChanged || !draft.isActive || !draft.posEnabled || !draft.kdsEnabled || !draft.adminEnabled) {
+        const sessionTypes = [] as ("POS" | "KDS" | "ADMIN")[];
+        if (draft.employeePin || loginIdChanged || !draft.isActive || !draft.posEnabled) sessionTypes.push("POS");
+        if (draft.employeePin || loginIdChanged || !draft.isActive || !draft.kdsEnabled) sessionTypes.push("KDS");
+        if (draft.employeePin || loginIdChanged || !draft.isActive || !draft.adminEnabled) sessionTypes.push("ADMIN");
+        for (const sessionType of sessionTypes) await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date(), ownerReauthenticatedAt: null }).where(and(
+          eq(staffSessions.staffId, id), eq(staffSessions.sessionType, sessionType), eq(staffSessions.status, "ACTIVE"),
         ));
       }
-      if (!draft.isActive || !draft.kdsEnabled || draft.kdsPassword) {
-        await tx.update(kdsTrustedDevices).set({ revokedAt: new Date() }).where(and(
-          eq(kdsTrustedDevices.staffId, id), isNull(kdsTrustedDevices.revokedAt),
-        ));
-      }
-      return { status: 200, body: { success: true } };
+      if (!draft.isActive || !draft.kdsEnabled) await tx.update(managedDevices).set({ status: "REVOKED", revokedAt: new Date(), updatedAt: new Date() }).where(and(
+        eq(managedDevices.registeredByStaffId, id), eq(managedDevices.deviceType, "KDS"), eq(managedDevices.status, "APPROVED"),
+      ));
+      await tx.insert(auditLogs).values({ staffId: actor.staffId, actionType: "STAFF_UPDATED", entityType: "STAFF", entityId: id, description: "Employee profile and access permissions updated" });
+      return { status: 200, body: { success: true, reauthRequired } };
     });
     return Response.json(result.body, { status: result.status });
   } catch (error) {
-    if (isDuplicateAdminLoginId(error)) return Response.json({ success: false, errors: { adminLoginId: "이미 사용 중인 관리센터 아이디입니다." } }, { status: 409 });
-    console.error("Admin staff update failed", error);
+    if (isDuplicateAdminLoginId(error)) return Response.json({ success: false, errors: { loginId: "이미 사용 중인 ID입니다." }, message: "이미 사용 중인 ID입니다." }, { status: 409 });
+    const detail = error as { code?: string; cause?: { code?: string } };
+    console.error("Admin staff update failed", { code: detail?.code ?? detail?.cause?.code });
     return Response.json({ success: false, message: "직원 정보를 저장하지 못했습니다." }, { status: 500 });
   }
 }

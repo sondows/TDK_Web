@@ -136,7 +136,7 @@ export default function SessionOrderScreen({
         return;
       }
 
-      router.replace("/pos");
+      router.replace("/tdkpos");
       router.refresh();
     } catch {
       setErrorMessage("테이블 종료 중 네트워크 오류가 발생했습니다.");
@@ -177,7 +177,7 @@ export default function SessionOrderScreen({
 
   return (
     <main className="min-h-screen bg-gray-100 p-6">
-      <PosSubHeader backLabel="POS 테이블 화면으로 돌아가기" className="rounded-xl shadow-sm" level={1} onBack={() => router.push("/pos")} title={session.tableName} variant="page" trailing={<div className="flex items-center gap-4">
+      <PosSubHeader backLabel="POS 테이블 화면으로 돌아가기" className="rounded-xl shadow-sm" level={1} onBack={() => router.push("/tdkpos")} title={session.tableName} variant="page" trailing={<div className="flex items-center gap-4">
           <p className="text-base text-white/90">성인 {session.personCount}명 · 유아 {session.babyCount}명 · 입장 {formatDate(session.openedAt)}</p>
           <button
             className="rounded-lg bg-red-600 px-5 py-3 text-lg font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-400"

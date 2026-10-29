@@ -1,6 +1,16 @@
+# Legacy reference only. For the current unified-path deployment use
+# Caddyfile.unified-paths.example; this older sample lacks the app ingress
+# origin header and must not be applied with the new server.cjs.
 # Replace/merge with the existing tdkon.myasustor.com site block; do not add a duplicate block.
-# Public HTTPS KDS is protected by employee authentication, OTP-enrolled devices,
-# and server-side KDS API authorization. POS remains LAN-only.
+# KDS network identity uses Caddy's client_ip, not browser-supplied IP headers.
+# NAS eth0 is confirmed as 192.168.0.83/24. Verify that Caddy sees each real
+# client IP before using 192.168.0.0/24 as the KDS exemption CIDR.
+# Set KDS_PROXY_SHARED_SECRET to the same 64-character random hex value in
+# Caddy's environment and the app's .env.production before enabling LAN bypass.
+# If another proxy is in front of Caddy, configure only that proxy's exact IP
+# under Caddy's global trusted_proxies and enable trusted_proxies_strict.
+# Do not trust private_ranges or an unverified LAN proxy address.
+# POS remains LAN-only; KDS still requires employee authentication everywhere.
 tdkon.myasustor.com {
 	@tdkpos path /tdkpos /tdkpos/*
 	handle @tdkpos {
@@ -8,6 +18,8 @@ tdkon.myasustor.com {
 		handle @trustedPos {
 			reverse_proxy 192.168.0.83:3000 {
 				header_up Host {host}
+				header_up X-TDK-KDS-Client-IP {client_ip}
+				header_up X-TDK-KDS-Proxy-Secret {env.KDS_PROXY_SHARED_SECRET}
 				header_up -X-TDK-Trusted-Network
 				header_up X-TDK-Trusted-Network caddy-vpn-validated
 				header_up X-Real-IP {remote_host}
@@ -20,6 +32,8 @@ tdkon.myasustor.com {
 	handle @tdkkds {
 		reverse_proxy 192.168.0.83:3000 {
 			header_up Host {host}
+			header_up X-TDK-KDS-Client-IP {client_ip}
+			header_up X-TDK-KDS-Proxy-Secret {env.KDS_PROXY_SHARED_SECRET}
 			header_up -X-TDK-Trusted-Network
 			header_up X-Real-IP {remote_host}
 		}
@@ -29,6 +43,8 @@ tdkon.myasustor.com {
 	handle @tdkadm {
 		reverse_proxy 192.168.0.83:3000 {
 			header_up Host {host}
+			header_up X-TDK-KDS-Client-IP {client_ip}
+			header_up X-TDK-KDS-Proxy-Secret {env.KDS_PROXY_SHARED_SECRET}
 			header_up -X-TDK-Trusted-Network
 			header_up X-Real-IP {remote_host}
 		}
@@ -42,6 +58,8 @@ tdkon.myasustor.com {
 		handle @trustedApi {
 			reverse_proxy 192.168.0.83:3000 {
 				header_up Host {host}
+				header_up X-TDK-KDS-Client-IP {client_ip}
+				header_up X-TDK-KDS-Proxy-Secret {env.KDS_PROXY_SHARED_SECRET}
 				header_up -X-TDK-Trusted-Network
 				header_up X-TDK-Trusted-Network caddy-vpn-validated
 				header_up X-Real-IP {remote_host}
@@ -54,6 +72,8 @@ tdkon.myasustor.com {
 	handle {
 		reverse_proxy 192.168.0.83:3000 {
 			header_up Host {host}
+			header_up X-TDK-KDS-Client-IP {client_ip}
+			header_up X-TDK-KDS-Proxy-Secret {env.KDS_PROXY_SHARED_SECRET}
 			header_up -X-TDK-Trusted-Network
 			header_up X-Real-IP {remote_host}
 		}

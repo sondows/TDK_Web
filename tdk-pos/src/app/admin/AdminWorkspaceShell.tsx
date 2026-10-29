@@ -5,11 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import AdminLogoutButton from "./AdminLogoutButton";
 import AdminExitButton from "./AdminExitButton";
 import AdminSidebar from "./AdminSidebar";
-import { AdminAccessProvider } from "./AdminAccessContext";
-import type { AdminPermission } from "@/lib/staff-management";
 import styles from "./admin.module.css";
 
-export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, permission = "READ_WRITE" }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; permission?: AdminPermission }) {
+export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, canAccessSecurity = false }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; canAccessSecurity?: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -31,16 +29,16 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
     };
   }, [drawerOpen]);
 
-  return <AdminAccessProvider permission={permission}><div className={styles.shell}>
+  return <div className={styles.shell}>
     <header className={styles.header}>
       <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="메뉴 열기" aria-expanded={drawerOpen} aria-controls="admin-mobile-drawer" onClick={() => setDrawerOpen(true)}>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
       <div className={styles.brand}>TDK <span>관리센터</span></div>
-      <div className={styles.userArea}>{permission === "READ_ONLY" && <span className={styles.readOnlyBadge}>조회 전용</span>}<span className={styles.userName}>{userName}</span>{showLogout && <AdminLogoutButton />}<AdminExitButton /></div>
+      <div className={styles.userArea}><span className={styles.userName}>{userName}</span>{showLogout && <AdminLogoutButton />}<AdminExitButton /></div>
     </header>
     <div className={styles.workspace}>
-      <AdminSidebar menuOnly={menuOnly} />
+      <AdminSidebar canAccessSecurity={canAccessSecurity} menuOnly={menuOnly} />
       <main className={styles.main} id="admin-main">{children}</main>
     </div>
     {drawerOpen && <>
@@ -55,8 +53,8 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }}>
         <div className={styles.mobileDrawerHeader}><strong>메뉴</strong><button type="button" className={styles.mobileDrawerClose} aria-label="메뉴 닫기" onClick={() => setDrawerOpen(false)}>×</button></div>
-        <AdminSidebar menuOnly={menuOnly} mobileDrawer onNavigate={() => setDrawerOpen(false)} />
+        <AdminSidebar canAccessSecurity={canAccessSecurity} menuOnly={menuOnly} mobileDrawer onNavigate={() => setDrawerOpen(false)} />
       </aside>
     </>}
-  </div></AdminAccessProvider>;
+  </div>;
 }

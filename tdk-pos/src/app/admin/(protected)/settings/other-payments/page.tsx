@@ -1,5 +1,4 @@
 import OtherPaymentSettingsClient from "../../../../pos/admin/settings/payment/other/OtherPaymentSettingsClient";
-import AdminReadOnlyFields from "@/app/admin/AdminReadOnlyFields";
 import sharp from "sharp";
 import { getReceiptLogoRaster } from "@/lib/receipt-logo-storage";
 import { getStoreInfo } from "@/lib/store-info";
@@ -22,6 +21,6 @@ export default async function AdminOtherPaymentSettingsPage() {
     logoLoadError = error instanceof Error ? error.message : String(error);
   }
   return <div className="mx-auto max-w-5xl">
-    <AdminReadOnlyFields><OtherPaymentSettingsClient logoDataUrl={logoDataUrl} logoLoadError={logoLoadError} receiptLogo={receiptLogo} storeName={storeInfo.storeName} /></AdminReadOnlyFields>
+    <OtherPaymentSettingsClient logoDataUrl={logoDataUrl} logoLoadError={logoLoadError} receiptLogo={receiptLogo} storeName={storeInfo.storeName} />
   </div>;
 }

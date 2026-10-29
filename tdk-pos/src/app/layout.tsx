@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const externalAdmin = isExternalAdminHost(requestHeaders.get("host"));
-  const surface = externalAdmin ? requestHeaders.get("x-tdk-external-surface") : null;
+  const surface = requestHeaders.get("x-tdk-external-surface");
   const appName = surface === "pos" ? "TDK-POS" : surface === "kds" ? "TDK KDS" : externalAdmin ? "TDK Admin" : "TDK-POS";
   const manifest = surface === "pos" ? "/tdkpos/manifest.webmanifest" : surface === "admin" ? "/tdkadm/manifest.webmanifest" : "/manifest.webmanifest";
   return {

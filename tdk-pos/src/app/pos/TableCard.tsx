@@ -44,7 +44,7 @@ export default function TableCard({
 
   function handleClick() {
     if (isOccupied) {
-      router.push(`/pos/session/${sessionId}`);
+      router.push(`/tdkpos/session/${sessionId}`);
       return;
     }
     openEntryModal();

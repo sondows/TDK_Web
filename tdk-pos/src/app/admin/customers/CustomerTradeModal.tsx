@@ -8,7 +8,6 @@ import { nextGridSort, sortGridRows, type GridSortState } from "@/lib/admin-grid
 import CustomerTradeDetailModal from "./CustomerTradeDetailModal";
 import CustomerTradeEntryModal, { type TradeAction } from "./CustomerTradeEntryModal";
 import AdminBackLink from "@/app/pos/admin/AdminBackLink";
-import { useAdminReadOnly } from "../AdminAccessContext";
 import StaffToggle from "../staff/StaffToggle";
 import styles from "../admin.module.css";
 
@@ -50,7 +49,6 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
   onChanged: () => void;
   onClose: () => void;
 }) {
-  const readOnly = useAdminReadOnly();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [initialRange] = useState(currentMonthRange);
   const [balance, setBalance] = useState(customer.tradeBalance);
@@ -170,11 +168,11 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
               <span>현재 거래잔액</span>
               <strong className={balance > 0 ? styles.customerPositiveBalance : balance < 0 ? styles.customerNegativeBalance : styles.customerZeroBalance}>{formatTradeBalance(balance)}</strong>
             </div>
-            {!readOnly && <div className={styles.customerTradeActions}>
+            <div className={styles.customerTradeActions}>
               <button onClick={() => setAction("DEPOSIT")} type="button">입금</button>
               <button disabled={balance <= 0} onClick={() => setAction("REFUND")} type="button">환불</button>
               <button onClick={() => setAction("ADJUSTMENT")} type="button">잔액조정</button>
-            </div>}
+            </div>
           </section>
         </div>
         {error && <p className={styles.customerTradeError} role="alert">{error}</p>}

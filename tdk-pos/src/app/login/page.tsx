@@ -6,15 +6,12 @@ import { useRouter } from "next/navigation";
 import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
-import { PIN_LENGTH } from "@/lib/pin";
 import { OPENING_FUND_PROMPT_DISMISSED_KEY } from "@/lib/opening-fund-prompt";
 
 type Staff = {
-  staffId: number;
-  staffCode: string;
-  name: string;
-  role: string;
+  loginId: string;
   hasPin: boolean;
+  pinLength: 6;
 };
 
 type PinStatus = "idle" | "checking" | "valid";
@@ -30,8 +27,8 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPinError, setShowPinError] = useState(false);
   const verificationRequestId = useRef(0);
+  const verificationInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -40,9 +37,7 @@ export default function LoginPage() {
       .then(response => response.json() as Promise<{ staff?: Staff[]; message?: string }>)
       .then(result => {
         if (!active) return;
-        setStaff((result.staff ?? []).slice().sort((a, b) =>
-          a.staffCode < b.staffCode ? -1 : a.staffCode > b.staffCode ? 1 : 0,
-        ));
+        setStaff((result.staff ?? []).slice().sort((a, b) => a.loginId.localeCompare(b.loginId)));
         if (!result.staff?.length && result.message) setMessage(result.message);
       })
       .catch(() => {
@@ -59,6 +54,7 @@ export default function LoginPage() {
 
   const resetPinVerification = (nextPin = "") => {
     verificationRequestId.current += 1;
+    verificationInFlight.current = false;
     setPin(nextPin);
     setPinStatus("idle");
     setMessage("");
@@ -72,21 +68,21 @@ export default function LoginPage() {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffCode: staffMember.staffCode, pin: pinValue }),
+        body: JSON.stringify({ loginId: staffMember.loginId, pin: pinValue }),
       });
       const result = await response.json() as { success?: boolean; message?: string };
 
       if (!response.ok || !result.success) {
         resetPinVerification();
-        if (response.status === 401) setShowPinError(true);
-        else setMessage(result.message ?? "로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
+        setMessage(response.status === 401 ? "PIN 번호가 올바르지 않습니다." : result.message ?? "로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
         return;
       }
 
       try { window.sessionStorage.removeItem(OPENING_FUND_PROMPT_DISMISSED_KEY); }
       catch { /* The next authenticated POS session will still check the server. */ }
-      router.replace("/pos");
+      router.replace("/tdkpos");
     } catch {
+      resetPinVerification();
       setMessage("로그인 요청 중 네트워크 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
@@ -94,15 +90,17 @@ export default function LoginPage() {
   };
 
   const verifyPin = (staffMember: Staff, pinValue: string) => {
+    if (verificationInFlight.current) return;
+    verificationInFlight.current = true;
     const requestId = ++verificationRequestId.current;
     setPinStatus("checking");
 
     void fetch("/api/auth/verify-pin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staffCode: staffMember.staffCode, pin: pinValue }),
+      body: JSON.stringify({ loginId: staffMember.loginId, pin: pinValue }),
     })
-      .then(async response => ({ response, result: await response.json() as { success?: boolean } }))
+      .then(async response => ({ response, result: await response.json() as { success?: boolean; message?: string } }))
       .then(({ response, result }) => {
         if (requestId !== verificationRequestId.current) return;
 
@@ -113,41 +111,41 @@ export default function LoginPage() {
         }
 
         resetPinVerification();
-        if (response.status === 401) setShowPinError(true);
-        else setMessage("PIN 검증 서비스를 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+        if (response.status === 401) setMessage("PIN 번호가 올바르지 않습니다.");
+        else setMessage(result.message ?? "PIN 검증 서비스를 이용할 수 없습니다. 잠시 후 다시 시도해 주세요.");
       })
       .catch(() => {
         if (requestId === verificationRequestId.current) {
-          setPinStatus("idle");
+          resetPinVerification();
           setMessage("PIN 검증 중 네트워크 오류가 발생했습니다.");
         }
       });
   };
 
   const selectStaff = (next: Staff) => {
-    if (isSubmitting) return;
-    setSelectedStaff(current => current?.staffCode === next.staffCode ? null : next);
+    if (isSubmitting || verificationInFlight.current) return;
+    setSelectedStaff(current => current?.loginId === next.loginId ? null : next);
     resetPinVerification();
-    setShowPinError(false);
   };
 
   const updatePin = (nextPin = "") => {
-    if (isSubmitting || pinStatus === "checking") return;
-    resetPinVerification(nextPin);
-    if (selectedStaff && nextPin.length === PIN_LENGTH) verifyPin(selectedStaff, nextPin);
+    if (!selectedStaff || isSubmitting || verificationInFlight.current || pinStatus !== "idle") return;
+    const normalizedPin = nextPin.replace(/\D/g, "").slice(0, selectedStaff.pinLength);
+    resetPinVerification(normalizedPin);
+    if (normalizedPin.length === selectedStaff.pinLength) verifyPin(selectedStaff, normalizedPin);
   };
 
   const append = (digit: string) => {
-    if (!selectedStaff || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH) return;
-    updatePin(`${pin}${digit}`.slice(0, PIN_LENGTH));
+    if (!selectedStaff || isSubmitting || verificationInFlight.current || pinStatus !== "idle" || pin.length >= selectedStaff.pinLength) return;
+    updatePin(`${pin}${digit}`.slice(0, selectedStaff.pinLength));
   };
 
   const remove = () => {
-    if (!isSubmitting && pinStatus !== "checking") updatePin(pin.slice(0, -1));
+    if (!isSubmitting && !verificationInFlight.current) updatePin(pin.slice(0, -1));
   };
 
   const clear = () => {
-    if (!isSubmitting && pinStatus !== "checking") updatePin();
+    if (!isSubmitting && !verificationInFlight.current) updatePin();
   };
 
   const pinEnabled = Boolean(selectedStaff);
@@ -156,17 +154,16 @@ export default function LoginPage() {
     <main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
       <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[336px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <header className="shrink-0 border-b-4 border-blue-600 px-8 py-6 text-center">
-          <h1 className="text-4xl font-extrabold text-blue-600">TDK POS</h1>
+          <h1 className="text-4xl font-extrabold text-blue-600">TDKON</h1>
           <p className="mt-2 text-xl font-bold text-slate-600">로그인</p>
         </header>
 
         <PinAuthPanel
           scrollablePeople
           emptyMessage={!loading && !staff.length ? message || "로그인 가능한 직원이 없습니다." : undefined}
-          footer={message && staff.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{message}</p> : undefined}
           keypad={<PinKeypad
-            actionDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || !pin}
-            digitDisabled={!pinEnabled || isSubmitting || pinStatus === "checking" || pin.length >= PIN_LENGTH}
+            actionDisabled={!pinEnabled || isSubmitting || pinStatus !== "idle" || !pin}
+            digitDisabled={!pinEnabled || isSubmitting || pinStatus !== "idle" || pin.length >= (selectedStaff?.pinLength ?? 6)}
             largeKeys
             onBackspace={remove}
             onClear={clear}
@@ -175,32 +172,23 @@ export default function LoginPage() {
           label="직원"
           onSelect={selectStaff}
           people={staff}
+          pinFeedback={<div aria-live="polite" className="mt-2 flex h-12 shrink-0 items-center justify-center overflow-y-auto text-center text-sm font-semibold leading-5 text-red-600" role={message && staff.length > 0 ? "alert" : undefined}>{staff.length > 0 ? message : ""}</div>}
           pinInput={<PinInput
               ariaLabel="직원 PIN"
               className={pinEnabled ? activePinStyle : ""}
-              disabled={!pinEnabled || isSubmitting || pinStatus === "checking"}
+              disabled={!pinEnabled || isSubmitting || pinStatus !== "idle"}
+              maxLength={selectedStaff?.pinLength ?? 6}
               keypadAligned
               onChange={updatePin}
               value={pin}
             />}
-          selectedCode={selectedStaff?.staffCode}
-          selectionDisabled={loading || isSubmitting}
+          selectedLoginId={selectedStaff?.loginId}
+          selectionDisabled={loading || isSubmitting || pinStatus !== "idle"}
           largePeopleButtons
           showLabels={false}
         />
       </section>
 
-      {showPinError && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4">
-          <section aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl" role="dialog">
-            <h2 className="text-2xl font-extrabold text-slate-900">로그인 오류</h2>
-            <p className="mt-5 text-xl text-slate-700">PIN 번호가 올바르지 않습니다.</p>
-            <button className="mt-7 min-h-[58px] w-[160px] rounded-xl bg-blue-600 text-xl font-extrabold text-white" onClick={() => { setShowPinError(false); resetPinVerification(); }} type="button">
-              확인
-            </button>
-          </section>
-        </div>
-      )}
     </main>
   );
 }

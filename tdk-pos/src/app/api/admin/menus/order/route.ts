@@ -1,4 +1,4 @@
-import { requireAdminWriteForAdminSession } from "@/lib/admin-auth";
+import { requireAdminAccessForAdminSession } from "@/lib/admin-auth";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { menus } from "@/db/schema";
@@ -14,7 +14,7 @@ async function requireOwner() {
 }
 
 export async function PATCH(request: Request) {
-  const writeDenied = await requireAdminWriteForAdminSession(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccessForAdminSession(); if (writeDenied) return writeDenied;
   const auth = await requireOwner(); if (auth.error) return auth.error;
   try {
     const body = await request.json() as { menuId?: unknown; direction?: unknown };

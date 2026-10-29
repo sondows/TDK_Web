@@ -1,7 +1,7 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, orderItems, orders, paymentMethods, payments } from "@/db/schema";
-import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminAccess } from "@/lib/admin-auth";
 import { adjustmentReasons, fullyReversedAdjacentLedgerPairs, tradeMethods, type TradeEntryType } from "@/lib/customer-trade";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
@@ -125,7 +125,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cust
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ customerId: string }> }) {
-  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccess(); if (writeDenied) return writeDenied;
   try {
     const member = await getCurrentAdminStaff();
     if (!member) return json({ success: false, message: "로그인이 필요합니다." }, 401);

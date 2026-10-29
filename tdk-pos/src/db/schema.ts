@@ -64,6 +64,9 @@ export const staff = mysqlTable(
     staffCode: varchar("staff_code", { length: 30 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     pinHash: varchar("pin_hash", { length: 255 }),
+    posEnabled: tinyint("pos_enabled").notNull().default(0),
+    hosEnabled: tinyint("hos_enabled").notNull().default(0),
+    employeePinHash: varchar("employee_pin_hash", { length: 255 }),
     kdsEnabled: tinyint("kds_enabled").notNull().default(0),
     kdsPinHash: varchar("kds_pin_hash", { length: 255 }),
     kdsPasswordHash: varchar("kds_password_hash", { length: 255 }),
@@ -73,9 +76,7 @@ export const staff = mysqlTable(
     kdsPinChangeRequired: tinyint("kds_pin_change_required").notNull().default(1),
     adminLoginId: varchar("admin_login_id", { length: 32 }),
     adminPinHash: varchar("admin_pin_hash", { length: 255 }),
-    adminPermission: mysqlEnum("admin_permission", ["NONE", "READ_ONLY", "READ_WRITE"])
-      .notNull()
-      .default("NONE"),
+    adminEnabled: tinyint("admin_enabled").notNull().default(0),
     role: mysqlEnum("role", ["OWNER", "MANAGER", "STAFF"])
       .notNull()
       .default("STAFF"),
@@ -158,6 +159,8 @@ export const staffSessions = mysqlTable("staff_sessions", {
     mode: "number",
     unsigned: true,
   }),
+  // KDS managed-device registry has a different key space from legacy POS devices.
+  managedDeviceId: bigint("managed_device_id", { mode: "number", unsigned: true }),
   sessionTokenHash: varchar("session_token_hash", { length: 255 }),
   loggedInAt: datetime("logged_in_at")
     .notNull()
@@ -168,7 +171,35 @@ export const staffSessions = mysqlTable("staff_sessions", {
   status: mysqlEnum("status", ["ACTIVE", "LOGGED_OUT", "EXPIRED"])
     .notNull()
     .default("ACTIVE"),
+  ownerReauthenticatedAt: datetime("owner_reauthenticated_at"),
 });
+
+export const adminSecuritySettings = mysqlTable("admin_security_settings", {
+  settingsId: tinyint("settings_id").primaryKey(),
+  ownerStaffId: bigint("owner_staff_id", { mode: "number", unsigned: true }),
+  ownerSecurityPasswordHash: varchar("owner_security_password_hash", { length: 255 }),
+  deviceRegistrationPasswordEnabled: tinyint("device_registration_password_enabled").notNull().default(0),
+  deviceRegistrationPasswordHash: varchar("device_registration_password_hash", { length: 255 }),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }),
+});
+
+// Per-person second-factor credentials. A NULL hash means the member must enroll personally.
+export const adminSecurityOwners = mysqlTable("admin_security_owners", {
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).primaryKey(),
+  passwordHash: varchar("password_hash", { length: 255 }),
+  credentialState: mysqlEnum("credential_state", ["SETUP_PENDING", "RESET_REQUIRED", "ACTIVE"]).notNull().default("SETUP_PENDING"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  assignedByStaffId: bigint("assigned_by_staff_id", { mode: "number", unsigned: true }),
+});
+
+export const adminAuthAttempts = mysqlTable("admin_auth_attempts", {
+  attemptKey: varchar("attempt_key", { length: 64 }).primaryKey(),
+  windowStartedAt: datetime("window_started_at").notNull(),
+  attemptCount: int("attempt_count", { unsigned: true }).notNull().default(0),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [index("idx_admin_auth_attempts_updated_at").on(table.updatedAt)]);
 
 export const kdsLoginAttempts = mysqlTable("kds_login_attempts", {
   staffId: bigint("staff_id", { mode: "number", unsigned: true }).primaryKey(),
@@ -194,6 +225,36 @@ export const kdsTrustedDevices = mysqlTable("kds_trusted_devices", {
   expiresAt: datetime("expires_at").notNull(),
   revokedAt: datetime("revoked_at"),
 }, table => [uniqueIndex("uq_kds_trusted_devices_token_hash").on(table.tokenHash), index("idx_kds_trusted_devices_staff").on(table.staffId, table.revokedAt)]);
+
+export const managedDevices = mysqlTable("managed_devices", {
+  deviceId: bigint("device_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  deviceCode: varchar("device_code", { length: 24 }),
+  deviceName: varchar("device_name", { length: 120 }).notNull(),
+  deviceType: mysqlEnum("device_type", ["POS", "KDS", "ADM", "HOS"]).notNull(),
+  status: mysqlEnum("status", ["PENDING", "APPROVED", "DENIED", "REVOKED", "EXPIRED"]).notNull().default("PENDING"),
+  posEnabled: tinyint("pos_enabled").notNull().default(0),
+  kdsEnabled: tinyint("kds_enabled").notNull().default(0),
+  admEnabled: tinyint("adm_enabled").notNull().default(0),
+  hosEnabled: tinyint("hos_enabled").notNull().default(0),
+  tokenHash: varchar("token_hash", { length: 64 }),
+  requestTokenHash: varchar("request_token_hash", { length: 64 }),
+  confirmationCode: varchar("confirmation_code", { length: 6 }),
+  registeredByStaffId: bigint("registered_by_staff_id", { mode: "number", unsigned: true }),
+  requestedAt: datetime("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  requestExpiresAt: datetime("request_expires_at"),
+  approvedAt: datetime("approved_at"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastUsedAt: datetime("last_used_at"),
+  expiresAt: datetime("expires_at"),
+  revokedAt: datetime("revoked_at"),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("uq_managed_devices_code").on(table.deviceCode),
+  uniqueIndex("uq_managed_devices_token_hash").on(table.tokenHash),
+  uniqueIndex("uq_managed_devices_request_token_hash").on(table.requestTokenHash),
+  index("idx_managed_devices_status_requested").on(table.status, table.requestedAt),
+  index("idx_managed_devices_staff").on(table.registeredByStaffId, table.deviceType),
+]);
 
 /** Legacy KDS-only credentials and sessions are retained for data compatibility; new KDS auth uses staff sessions. */
 export const kdsAccounts = mysqlTable("kds_accounts", {

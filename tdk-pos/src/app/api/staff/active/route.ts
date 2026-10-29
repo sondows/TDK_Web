@@ -1,33 +1,31 @@
-import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import { staff } from "@/db/schema";
-import { getConfiguredPosLoginMode } from "@/lib/pos-login-mode";
 
 /** Publicly safe identity list used by the personal POS login screen. */
 export async function GET() {
   try {
-    const sharedMode = await getConfiguredPosLoginMode() === "SHARED";
     const employees = await db
       .select({
-        staffId: staff.staffId,
-        staffCode: staff.staffCode,
-        name: staff.name,
+        loginId: staff.adminLoginId,
         role: staff.role,
-        pinHash: staff.pinHash,
+        posEnabled: staff.posEnabled,
+        employeePinHash: staff.employeePinHash,
       })
       .from(staff)
       .where(
         and(
           eq(staff.isActive, 1),
-          sharedMode ? or(eq(staff.staffCode, "000"), isNotNull(staff.pinHash)) : and(ne(staff.staffCode, "000"), isNotNull(staff.pinHash))
+          isNotNull(staff.employeePinHash), ne(staff.employeePinHash, ""), isNotNull(staff.adminLoginId), ne(staff.adminLoginId, ""),
+          ne(staff.staffCode, "000"), eq(staff.posEnabled, 1)
         )
       )
-      .orderBy(asc(staff.staffCode));
+      .orderBy(asc(staff.adminLoginId));
 
     return Response.json({
       success: true,
-      staff: employees.map(employee => ({ staffId: employee.staffId, staffCode: employee.staffCode, name: employee.staffCode === "000" ? "매장 공용" : employee.name, role: employee.role, hasPin: Boolean(employee.pinHash) })),
+        staff: employees.map(employee => ({ loginId: employee.loginId, hasPin: Boolean(employee.employeePinHash), pinLength: 6 as const })),
     });
   } catch (error) {
     console.error("Failed to load active login staff", error);

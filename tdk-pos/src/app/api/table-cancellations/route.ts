@@ -1,10 +1,10 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { diningTables, orderItemCancellations, orderItems, orders, staff, tableSessionMerges, tableSessions } from "@/db/schema";
-import { getCurrentStaff, verifyPin } from "@/lib/auth";
+import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
-import { isValidPin } from "@/lib/pin";
+import { isValidEmployeePin } from "@/lib/pin";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
@@ -59,27 +59,27 @@ export async function POST(request: Request) {
   if (!current && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
 
   try {
-    const body = await request.json() as { tableId?: unknown; staffCode?: unknown; pin?: unknown; reason?: unknown; detail?: unknown };
+    const body = await request.json() as { tableId?: unknown; loginId?: unknown; pin?: unknown; reason?: unknown; detail?: unknown };
     const tableId = Number(body.tableId);
     if (!Number.isInteger(tableId) || tableId <= 0) return Response.json({ success: false, message: "취소할 테이블을 확인해 주세요." }, { status: 400 });
 
-    if (typeof body.staffCode !== "string" || typeof body.pin !== "string") {
+    if (typeof body.loginId !== "string" || typeof body.pin !== "string") {
       const preview = await resolveScope(tableId);
       return Response.json({ success: true, preview: true, tableNos: preview.tableNos, total: preview.total });
     }
 
-    const staffCode = body.staffCode.trim();
+    const loginId = body.loginId.trim().toLowerCase();
     const pin = body.pin;
     const reason = typeof body.reason === "string" ? body.reason : "";
     const detail = typeof body.detail === "string" ? body.detail.trim() : "";
-    if (!isValidPin(pin) || !reasons.has(reason) || (reason === "기타" && !detail)) {
+    if (!isValidEmployeePin(pin) || !reasons.has(reason) || (reason === "기타" && !detail)) {
       return Response.json({ success: false, message: "직원 PIN과 취소 사유를 확인해 주세요." }, { status: 400 });
     }
 
     const result = await db.transaction(async tx => {
-      const [checker] = await tx.select({ staffId: staff.staffId, pinHash: staff.pinHash })
-        .from(staff).where(and(eq(staff.staffCode, staffCode), eq(staff.isActive, 1))).limit(1);
-      if (!checker || staffCode === "000" || !(await verifyPin(pin, checker.pinHash))) throw new Error("직원번호 또는 PIN이 올바르지 않습니다.");
+      const [checker] = await tx.select({ staffId: staff.staffId, employeePinHash: staff.employeePinHash })
+        .from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
+      if (!checker?.employeePinHash || !(await verifyEmployeePin(pin, checker.employeePinHash))) throw new Error("직원 ID 또는 PIN이 올바르지 않습니다.");
 
       // Recalculate under locks; preview values are never trusted for execution.
       const base = await tx.select({ sessionId: tableSessions.sessionId, groupId: tableSessions.groupId })

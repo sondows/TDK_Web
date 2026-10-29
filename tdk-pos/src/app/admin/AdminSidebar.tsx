@@ -10,39 +10,49 @@ type NavigationGroup = { id: string; label: string; href: string; children: Navi
 type NavigationItem = NavigationLink | NavigationGroup;
 
 const navigation: NavigationItem[] = [
-  { label: "대시보드", href: "/admin" },
+  { label: "대시보드", href: "/tdkadm" },
   {
     id: "sales",
     label: "판매조회",
-    href: "/admin/sales-report",
+    href: "/tdkadm/sales-report",
     children: [
-      { label: "매출조회", href: "/admin/sales-report" },
-      { label: "품목별 매출", href: "/admin/item-sales" },
-      { label: "영업마감 내역", href: "/admin/business-closings" },
+      { label: "매출조회", href: "/tdkadm/sales-report" },
+      { label: "품목별 매출", href: "/tdkadm/item-sales" },
+      { label: "영업마감 내역", href: "/tdkadm/business-closings" },
     ],
   },
-  { label: "고객 관리", href: "/admin/customers" },
-  { label: "직원 관리", href: "/admin/staff" },
+  { label: "고객 관리", href: "/tdkadm/customers" },
   {
     id: "pos-settings",
     label: "POS",
-    href: "/admin/settings/pos",
+    href: "/tdkadm/settings/pos",
     children: [
-      { label: "테이블 설정", href: "/admin/tables" },
-      { label: "메뉴 관리", href: "/admin/menus" },
-      { label: "할인 설정", href: "/admin/settings/discounts" },
-      { label: "기타결제 설정", href: "/admin/settings/other-payments" },
-      { label: "포장 설정", href: "/admin/settings/takeout" },
-      { label: "영업마감", href: "/admin/settings/pos/business-closing" },
-      { label: "KDS 설정", href: "/admin/settings/pos/kds" },
+      { label: "테이블 설정", href: "/tdkadm/tables" },
+      { label: "메뉴 관리", href: "/tdkadm/menus" },
+      { label: "할인 설정", href: "/tdkadm/settings/discounts" },
+      { label: "기타결제 설정", href: "/tdkadm/settings/other-payments" },
+      { label: "포장 설정", href: "/tdkadm/settings/takeout" },
+      { label: "영업마감", href: "/tdkadm/settings/pos/business-closing" },
+      { label: "KDS 설정", href: "/tdkadm/settings/pos/kds" },
     ],
   },
   {
     id: "printing",
     label: "인쇄 설정",
-    href: "/admin/settings/printing",
+    href: "/tdkadm/settings/printing",
     children: [
-      { label: "매장 명판 설정", href: "/admin/settings/printing/nameplate" },
+      { label: "매장 명판 설정", href: "/tdkadm/settings/printing/nameplate" },
+    ],
+  },
+  {
+    id: "security",
+    label: "보안",
+    href: "/tdkadm/security/devices",
+    children: [
+      { label: "직원관리", href: "/tdkadm/security/staff" },
+      { label: "기기관리", href: "/tdkadm/security/devices" },
+      { label: "최고관리자 관리", href: "/tdkadm/security/owners" },
+      { label: "기기등록 설정", href: "/tdkadm/security/devices/settings" },
     ],
   },
 ];
@@ -53,7 +63,7 @@ function isGroup(item: NavigationItem): item is NavigationGroup {
 }
 
 function linkIsActive(pathname: string, href: string) {
-  return pathname === href || (href !== "/admin" && pathname.startsWith(`${href}/`));
+  return pathname === href || (href !== "/tdkadm" && pathname.startsWith(`${href}/`));
 }
 
 function groupContainsPath(group: NavigationGroup, pathname: string) {
@@ -62,7 +72,7 @@ function groupContainsPath(group: NavigationGroup, pathname: string) {
     || pathname.startsWith(`${group.href}/`);
 }
 
-export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; onNavigate?: () => void }) {
+export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [expansion, setExpansion] = useState(() => ({
     pathname,
@@ -88,8 +98,8 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, o
   };
 
   const items: NavigationItem[] = menuOnly
-    ? [{ label: "메뉴 관리", href: "/admin/menus" }]
-    : navigation;
+    ? [{ label: "메뉴 관리", href: "/tdkadm/menus" }]
+    : navigation.filter(item => canAccessSecurity || !isGroup(item) || item.id !== "security");
 
   return <aside className={`${styles.sidebar}${mobileDrawer ? ` ${styles.mobileDrawerSidebar}` : ""}`}>
     <nav aria-label="관리센터 메뉴" className={styles.navigation}>

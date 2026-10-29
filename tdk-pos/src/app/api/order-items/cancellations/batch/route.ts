@@ -2,7 +2,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { orderItemCancellations, orderItems, orders, staff, tableSessionMerges, tableSessions } from "@/db/schema";
-import { getCurrentStaff, verifyPin } from "@/lib/auth";
+import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
 import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { canEditDisplayedOrderSession } from "@/lib/party-order-access";
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   if (!current && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
 
   try {
-    const body = await request.json() as { cancellations?: unknown; componentQuantities?: unknown; currentSessionId?: unknown; reason?: unknown; detail?: unknown; staffCode?: unknown; pin?: unknown };
+    const body = await request.json() as { cancellations?: unknown; componentQuantities?: unknown; currentSessionId?: unknown; reason?: unknown; detail?: unknown; loginId?: unknown; pin?: unknown };
     const cancellations = Array.isArray(body.cancellations) ? body.cancellations.map(value => value as Partial<CancellationRequest>) : [];
     const componentQuantities = Array.isArray(body.componentQuantities) ? body.componentQuantities.map(value => value as Partial<ComponentQuantityRequest>) : [];
     const reason = typeof body.reason === "string" ? body.reason : "";
@@ -148,9 +148,10 @@ export async function POST(request: Request) {
       const [sharedStaff] = sharedMode ? await tx.select({ staffId: staff.staffId }).from(staff).where(and(eq(staff.staffCode, "000"), eq(staff.isActive, 1))).limit(1) : [];
       let cancelledByStaffId = sharedMode ? sharedStaff?.staffId : current?.staffId;
       if (requiresReauth) {
-        if (typeof body.staffCode !== "string" || typeof body.pin !== "string") return { reauth: true as const, isFullOrderCancellation };
-        const [checker] = await tx.select({ staffId: staff.staffId, pinHash: staff.pinHash }).from(staff).where(and(eq(staff.staffCode, body.staffCode.trim()), eq(staff.isActive, 1))).limit(1);
-        if (!checker || body.staffCode.trim() === "000" || !(await verifyPin(body.pin, checker.pinHash))) throw new Error("직원번호 또는 PIN이 올바르지 않습니다.");
+        if (typeof body.loginId !== "string" || typeof body.pin !== "string") return { reauth: true as const, isFullOrderCancellation };
+        const loginId = body.loginId.trim().toLowerCase();
+        const [checker] = await tx.select({ staffId: staff.staffId, employeePinHash: staff.employeePinHash }).from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
+        if (!checker?.employeePinHash || !(await verifyEmployeePin(body.pin, checker.employeePinHash))) throw new Error("직원 ID 또는 PIN이 올바르지 않습니다.");
         cancelledByStaffId = checker.staffId;
       }
       if (!cancelledByStaffId) throw new Error(sharedMode ? "매장 공용 취소 계정을 찾을 수 없습니다." : "취소 처리 직원이 필요합니다.");

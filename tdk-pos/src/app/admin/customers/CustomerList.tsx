@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import type { CustomerSummary } from "@/lib/customer";
 import SortableHeader from "@/app/admin/SortableHeader";
 import { nextGridSort, sortGridRows, type GridSortDirection, type GridSortState } from "@/lib/admin-grid-sort";
-import { useAdminReadOnly } from "../AdminAccessContext";
 import styles from "../admin.module.css";
 
 const columns = ["이름", "전화", "이메일", "거래잔액", "거래관리", "수정"];
@@ -33,7 +32,6 @@ export default function CustomerList({
   onTrade: (customer: CustomerSummary) => void;
   search: string;
 }) {
-  const readOnly = useAdminReadOnly();
   const [orderedCustomers, setOrderedCustomers] = useState(customers);
   const [draggingCustomerId, setDraggingCustomerId] = useState<number | null>(null);
   const [dropHint, setDropHint] = useState<{ customerId: number; before: boolean } | null>(null);
@@ -183,9 +181,9 @@ export default function CustomerList({
                 <td className={balanceClass}>{balance > 0 ? "+" : balance < 0 ? "−" : ""}{Math.abs(balance).toLocaleString("ko-KR")}</td>
                 <td><button className={styles.customerPaymentBadge} onClick={() => onTrade(customer)} type="button">거래관리</button></td>
                 <td>
-                  {!readOnly && <button className={styles.staffEditButton} onClick={() => onEdit(customer)} type="button">
+                  <button className={styles.staffEditButton} onClick={() => onEdit(customer)} type="button">
                     수정
-                  </button>}
+                  </button>
                 </td>
                 <td aria-hidden="true" />
               </tr>

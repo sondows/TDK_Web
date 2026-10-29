@@ -15,7 +15,7 @@ type QrOrderLocaleRow = RowDataPacket & { sessionId: number; languageCode: strin
 
 export default async function TableManagementView({ modal = false, closeToPos = false }: { modal?: boolean; closeToPos?: boolean }) {
   const [staff, loginMode] = await Promise.all([getCurrentStaff(), getPosLoginMode()]);
-  if (!staff && loginMode !== "SHARED") redirect("/login");
+  if (!staff && loginMode !== "SHARED") redirect("/tdkpos/login");
 
   const [tableLayouts, openSessions, activeMerges] = await Promise.all([db.select({
     tableId: diningTables.tableId,

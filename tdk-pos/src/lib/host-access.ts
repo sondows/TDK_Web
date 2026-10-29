@@ -50,6 +50,11 @@ export function isExternalAdminPathAllowed(pathname: string, method: string): bo
   return isAdminPageOrApi(pathname) || isPathOrChild(pathname, "/api/customers")
     || pathname === "/api/pos-settings/business-day" || pathname === "/api/pos-settings/takeout-preparation";
 }
+export function isExternalAliasTargetAllowed(surface: ExternalSurface, target: string, method: string, trustedNetwork: boolean): boolean {
+  if (surface === "pos") return trustedNetwork && (isExternalPosPath(target) || target === "/manifest.webmanifest");
+  if (surface === "kds") return isExternalKdsPath(target) || target === "/manifest.webmanifest";
+  return isExternalAdminPathAllowed(target, method);
+}
 export function externalAliasTarget(pathname: string): { surface: ExternalSurface; target: string } | null {
   const aliases: Array<{ prefix: string; surface: ExternalSurface }> = [
     { prefix: "/tdkpos", surface: "pos" }, { prefix: "/tdkadm", surface: "admin" }, { prefix: "/tdkkds", surface: "kds" },
@@ -59,22 +64,27 @@ export function externalAliasTarget(pathname: string): { surface: ExternalSurfac
   const suffix = pathname.slice(alias.prefix.length);
   if (alias.surface === "pos") {
     if (!suffix) return { surface: alias.surface, target: "/pos" };
+    if (suffix === "/login") return { surface: alias.surface, target: "/login" };
     if (suffix === "/manifest.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
-    return { surface: alias.surface, target: suffix };
+    return { surface: alias.surface, target: isPathOrChild(suffix, "/pos") ? suffix : `/pos${suffix}` };
   }
   if (alias.surface === "admin") {
-    if (!suffix) return { surface: alias.surface, target: "/admin/login" };
+    if (!suffix) return { surface: alias.surface, target: "/admin" };
     if (suffix === "/manifest.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
-    return { surface: alias.surface, target: suffix };
+    return { surface: alias.surface, target: `/admin${suffix}` };
   }
   if (!suffix || suffix === "/kitchen") return { surface: alias.surface, target: "/kitchen" };
   if (suffix === "/kds.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
-  return { surface: alias.surface, target: suffix };
+  return { surface: alias.surface, target: isPathOrChild(suffix, "/kitchen") ? suffix : `/kitchen${suffix}` };
+}
+export function internalCanonicalPath(pathname: string): string | null {
+  if (isPathOrChild(pathname, "/tdkadm/admin")) return `/tdkadm${pathname.slice("/tdkadm/admin".length)}`;
+  if (isPathOrChild(pathname, "/admin")) return `/tdkadm${pathname.slice("/admin".length)}`;
+  if (pathname === "/login") return "/tdkpos/login";
+  if (isPathOrChild(pathname, "/pos")) return `/tdkpos${pathname.slice("/pos".length)}`;
+  if (isPathOrChild(pathname, "/kitchen")) return `/tdkkds${pathname.slice("/kitchen".length)}`;
+  return null;
 }
 export function externalCanonicalPath(pathname: string): string | null {
-  if (pathname === "/login") return "/tdkpos/login";
-  if (isPathOrChild(pathname, "/pos")) return `/tdkpos${pathname}`;
-  if (isPathOrChild(pathname, "/kitchen")) return pathname === "/kitchen" ? "/tdkkds" : `/tdkkds${pathname}`;
-  if (isPathOrChild(pathname, "/admin")) return `/tdkadm${pathname}`;
-  return null;
+  return internalCanonicalPath(pathname);
 }

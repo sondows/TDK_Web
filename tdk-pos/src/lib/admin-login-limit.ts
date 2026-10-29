@@ -18,6 +18,12 @@ export function reserveAdminLoginAttempt(loginId: string) {
   return next.count <= MAX_ATTEMPTS;
 }
 
+/** Checks the current window without consuming an attempt. */
+export function isAdminLoginAttemptAllowed(loginId: string) {
+  const current = attempts.get(loginId);
+  return !current || current.expiresAt <= Date.now() || current.count < MAX_ATTEMPTS;
+}
+
 export function clearAdminLoginAttempts(loginId: string) {
   attempts.delete(loginId);
 }

@@ -19,11 +19,11 @@ export default async function SessionOrderPage({
   params: Promise<{ sessionId: string }>;
 }) {
   const currentStaff = await getCurrentStaff();
-  if (!currentStaff) redirect("/login");
+  if (!currentStaff) redirect("/tdkpos/login");
 
   const { sessionId: sessionIdParam } = await params;
   const sessionId = Number(sessionIdParam);
-  if (!Number.isInteger(sessionId) || sessionId <= 0) redirect("/pos");
+  if (!Number.isInteger(sessionId) || sessionId <= 0) redirect("/tdkpos");
 
   const [tableSession] = await db
     .select({
@@ -44,7 +44,7 @@ export default async function SessionOrderPage({
     )
     .limit(1);
 
-  if (!tableSession) redirect("/pos");
+  if (!tableSession) redirect("/tdkpos");
 
   const categories = await db
     .select({

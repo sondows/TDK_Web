@@ -5,7 +5,7 @@ import { checkoutItems, checkouts, orderItems, orders, paymentMethods, payments,
 import { getCurrentStaff, verifyActiveStaffCredentials } from "@/lib/auth";
 import { canViewSales } from "@/lib/permissions";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
-import { isValidPin } from "@/lib/pin";
+import { isValidEmployeePin } from "@/lib/pin";
 import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
 import { summarizeSalesFinancials, won } from "@/lib/sales-financial-summary";
 
@@ -35,11 +35,11 @@ export async function POST(request: Request) {
     if (!currentStaff && loginMode !== "SHARED")
       return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
     const body = await request.json() as Record<string, unknown>;
-    const staffCode = typeof body.staffCode === "string" ? body.staffCode.trim() : "";
+    const loginId = typeof body.loginId === "string" ? body.loginId.trim().toLowerCase() : "";
     const pin = typeof body.pin === "string" ? body.pin : "";
-    if (!staffCode || staffCode === "000" || !isValidPin(pin))
+    if (!loginId || !isValidEmployeePin(pin))
       return Response.json({ success: false, message: "개인 직원 계정과 PIN을 확인해 주세요." }, { status: 401 });
-    const employee = await verifyActiveStaffCredentials(staffCode, pin);
+    const employee = await verifyActiveStaffCredentials(loginId, pin);
     if (!employee) return Response.json({ success: false, message: "직원 또는 PIN이 올바르지 않습니다." }, { status: 401 });
     if (!canViewSales(employee.role))
       return Response.json({ success: false, message: "매출현황 조회 권한이 없습니다." }, { status: 403 });

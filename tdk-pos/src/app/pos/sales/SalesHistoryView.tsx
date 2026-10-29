@@ -7,7 +7,7 @@ import SalesHistoryClient from "./SalesHistoryClient";
 
 export default async function SalesHistoryView({ closeToPos = false }: { closeToPos?: boolean }) {
   const [staff, loginMode] = await Promise.all([getCurrentStaff(), getPosLoginMode()]);
-  if (!staff && loginMode !== "SHARED") redirect("/login");
+  if (!staff && loginMode !== "SHARED") redirect("/tdkpos/login");
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
     year: "numeric",

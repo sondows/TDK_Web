@@ -1,16 +1,17 @@
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
-import { and, eq, sql } from "drizzle-orm";
-import { cookies, headers } from "next/headers";
+import { and, eq, or, sql } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { db } from "@/db";
-import { kdsAuthIpAttempts, kdsTrustedDevices } from "@/db/schema";
+import { kdsAuthIpAttempts, managedDevices } from "@/db/schema";
 import { sessionCookieSecure } from "@/lib/auth";
 import { isExternalAdminHost } from "@/lib/host-access";
+import { getKdsRateLimitIp } from "@/lib/kds-network-server";
 export { newTotpSecret, verifyTotp } from "@/lib/kds-totp";
 
 export const KDS_DEVICE_COOKIE = "tdk_kds_device";
-export const KDS_DEVICE_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+export const KDS_DEVICE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const kdsDeviceCookieOptions = {
   httpOnly: true, secure: sessionCookieSecure, sameSite: "lax" as const,
   path: "/", maxAge: KDS_DEVICE_MAX_AGE_SECONDS,
@@ -44,23 +45,41 @@ export function isSameOriginRequest(request: Request) {
   if (!origin || !host) return false;
   try { return new URL(origin).host.toLowerCase() === host.toLowerCase(); } catch { return false; }
 }
-export async function getCurrentKdsDevice(staffId: number) {
+export async function getCurrentDeviceRegistration() {
   const token = (await cookies()).get(KDS_DEVICE_COOKIE)?.value;
   if (!token) return null;
-  const [device] = await db.select({ deviceId: kdsTrustedDevices.deviceId, lastUsedAt: kdsTrustedDevices.lastUsedAt }).from(kdsTrustedDevices).where(and(
-    eq(kdsTrustedDevices.staffId, staffId), eq(kdsTrustedDevices.tokenHash, hashKdsDeviceToken(token)),
-    sql`${kdsTrustedDevices.revokedAt} IS NULL`, sql`${kdsTrustedDevices.expiresAt} > NOW()`,
+  const tokenHash = hashKdsDeviceToken(token);
+  const [device] = await db.select({
+    deviceId: managedDevices.deviceId,
+    deviceCode: managedDevices.deviceCode,
+    deviceName: managedDevices.deviceName,
+    deviceType: managedDevices.deviceType,
+    kdsEnabled: managedDevices.kdsEnabled,
+    status: managedDevices.status,
+    confirmationCode: managedDevices.confirmationCode,
+    requestExpiresAt: managedDevices.requestExpiresAt,
+    expiresAt: managedDevices.expiresAt,
+  }).from(managedDevices).where(or(
+    eq(managedDevices.requestTokenHash, tokenHash), eq(managedDevices.tokenHash, tokenHash),
+  )).limit(1);
+  return device ? { token, device } : null;
+}
+export async function getCurrentKdsDevice() {
+  const token = (await cookies()).get(KDS_DEVICE_COOKIE)?.value;
+  if (!token) return null;
+  const [device] = await db.select({ deviceId: managedDevices.deviceId, lastUsedAt: managedDevices.lastUsedAt }).from(managedDevices).where(and(
+    eq(managedDevices.tokenHash, hashKdsDeviceToken(token)), eq(managedDevices.status, "APPROVED"),
+    eq(managedDevices.kdsEnabled, 1), sql`${managedDevices.expiresAt} > NOW()`,
   )).limit(1);
   if (device && (!device.lastUsedAt || Date.now() - device.lastUsedAt.getTime() > 5 * 60 * 1000)) {
-    await db.update(kdsTrustedDevices).set({ lastUsedAt: new Date() }).where(eq(kdsTrustedDevices.deviceId, device.deviceId));
+    await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
   }
   return device ?? null;
 }
 
 export async function reserveKdsIpAttempt() {
-  const requestHeaders = await headers();
-  const ip = requestHeaders.get("x-real-ip") ?? requestHeaders.get("x-forwarded-for")?.split(",").at(-1)?.trim() ?? "unknown";
-  const ipHash = createHash("sha256").update(ip).digest("hex");
+  const clientIp = await getKdsRateLimitIp();
+  const ipHash = createHash("sha256").update(clientIp ?? "unverified-client-ip").digest("hex");
   await db.delete(kdsAuthIpAttempts).where(sql`${kdsAuthIpAttempts.updatedAt} < DATE_SUB(NOW(), INTERVAL 1 DAY)`);
   const expired = sql`${kdsAuthIpAttempts.windowStartedAt} <= DATE_SUB(NOW(), INTERVAL 15 MINUTE)`;
   await db.insert(kdsAuthIpAttempts).values({ ipHash, windowStartedAt: new Date(), attemptCount: 1 }).onDuplicateKeyUpdate({

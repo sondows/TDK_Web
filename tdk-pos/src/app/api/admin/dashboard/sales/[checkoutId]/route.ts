@@ -1,6 +1,6 @@
 import type { RowDataPacket } from "mysql2";
 import { pool } from "@/db";
-import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminAccess } from "@/lib/admin-auth";
 
 class DeleteConflict extends Error {}
 type IdRow = RowDataPacket & { id: number };
@@ -14,7 +14,7 @@ const reversalTypes: Record<string, string> = {
 };
 
 export async function DELETE(_request: Request, context: { params: Promise<{ checkoutId: string }> }) {
-  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccess(); if (writeDenied) return writeDenied;
   const admin = await getCurrentAdminStaff();
   if (!admin) return Response.json({ success: false, message: "OWNER 권한이 필요합니다." }, { status: 403 });
   const checkoutId = Number((await context.params).checkoutId);

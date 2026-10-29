@@ -17,7 +17,7 @@ import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 
 type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; discountAmount: number; discountCount: number; cancelledAmount: number; cardAmount: number; cardCount: number; cashAmount: number; cashCount: number; otherAmount: number; otherCount: number; pendingAmount: number | null; pendingCount: number | null; salesIncludingPending: number | null; countIncludingPending: number | null; tableCount: number; knownGuestCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
-type Employee = { staffId: number; staffCode: string; name: string; role: string; hasPin: boolean };
+type Employee = { loginId: string; role: string; hasPin: boolean };
 
 const statusStyle: Record<SaleDisplayStatus, { label: string; className: string }> = {
   COMPLETED: { label: "결제완료", className: "text-blue-700" },
@@ -147,12 +147,12 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
       const response = await fetch("/api/staff/active", { cache: "no-store" });
       const result = await response.json() as { success?: boolean; staff?: Employee[]; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "직원 목록을 불러올 수 없습니다.");
-      setEmployees((result.staff ?? []).filter(employee => employee.staffCode !== "000" && employee.hasPin && (employee.role === "OWNER" || employee.role === "MANAGER")));
+      setEmployees((result.staff ?? []).filter(employee => employee.hasPin && (employee.role === "OWNER" || employee.role === "MANAGER")));
     } catch (error) { setSummaryError(error instanceof Error ? error.message : "직원 목록을 불러올 수 없습니다."); }
   };
 
   const authenticateSummary = async (pin: string) => {
-    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || pin.length !== 4) return;
+    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || pin.length !== 6) return;
     summaryAuthInFlight.current = true;
     const requestId = ++summaryRequestId.current;
     setSummaryBusy(true);
@@ -160,7 +160,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     try {
       const response = await fetch("/api/sales/summary", {
         method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
-        body: JSON.stringify({ staffCode: selectedEmployee, pin, startDate: period.startDate, endDate: period.endDate }),
+        body: JSON.stringify({ loginId: selectedEmployee, pin, startDate: period.startDate, endDate: period.endDate }),
       });
       const result = await response.json() as { success?: boolean; summary?: SalesSummary; message?: string };
       if (requestId !== summaryRequestId.current) return;
@@ -178,13 +178,13 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
 
   const updateSummaryPin = (nextPin: string) => {
     if (summaryBusy || summaryAuthInFlight.current) return;
-    const normalizedPin = nextPin.slice(0, 4);
+    const normalizedPin = nextPin.slice(0, 6);
     setSummaryPin(normalizedPin);
-    if (normalizedPin.length === 4) void authenticateSummary(normalizedPin);
+    if (normalizedPin.length === 6) void authenticateSummary(normalizedPin);
   };
 
   const appendSummaryPin = (digit: string) => {
-    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || summaryPin.length >= 4) return;
+    if (!selectedEmployee || summaryBusy || summaryAuthInFlight.current || summaryPin.length >= 6) return;
     updateSummaryPin(`${summaryPin}${digit}`);
   };
 
@@ -321,7 +321,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 text-slate-900">
       <section aria-labelledby="sales-history-title" aria-modal="true" className="flex h-[min(88dvh,960px)] max-h-[calc(100dvh-2rem)] w-[clamp(900px,60vw,1280px)] max-w-[calc(100vw-2rem)] min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog">
-        <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={() => closeToPos ? router.push("/pos") : router.back()} title="판매내역" titleId="sales-history-title" titleTrailing={
+        <PosSubHeader backLabel="POS로 돌아가기" level={1} onBack={() => closeToPos ? router.push("/tdkpos") : router.back()} title="판매내역" titleId="sales-history-title" titleTrailing={
           <button className={`${POS_HEADER_ACTION_CLASS_NAME} shrink-0 rounded-lg px-2 py-1 transition-colors active:scale-[0.98] bg-white/20 text-white`} onClick={() => void openSummary()} type="button">매출현황</button>
         } trailingClassName="min-w-0 flex-1 gap-1 whitespace-nowrap" trailing={
           <>
@@ -422,17 +422,17 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
           footer={summaryError && employees.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{summaryError}</p> : undefined}
           keypad={<PinKeypad
             actionDisabled={!selectedEmployee || summaryBusy || summaryPin.length === 0}
-            digitDisabled={!selectedEmployee || summaryBusy || summaryPin.length >= 4}
+            digitDisabled={!selectedEmployee || summaryBusy || summaryPin.length >= 6}
             largeKeys
             onBackspace={() => updateSummaryPin(summaryPin.slice(0, -1))}
             onClear={() => updateSummaryPin("")}
             onDigit={appendSummaryPin}
           />}
           label="관리자"
-          onSelect={employee => { setSelectedEmployee(employee.staffCode); updateSummaryPin(""); setSummaryError(""); }}
+          onSelect={employee => { setSelectedEmployee(employee.loginId); updateSummaryPin(""); setSummaryError(""); }}
           people={employees}
-          pinInput={<PinInput ariaLabel="매출현황 관리자 PIN" className={selectedEmployee ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={!selectedEmployee || summaryBusy} keypadAligned onChange={updateSummaryPin} value={summaryPin} />}
-          selectedCode={selectedEmployee}
+          pinInput={<PinInput ariaLabel="매출현황 관리자 PIN" className={selectedEmployee ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={!selectedEmployee || summaryBusy} maxLength={6} keypadAligned onChange={updateSummaryPin} value={summaryPin} />}
+          selectedLoginId={selectedEmployee}
           selectionDisabled={summaryBusy}
           scrollablePeople
         />}

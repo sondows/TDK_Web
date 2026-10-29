@@ -1,5 +1,10 @@
 # KDS HTTPS rollout and recovery
 
+This is the earlier KDS rollout guide. For the current managed-device flow and
+LAN device exemption and unified paths, use `ADMIN-MANAGED-DEVICES.md` and
+`UNIFIED-POS-KDS-PATHS.md`; the old OTP and 90-day token instructions below
+do not describe the current code.
+
 This change has not been deployed to the NAS. The live Caddyfile, production environment, and database were not available from this workspace.
 
 ## Before rollout

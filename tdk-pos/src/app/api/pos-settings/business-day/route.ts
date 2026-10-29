@@ -1,6 +1,6 @@
 import { db, pool } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { getCurrentAdminStaff, requireAdminWrite } from "@/lib/admin-auth";
+import { getCurrentAdminStaff, requireAdminAccess } from "@/lib/admin-auth";
 import { OPENING_CASH_ENABLED_KEY } from "@/lib/business-session";
 
 async function settings() {
@@ -15,7 +15,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const writeDenied = await requireAdminWrite(); if (writeDenied) return writeDenied;
+  const writeDenied = await requireAdminAccess(); if (writeDenied) return writeDenied;
   const admin = await getCurrentAdminStaff();
   if (!admin) return Response.json({ success: false, message: "관리자 로그인이 필요합니다." }, { status: 401 });
   const body = await request.json().catch(() => null) as { openingCashEnabled?: unknown } | null;
