@@ -7,6 +7,7 @@ import { MANAGED_DEVICE_TYPES, type ManagedDeviceType } from "@/lib/managed-devi
 type DeviceResult = { success?: boolean; code?: string; status?: "UNREGISTERED" | "PENDING" | "APPROVED" | "DENIED" | "EXPIRED" | "CANCELLED"; confirmationCode?: string; requestExpiresAt?: string; deviceName?: string; deviceCode?: string; deviceType?: ManagedDeviceType; kdsEnabled?: boolean };
 type DeviceState = { status: "LOADING" | "UNREGISTERED" | "PENDING" | "APPROVED"; confirmationCode?: string; requestExpiresAt?: string; deviceName?: string; deviceCode?: string; deviceType?: ManagedDeviceType; kdsEnabled?: boolean };
 function errorText(status: number, code?: string) {
+  if (code === "EMPLOYEE_PIN_NOT_CONFIGURED") return "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요.";
   if (code === "KDS_AUTH_SCHEMA_MISMATCH") return "인증 설정을 확인할 수 없습니다. 관리자에게 문의해 주세요.";
   if (code === "DEVICE_APPROVAL_REQUIRED") return "외부망에서는 관리자 승인을 받은 기기만 로그인할 수 있습니다. 기기등록 탭에서 승인 요청을 해 주세요.";
   if (code === "KDS_PERMISSION_DENIED") return "이 직원에게 KDS 사용 권한이 없습니다.\n관리자에게 문의해 주세요.";
@@ -68,7 +69,7 @@ export default function KitchenLogin({ internalNetwork }: { internalNetwork: boo
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/kitchen/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loginId: normalizedLoginId, pin }) });
-      const result = await response.json() as { success?: boolean; code?: string; requiresPinChange?: boolean };
+      const result = await response.json() as { success?: boolean; code?: string };
       if (!response.ok || !result.success) {
         if (!internalNetwork && result.code === "DEVICE_APPROVAL_REQUIRED") { setTab("register"); setDevice({ status: "LOADING" }); }
         setPin(""); setMessage(errorText(response.status, result.code)); setMessageKind("error"); return;

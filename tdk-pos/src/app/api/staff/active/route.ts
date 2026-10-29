@@ -17,7 +17,7 @@ export async function GET() {
       .where(
         and(
           eq(staff.isActive, 1),
-          isNotNull(staff.employeePinHash), ne(staff.employeePinHash, ""), isNotNull(staff.adminLoginId), ne(staff.adminLoginId, ""),
+          isNotNull(staff.adminLoginId), ne(staff.adminLoginId, ""),
           ne(staff.staffCode, "000"), eq(staff.posEnabled, 1)
         )
       )

@@ -18,7 +18,7 @@ export const kdsSessionCookieOptions = {
   path: "/",
 };
 
-export async function getCurrentKdsStaff({ allowPinChange = false }: { allowPinChange?: boolean } = {}) {
+export async function getCurrentKdsStaff() {
   const token = (await cookies()).get(KDS_SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
   const cutoff = new Date(Date.now() - SESSION_MAX_AGE_SECONDS * 1000);
@@ -28,7 +28,6 @@ export async function getCurrentKdsStaff({ allowPinChange = false }: { allowPinC
     loginId: staff.adminLoginId,
     name: staff.name,
     employeePinHash: staff.employeePinHash,
-    kdsPinChangeRequired: staff.kdsPinChangeRequired,
     managedDeviceId: staffSessions.managedDeviceId,
   }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
     eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
@@ -38,7 +37,7 @@ export async function getCurrentKdsStaff({ allowPinChange = false }: { allowPinC
     eq(staff.isActive, 1),
     eq(staff.kdsEnabled, 1),
   )).limit(1);
-  if (!member || member.staffCode === "000" || (!allowPinChange && !member.employeePinHash && member.kdsPinChangeRequired === 1)) return null;
+  if (!member || member.staffCode === "000" || !member.employeePinHash) return null;
   const network = await getKdsNetworkContext();
   const device = network.isInternal || member.managedDeviceId === null ? null : await getCurrentKdsDevice();
   return canUseKdsSessionOnNetwork(network.isInternal, member.managedDeviceId, device?.deviceId ?? null) ? member : null;

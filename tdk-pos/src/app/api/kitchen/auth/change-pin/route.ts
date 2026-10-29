@@ -1,34 +1,8 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { auditLogs, staff, staffSessions } from "@/db/schema";
-import { hashEmployeePin, isValidKdsPin, verifyKdsPin } from "@/lib/auth";
-import { getCurrentKdsStaff } from "@/lib/kds-auth";
-import { isSameOriginRequest } from "@/lib/kds-device";
 
-export async function POST(request: Request) {
-  if (!isSameOriginRequest(request)) return NextResponse.json({ success: false }, { status: 403 });
-  const member = await getCurrentKdsStaff({ allowPinChange: true });
-  if (!member || member.kdsPinChangeRequired !== 1) return NextResponse.json({ success: false, message: "PIN change is not available." }, { status: 401 });
-  const body = await request.json().catch(() => null) as { pin?: unknown; confirm?: unknown } | null;
-  if (typeof body?.pin !== "string" || !isValidKdsPin(body.pin) || body.pin !== body.confirm) {
-    return NextResponse.json({ success: false, message: "Enter matching 6-digit PIN values." }, { status: 400 });
-  }
-  try {
-    const [current] = await db.select({ pinHash: staff.kdsPinHash }).from(staff).where(eq(staff.staffId, member.staffId)).limit(1);
-    if (current?.pinHash && await verifyKdsPin(body.pin as string, current.pinHash)) {
-      return NextResponse.json({ success: false, message: "Choose a PIN different from the temporary PIN." }, { status: 400 });
-    }
-    await db.transaction(async tx => {
-      await tx.update(staff).set({ employeePinHash: await hashEmployeePin(body.pin as string), kdsPinChangeRequired: 0 }).where(eq(staff.staffId, member.staffId));
-      await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: new Date() }).where(and(
-        eq(staffSessions.staffId, member.staffId), eq(staffSessions.status, "ACTIVE"),
-      ));
-      await tx.insert(auditLogs).values({ staffId: member.staffId, actionType: "KDS_PIN_CHANGED", entityType: "KDS_AUTH" });
-    });
-    return NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) {
-    console.error("KDS PIN change failed", error);
-    return NextResponse.json({ success: false, message: "Could not change the KDS PIN." }, { status: 500 });
-  }
+export async function POST() {
+  return NextResponse.json({ success: false, code: "EMPLOYEE_PIN_ADMIN_MANAGED", message: "직원 공통 PIN은 관리센터 직원관리에서 설정하거나 변경해 주세요." }, {
+    status: 410,
+    headers: { "Cache-Control": "no-store" },
+  });
 }

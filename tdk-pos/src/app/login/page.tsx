@@ -124,12 +124,14 @@ export default function LoginPage() {
 
   const selectStaff = (next: Staff) => {
     if (isSubmitting || verificationInFlight.current) return;
-    setSelectedStaff(current => current?.loginId === next.loginId ? null : next);
+    const selection = selectedStaff?.loginId === next.loginId ? null : next;
+    setSelectedStaff(selection);
     resetPinVerification();
+    if (selection && !selection.hasPin) setMessage("직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요.");
   };
 
   const updatePin = (nextPin = "") => {
-    if (!selectedStaff || isSubmitting || verificationInFlight.current || pinStatus !== "idle") return;
+    if (!selectedStaff?.hasPin || isSubmitting || verificationInFlight.current || pinStatus !== "idle") return;
     const normalizedPin = nextPin.replace(/\D/g, "").slice(0, selectedStaff.pinLength);
     resetPinVerification(normalizedPin);
     if (normalizedPin.length === selectedStaff.pinLength) verifyPin(selectedStaff, normalizedPin);
@@ -148,7 +150,7 @@ export default function LoginPage() {
     if (!isSubmitting && !verificationInFlight.current) updatePin();
   };
 
-  const pinEnabled = Boolean(selectedStaff);
+  const pinEnabled = Boolean(selectedStaff?.hasPin);
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">

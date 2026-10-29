@@ -22,7 +22,10 @@ export default function AdminLoginForm() {
         body: JSON.stringify({ loginId: normalizedLoginId, pin }),
       });
       if (!response.ok) {
-        setMessage(response.status === 429 ? "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." : "직원 또는 PIN을 확인해 주세요.");
+        const result = await response.json().catch(() => null) as { code?: string; message?: string } | null;
+        setMessage(result?.code === "EMPLOYEE_PIN_NOT_CONFIGURED"
+          ? result.message ?? "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요."
+          : response.status === 429 ? "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." : "직원 또는 PIN을 확인해 주세요.");
         setPin(""); return;
       }
       router.replace("/tdkadm"); router.refresh();

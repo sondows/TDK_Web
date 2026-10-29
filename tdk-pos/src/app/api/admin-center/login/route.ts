@@ -29,6 +29,9 @@ export async function POST(request: Request) {
       eq(staff.adminEnabled, 1),
       ne(staff.staffCode, "000"),
     )).limit(1);
+    if (candidate && !candidate.employeePinHash) {
+      return NextResponse.json({ success: false, code: "EMPLOYEE_PIN_NOT_CONFIGURED", message: "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+    }
     const validPin = candidate?.employeePinHash && await verifyEmployeePin(pin, candidate.employeePinHash);
     if (!candidate || !validPin) {
       const allowed = await recordAdminAuthFailure("adm-login", loginId, ip);

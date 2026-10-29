@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     authStage = "employee_lookup";
     const candidates = await db.select({
       staffId: staff.staffId, employeePinHash: staff.employeePinHash,
-      isActive: staff.isActive, kdsEnabled: staff.kdsEnabled, kdsPinChangeRequired: staff.kdsPinChangeRequired,
+      isActive: staff.isActive, kdsEnabled: staff.kdsEnabled,
       staffCode: staff.staffCode,
     }).from(staff).where(sql`LOWER(${staff.adminLoginId}) = ${loginId}`).limit(2);
     const candidate = candidates.length === 1 ? candidates[0] : null;
@@ -36,8 +36,9 @@ export async function POST(request: Request) {
     }
     authStage = "employee_attempt_limit";
     if (!await isKdsLoginAttemptAllowed(candidate.staffId, loginId)) return failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
+    if (!candidate.employeePinHash) return failure(403, "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요.", "EMPLOYEE_PIN_NOT_CONFIGURED");
     authStage = "common_pin_verification";
-    const pinMatches = candidate.employeePinHash ? await verifyEmployeePin(pin, candidate.employeePinHash) : false;
+    const pinMatches = await verifyEmployeePin(pin, candidate.employeePinHash);
     if (!pinMatches) {
       const allowed = await recordKdsLoginFailure(candidate.staffId, loginId);
       await db.insert(auditLogs).values({ staffId: candidate.staffId, actionType: "KDS_LOGIN_FAILED", entityType: "KDS_AUTH", entityId: candidate.staffId, description: "invalid PIN" });
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
       authStage = "device_last_used_update";
       await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
     }
-    const response = NextResponse.json({ success: true, requiresPinChange: !candidate.employeePinHash && candidate.kdsPinChangeRequired === 1 }, { headers: { "Cache-Control": "no-store" } });
+    const response = NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });
     response.cookies.set(KDS_SESSION_COOKIE_NAME, token, { ...kdsSessionCookieOptions, secure: kdsCookieSecureForRequest(request) });
     return response;
   } catch (error) {

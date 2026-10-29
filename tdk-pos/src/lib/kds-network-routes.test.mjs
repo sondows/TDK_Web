@@ -82,6 +82,17 @@ test("a new LAN browser signs in without a device token", async () => {
   assert.deepEqual(fixture.clearedAttempts, [9]);
 });
 
+test("an employee without the common PIN is directed to an administrator and gets no KDS session", async () => {
+  const fixture = loginFixture({ internal: true, candidate: {
+    staffId: 9, employeePinHash: null, isActive: 1, kdsEnabled: 1, kdsPinChangeRequired: 1,
+  } });
+  const response = await fixture.login("123456");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "EMPLOYEE_PIN_NOT_CONFIGURED");
+  assert.equal(fixture.rows.some(entry => entry.table === fixture.staffSessions), false);
+  assert.deepEqual(fixture.failedAttempts, []);
+});
+
 test("KDS enabled and active flags accept numeric database representations", async () => {
   const fixture = loginFixture({ internal: true, candidate: {
     staffId: 9, employeePinHash: "stored-hash", isActive: "1", kdsEnabled: "1", kdsPinChangeRequired: 0,
@@ -177,9 +188,9 @@ test("an admin login ID still requires the correct KDS PIN and KDS permission", 
     staffId: 9, employeePinHash: null, isActive: 1, kdsEnabled: 1, kdsPinChangeRequired: 0,
   } });
   const notConfigured = await noPin.login("123456");
-  assert.equal(notConfigured.status, 401);
-  assert.equal((await notConfigured.json()).code, undefined);
-  assert.deepEqual(noPin.failedAttempts, [{ staffId: 9, employeeId: "manager" }]);
+  assert.equal(notConfigured.status, 403);
+  assert.equal((await notConfigured.json()).code, "EMPLOYEE_PIN_NOT_CONFIGURED");
+  assert.deepEqual(noPin.failedAttempts, []);
   assert.equal(noPin.rows.some(entry => entry.table === noPin.staffSessions), false);
 });
 
@@ -231,7 +242,7 @@ test("an approved external browser signs in with a session bound to its device",
 });
 
 function sessionFixture({ internal, boundDeviceId, approvedDeviceId }) {
-  const member = { staffId: 9, staffCode: "9", name: "Cook", kdsPinChangeRequired: 0, managedDeviceId: boundDeviceId };
+  const member = { staffId: 9, staffCode: "9", name: "Cook", employeePinHash: "stored-hash", managedDeviceId: boundDeviceId };
   const route = loadRoute("kds-auth.ts", {
     "server-only": {}, "drizzle-orm": { and: () => true, eq: () => true, gt: () => true },
     "next/headers": { cookies: async () => ({ get: () => ({ value: "employee-session" }) }) },
