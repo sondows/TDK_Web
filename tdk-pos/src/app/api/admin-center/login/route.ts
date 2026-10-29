@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLogs, staff, staffSessions } from "@/db/schema";
+import { adminSecurityOwners, auditLogs, managedDevices, staff, staffSessions } from "@/db/schema";
 import { hashSessionToken, verifyEmployeePin } from "@/lib/auth";
 import { ADMIN_SESSION_COOKIE_NAME, adminSessionCookieOptions, createAdminSessionToken } from "@/lib/admin-auth";
 import { clearAdminAuthFailures, isAdminAuthAttemptAllowed, recordAdminAuthFailure } from "@/lib/admin-auth-limit";
 import { getKdsRateLimitIp } from "@/lib/kds-network-server";
+import { getCurrentAdmDevice } from "@/lib/kds-device";
 import { isValidEmployeePin } from "@/lib/pin";
 
 const failure = () => NextResponse.json({ success: false, message: "직원 또는 PIN을 확인해 주세요." }, { status: 401 });
@@ -40,9 +41,27 @@ export async function POST(request: Request) {
       return failure();
     }
 
+    const currentDevice = await getCurrentAdmDevice();
+    const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
+      eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1),
+    ));
+    const hasUsableApprovedDevice = approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now());
+    let isRecoveryOwner = false;
+    if (!hasUsableApprovedDevice) {
+      const [owner] = await db.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
+        .where(eq(adminSecurityOwners.staffId, candidate.staffId)).limit(1);
+      isRecoveryOwner = Boolean(owner);
+    }
+    if (!currentDevice && (hasUsableApprovedDevice || !isRecoveryOwner)) {
+      return NextResponse.json({ success: false, code: "DEVICE_APPROVAL_REQUIRED",
+        message: "이 ADM 기기는 아직 승인되지 않았습니다. 기기등록 탭에서 승인 요청을 해 주세요." },
+      { status: 403, headers: { "Cache-Control": "no-store" } });
+    }
+
     const token = createAdminSessionToken();
     await db.transaction(async tx => {
-      await tx.insert(staffSessions).values({ staffId: candidate.staffId, sessionTokenHash: hashSessionToken(token), sessionType: "ADMIN", status: "ACTIVE" });
+      await tx.insert(staffSessions).values({ staffId: candidate.staffId, managedDeviceId: currentDevice?.deviceId ?? null,
+        sessionTokenHash: hashSessionToken(token), sessionType: "ADMIN", status: "ACTIVE" });
       await tx.insert(auditLogs).values({ staffId: candidate.staffId, actionType: "ADM_LOGIN_SUCCEEDED", entityType: "ADMIN_SESSION" });
     });
     await clearAdminAuthFailures("adm-login", loginId, ip);

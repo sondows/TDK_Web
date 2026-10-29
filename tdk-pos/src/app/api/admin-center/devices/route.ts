@@ -1,4 +1,4 @@
-import { and, eq, lte, ne } from "drizzle-orm";
+import { and, eq, isNull, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, managedDevices, staffSessions } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminAccess, requireOwnerSecurityAccess } from "@/lib/admin-auth";
@@ -129,6 +129,9 @@ export async function POST(request: Request) {
           return { status: 200, success: true };
         }
         const deviceType = isManagedDeviceType(body?.deviceType) ? body.deviceType : device.deviceType;
+        if (device.deviceType === "POS" && deviceType !== "POS") {
+          return { status: 400, message: "POS 기기 요청은 POS 종류로만 승인할 수 있습니다." };
+        }
         const admEnabled = body?.admEnabled === undefined ? deviceType === "ADM" : body.admEnabled === true;
         const hosEnabled = body?.hosEnabled === undefined ? deviceType === "HOS" : body.hosEnabled === true;
         if (!body!.posEnabled && !body!.kdsEnabled && !admEnabled && !hosEnabled) {
@@ -146,6 +149,11 @@ export async function POST(request: Request) {
           staffId: actor.staffId, actionType: "DEVICE_REQUEST_APPROVED", entityType: "MANAGED_DEVICE",
           entityId: deviceId, description: `type=${deviceType}; code=${deviceCode}`,
         });
+        if (deviceType === "POS") {
+          await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: now }).where(and(
+            isNull(staffSessions.managedDeviceId), eq(staffSessions.sessionType, "POS"), eq(staffSessions.status, "ACTIVE"),
+          ));
+        }
         return { status: 200, success: true, deviceCode };
       }
 
@@ -166,6 +174,9 @@ export async function POST(request: Request) {
         }).where(eq(managedDevices.deviceId, deviceId));
         if (!kdsEnabled) await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: now }).where(and(
           eq(staffSessions.managedDeviceId, deviceId), eq(staffSessions.sessionType, "KDS"), eq(staffSessions.status, "ACTIVE"),
+        ));
+        if (!posEnabled || deviceType !== "POS") await tx.update(staffSessions).set({ status: "LOGGED_OUT", loggedOutAt: now }).where(and(
+          eq(staffSessions.managedDeviceId, deviceId), eq(staffSessions.sessionType, "POS"), eq(staffSessions.status, "ACTIVE"),
         ));
         await tx.insert(auditLogs).values({ staffId: actor.staffId, actionType: "DEVICE_UPDATED", entityType: "MANAGED_DEVICE", entityId: deviceId });
         return { status: 200, success: true };

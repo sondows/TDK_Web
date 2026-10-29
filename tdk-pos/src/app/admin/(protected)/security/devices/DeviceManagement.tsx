@@ -140,7 +140,7 @@ function PendingDevice({ device, busy, onOperate }: { device: ManagedDevice; bus
     <p className={styles.subline}>요청자 직원 번호: {device.registeredByStaffId ?? "—"} · 만료: {dateTime(device.requestExpiresAt)}</p>
     <div className={styles.fields}>
       <label className={styles.field}>기기 이름<input className={styles.input} maxLength={120} onChange={event => setDeviceName(event.target.value)} value={deviceName} /></label>
-      <label className={styles.field}>기기 종류<select className={styles.input} disabled={busy} onChange={event => { const type = event.target.value as ManagedDeviceType; setDeviceType(type); setPermissions(defaultPermissions(type)); }} value={deviceType}>{MANAGED_DEVICE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
+      <label className={styles.field}>기기 종류<select className={styles.input} disabled={busy || device.deviceType === "POS"} onChange={event => { const type = event.target.value as ManagedDeviceType; setDeviceType(type); setPermissions(defaultPermissions(type)); }} value={deviceType}>{MANAGED_DEVICE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}</select></label>
       <div className={styles.field}>승인할 권한<PermissionInputs disabled={busy} onChange={setPermissions} value={permissions} /></div>
     </div>
     <div className={styles.actions}>
@@ -173,6 +173,7 @@ function RegisteredDevice({ device, busy, onOperate }: { device: ManagedDevice; 
     <div className={styles.subline}>등록: {dateTime(device.approvedAt ?? device.createdAt)} · 마지막 접속: {dateTime(device.lastUsedAt)} · 인증 만료: {dateTime(device.expiresAt)}</div>
     {device.registeredByStaffId && <div className={styles.subline}>등록 요청 직원 번호: {device.registeredByStaffId}</div>}
     <div className={styles.actions}>
+      {device.status === "APPROVED" && <p className="w-full text-center font-bold text-[#165DFF]">등록된 기기입니다.</p>}
       {device.status === "APPROVED" && <>
         <button className={styles.button} disabled={busy || !deviceName.trim() || !hasPermission(permissions)} onClick={() => void onOperate("update", device.deviceId, { deviceName, deviceType, ...permissions })} type="button">변경 저장</button>
         <button className={`${styles.button} ${styles.buttonDanger}`} disabled={busy} onClick={() => void onOperate("revoke", device.deviceId)} type="button">승인 취소</button>

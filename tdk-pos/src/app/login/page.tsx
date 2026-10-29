@@ -7,6 +7,7 @@ import PinInput from "@/components/PinInput";
 import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import { OPENING_FUND_PROMPT_DISMISSED_KEY } from "@/lib/opening-fund-prompt";
+import PosDeviceRegistration from "./PosDeviceRegistration";
 
 type Staff = {
   loginId: string;
@@ -20,6 +21,7 @@ const activePinStyle = "border-2 border-blue-600 ring-1 ring-blue-100";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [tab, setTab] = useState<"login" | "register">("login");
   const [staff, setStaff] = useState<Staff[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [pin, setPin] = useState("");
@@ -70,10 +72,11 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId: staffMember.loginId, pin: pinValue }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await response.json() as { success?: boolean; message?: string; code?: string };
 
       if (!response.ok || !result.success) {
         resetPinVerification();
+        if (result.code === "DEVICE_APPROVAL_REQUIRED") setTab("register");
         setMessage(response.status === 401 ? "PIN 번호가 올바르지 않습니다." : result.message ?? "로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
         return;
       }
@@ -157,10 +160,15 @@ export default function LoginPage() {
       <section className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[336px] flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <header className="shrink-0 border-b-4 border-blue-600 px-8 py-6 text-center">
           <h1 className="text-4xl font-extrabold text-blue-600">TDKON</h1>
-          <p className="mt-2 text-xl font-bold text-slate-600">로그인</p>
+          <p className="mt-2 text-xl font-bold text-slate-600">{tab === "login" ? "로그인" : "기기등록"}</p>
         </header>
-
-        <PinAuthPanel
+        <div className="grid shrink-0 grid-cols-2 gap-3 px-6 pt-4">
+          <button aria-pressed={tab === "login"} className={tab === "login" ? "min-h-11 rounded-lg bg-blue-600 font-bold text-white" : "min-h-11 rounded-lg bg-slate-100 font-bold text-slate-700"}
+            onClick={() => { setTab("login"); setMessage(""); }} type="button">POS 로그인</button>
+          <button aria-pressed={tab === "register"} className={tab === "register" ? "min-h-11 rounded-lg bg-blue-600 font-bold text-white" : "min-h-11 rounded-lg bg-slate-100 font-bold text-slate-700"}
+            onClick={() => { setTab("register"); setMessage(""); }} type="button">기기등록</button>
+        </div>
+        {tab === "login" ? <PinAuthPanel
           scrollablePeople
           emptyMessage={!loading && !staff.length ? message || "로그인 가능한 직원이 없습니다." : undefined}
           keypad={<PinKeypad
@@ -188,7 +196,7 @@ export default function LoginPage() {
           selectionDisabled={loading || isSubmitting || pinStatus !== "idle"}
           largePeopleButtons
           showLabels={false}
-        />
+        /> : <PosDeviceRegistration />}
       </section>
 
     </main>

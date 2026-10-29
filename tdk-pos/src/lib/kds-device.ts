@@ -11,6 +11,8 @@ import { getKdsRateLimitIp } from "@/lib/kds-network-server";
 export { newTotpSecret, verifyTotp } from "@/lib/kds-totp";
 
 export const KDS_DEVICE_COOKIE = "tdk_kds_device";
+export const ADM_DEVICE_COOKIE = "tdk_adm_device";
+export const POS_DEVICE_COOKIE = "tdk_pos_device";
 export const KDS_DEVICE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const kdsDeviceCookieOptions = {
   httpOnly: true, secure: sessionCookieSecure, sameSite: "lax" as const,
@@ -45,8 +47,8 @@ export function isSameOriginRequest(request: Request) {
   if (!origin || !host) return false;
   try { return new URL(origin).host.toLowerCase() === host.toLowerCase(); } catch { return false; }
 }
-export async function getCurrentDeviceRegistration() {
-  const token = (await cookies()).get(KDS_DEVICE_COOKIE)?.value;
+export async function getCurrentDeviceRegistration(cookieName = KDS_DEVICE_COOKIE, expectedType?: "POS" | "ADM" | "KDS" | "HOS") {
+  const token = (await cookies()).get(cookieName)?.value;
   if (!token) return null;
   const tokenHash = hashKdsDeviceToken(token);
   const [device] = await db.select({
@@ -59,9 +61,9 @@ export async function getCurrentDeviceRegistration() {
     confirmationCode: managedDevices.confirmationCode,
     requestExpiresAt: managedDevices.requestExpiresAt,
     expiresAt: managedDevices.expiresAt,
-  }).from(managedDevices).where(or(
+  }).from(managedDevices).where(and(or(
     eq(managedDevices.requestTokenHash, tokenHash), eq(managedDevices.tokenHash, tokenHash),
-  )).limit(1);
+  ), ...(expectedType ? [eq(managedDevices.deviceType, expectedType)] : []))).limit(1);
   return device ? { token, device } : null;
 }
 export async function getCurrentKdsDevice() {
@@ -75,6 +77,38 @@ export async function getCurrentKdsDevice() {
     await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
   }
   return device ?? null;
+}
+
+export async function getCurrentAdmDevice() {
+  const token = (await cookies()).get(ADM_DEVICE_COOKIE)?.value;
+  if (!token) return null;
+  const [device] = await db.select({ deviceId: managedDevices.deviceId, lastUsedAt: managedDevices.lastUsedAt,
+    expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
+      eq(managedDevices.tokenHash, hashKdsDeviceToken(token)),
+      eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"),
+      eq(managedDevices.admEnabled, 1),
+    )).limit(1);
+  if (!device || !device.expiresAt || device.expiresAt.getTime() <= Date.now()) return null;
+  if (!device.lastUsedAt || Date.now() - device.lastUsedAt.getTime() > 5 * 60 * 1000) {
+    await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
+  }
+  return { deviceId: device.deviceId, lastUsedAt: device.lastUsedAt };
+}
+
+export async function getCurrentPosDevice() {
+  const token = (await cookies()).get(POS_DEVICE_COOKIE)?.value;
+  if (!token) return null;
+  const [device] = await db.select({ deviceId: managedDevices.deviceId, lastUsedAt: managedDevices.lastUsedAt,
+    expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
+      eq(managedDevices.tokenHash, hashKdsDeviceToken(token)),
+      eq(managedDevices.deviceType, "POS"), eq(managedDevices.status, "APPROVED"),
+      eq(managedDevices.posEnabled, 1),
+    )).limit(1);
+  if (!device || !device.expiresAt || device.expiresAt.getTime() <= Date.now()) return null;
+  if (!device.lastUsedAt || Date.now() - device.lastUsedAt.getTime() > 5 * 60 * 1000) {
+    await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
+  }
+  return { deviceId: device.deviceId, lastUsedAt: device.lastUsedAt };
 }
 
 export async function reserveKdsIpAttempt() {

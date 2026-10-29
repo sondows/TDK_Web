@@ -3,7 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { and, eq, gt, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { adminSecurityOwners, staff, staffSessions } from "@/db/schema";
+import { adminSecurityOwners, managedDevices, staff, staffSessions } from "@/db/schema";
 import { createSessionToken, hashSessionToken, sessionCookieSecure, type CurrentStaff } from "@/lib/auth";
 
 export const ADMIN_SESSION_COOKIE_NAME = "tdk_admin_session";
@@ -36,6 +36,7 @@ export async function getCurrentAdminStaff(): Promise<CurrentStaff | null> {
   const cutoff = new Date(Date.now() - ADMIN_SESSION_MAX_AGE_SECONDS * 1000);
   const [member] = await db.select({
     staffId: staff.staffId,
+    managedDeviceId: staffSessions.managedDeviceId,
     staffCode: staff.staffCode,
     loginId: staff.adminLoginId,
     name: staff.name,
@@ -48,7 +49,20 @@ export async function getCurrentAdminStaff(): Promise<CurrentStaff | null> {
     ne(staff.staffCode, "000"),
     eq(staff.adminEnabled, 1),
   )).limit(1);
-  return member ?? null;
+  if (!member) return null;
+  if (member.managedDeviceId !== null) {
+    const [device] = await db.select({ deviceId: managedDevices.deviceId, expiresAt: managedDevices.expiresAt })
+      .from(managedDevices).where(and(eq(managedDevices.deviceId, member.managedDeviceId),
+        eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1))).limit(1);
+    return device?.expiresAt && device.expiresAt.getTime() > Date.now() ? member : null;
+  }
+  const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
+    eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1),
+  ));
+  if (approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now())) return null;
+  const [recoveryOwner] = await db.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
+    .where(eq(adminSecurityOwners.staffId, member.staffId)).limit(1);
+  return recoveryOwner ? member : null;
 }
 
 export type OwnerSecurityState = "NOT_OWNER" | "OWNER_UNCONFIGURED" | "NEEDS_REAUTH" | "AUTHORIZED";
@@ -82,6 +96,9 @@ export async function isDesignatedOwnerStaff(staffId: number) {
 }
 
 export async function requireOwnerSecurityAccess() {
+  if (!await getCurrentAdminStaff()) return Response.json(
+    { success: false, message: "관리센터 로그인 및 승인된 ADM 기기가 필요합니다." }, { status: 401 },
+  );
   const state = await getOwnerSecurityState();
   if (state === "AUTHORIZED") return null;
   const status = state === "NOT_OWNER" ? 403 : 428;

@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { and, eq, gt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { staff, staffSessions } from "@/db/schema";
+import { managedDevices, staff, staffSessions } from "@/db/schema";
 import { isValidEmployeePin, isValidPin } from "@/lib/pin";
 
 export const SESSION_COOKIE_NAME = "tdk_pos_session";
@@ -186,7 +186,8 @@ async function verifyNumericPin(pin: string, storedHash: string) {
 }
 
 export async function getCurrentStaff(): Promise<CurrentStaff | null> {
-  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token || token.startsWith("admin.")) return null;
 
   const sessionCutoff = new Date(Date.now() - SESSION_MAX_AGE_SECONDS * 1000);
@@ -197,6 +198,7 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
       loginId: staff.adminLoginId,
       name: staff.name,
       role: staff.role,
+      managedDeviceId: staffSessions.managedDeviceId,
     })
     .from(staffSessions)
     .innerJoin(staff, eq(staffSessions.staffId, staff.staffId))
@@ -213,7 +215,33 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
     )
     .limit(1);
 
-  return currentStaff ?? null;
+  if (!currentStaff) return null;
+  const member: CurrentStaff = {
+    staffId: currentStaff.staffId,
+    staffCode: currentStaff.staffCode,
+    loginId: currentStaff.loginId,
+    name: currentStaff.name,
+    role: currentStaff.role,
+  };
+  if (currentStaff.managedDeviceId !== null) {
+    const deviceToken = cookieStore.get("tdk_pos_device")?.value;
+    if (!deviceToken) return null;
+    const deviceTokenHash = createHash("sha256").update(deviceToken).digest("hex");
+    const [device] = await db.select({ deviceId: managedDevices.deviceId, expiresAt: managedDevices.expiresAt })
+      .from(managedDevices).where(and(eq(managedDevices.deviceId, currentStaff.managedDeviceId),
+        eq(managedDevices.tokenHash, deviceTokenHash), eq(managedDevices.deviceType, "POS"),
+        eq(managedDevices.status, "APPROVED"), eq(managedDevices.posEnabled, 1))).limit(1);
+    if (!device?.expiresAt || device.expiresAt.getTime() <= Date.now()) return null;
+    return member;
+  }
+  const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
+    eq(managedDevices.deviceType, "POS"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.posEnabled, 1),
+  ));
+  if (approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now())) return null;
+  // Keep pre-registration POS sessions alive during rollout. New sessions are
+  // owner-only until the first POS device is approved; approving it logs these
+  // legacy sessions out in the device-management transaction.
+  return member;
 }
 
 /** Verifies a real active employee without creating a browser login session. */

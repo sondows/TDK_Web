@@ -922,7 +922,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       <button className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 disabled:opacity-50" disabled={logoutBusy} onClick={() => {
         setLogoutBusy(true);
         void fetch("/api/kitchen/auth/logout", { method: "POST" }).then(() => router.refresh()).catch(() => setLogoutBusy(false));
-      }} type="button">{logoutBusy ? "Signing out…" : "Sign out"}</button>
+      }} type="button">{logoutBusy ? "로그아웃 중…" : "로그아웃"}</button>
     </header>
     <div className="mx-auto mt-3 max-w-5xl">
       <div className="grid grid-cols-3 gap-2">

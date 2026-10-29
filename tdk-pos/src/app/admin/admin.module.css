@@ -103,8 +103,13 @@
   box-shadow: 0 12px 34px rgb(22 37 45 / 9%);
 }
 
-.loginHeading h1 { color: #455a64; font-size: 23px; font-weight: 700; }
+.loginHeading { text-align: center; }
+.loginHeading h1 { color: #165DFF; font-size: 36px; font-weight: 800; }
 .loginHeading p { margin-top: 8px; color: #60717a; font-size: 13px; }
+.loginTabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 22px; }
+.loginTab,
+.loginTabActive { min-height: 42px; border: 1px solid #d5dfe4; border-radius: 5px; background: #f4f7f9; color: #455a64; font-size: 13px; font-weight: 700; }
+.loginTabActive { border-color: #455a64; background: #455a64; color: #fff; }
 .loginForm { display: flex; flex-direction: column; margin-top: 28px; }
 .loginForm label { margin-bottom: 7px; font-size: 14px; font-weight: 600; }
 .loginForm input {
@@ -128,6 +133,31 @@
 .loginForm button:hover { background: #344b56; }
 .loginForm button:disabled { opacity: 0.65; }
 .loginError { margin: 0 0 12px; color: #bc3535; font-size: 13px; }
+.deviceForm { display: flex; flex-direction: column; gap: 14px; margin-top: 24px; }
+.deviceForm label { display: flex; flex-direction: column; gap: 7px; font-size: 14px; font-weight: 600; }
+.deviceForm input { height: 42px; border: 1px solid #cbd5da; border-radius: 4px; padding: 0 12px; font-size: 15px; }
+.deviceForm input:read-only { background: #f5f7f9; }
+.deviceForm button { min-height: 42px; margin-top: 5px; border-radius: 4px; background: #455a64; color: #fff; font-size: 14px; font-weight: 700; }
+.deviceForm button:disabled { opacity: .65; }
+.deviceForm p,
+.deviceInfo,
+.registrationNote { color: #60717a; font-size: 13px; line-height: 1.55; }
+.deviceInfo { margin-top: 26px; text-align: center; }
+.deviceInfo p { margin-top: 12px; }
+.confirmationCode { display: block; margin-top: 18px; color: #25343b; font-family: ui-monospace, monospace; font-size: 32px; letter-spacing: .2em; }
+.cancelRequestButton { min-height: 40px; margin-top: 16px; border: 1px solid #cbd5da; border-radius: 5px; background: #fff; color: #455a64; font-weight: 700; padding: 0 16px; }
+.deviceCode { text-align: center; font-family: ui-monospace, monospace; }
+.registeredDevice { margin: 3px 0 0; color: #165DFF !important; font-weight: 700; text-align: center; }
+.deviceForm .revokeButton { border: 1px solid #cbd5da; background: #f4f7f9; color: #455a64; }
+.registrationNote { margin-top: 16px; }
+.deviceDialog { width: min(420px, calc(100% - 32px)); border: 0; border-radius: 10px; padding: 24px; color: #25343b; box-shadow: 0 12px 34px rgb(22 37 45 / 20%); }
+.deviceDialog::backdrop { background: rgb(19 31 38 / 45%); }
+.deviceDialog h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.deviceDialog p { margin: 16px 0 20px; color: #52636c; line-height: 1.6; }
+.deviceDialog div { display: flex; gap: 10px; }
+.deviceDialog button { min-height: 42px; flex: 1; border: 1px solid #cbd5da; border-radius: 5px; background: #f4f7f9; color: #455a64; font-weight: 700; }
+.deviceDialog button:last-child { border-color: #b73e3e; background: #b73e3e; color: white; }
+.deviceDialog button:disabled { opacity: .65; }
 
 .workspace {
   display: grid;
