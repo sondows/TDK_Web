@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 
 export async function generateMetadata(): Promise<Metadata> {
   return {
-    title: "TDK KDS",
-    applicationName: "TDK KDS",
+    title: "TDKON KDS",
+    applicationName: "TDKON KDS",
     description: "TDK-POS kitchen display",
     manifest: "/tdkkds/kds.webmanifest",
-    appleWebApp: { capable: true, title: "TDK KDS", statusBarStyle: "default" },
+    appleWebApp: { capable: true, title: "TDKON KDS", statusBarStyle: "default" },
   };
 }
 

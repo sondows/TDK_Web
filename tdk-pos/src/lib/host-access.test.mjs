@@ -35,6 +35,8 @@ test("public aliases map to their actual application routes", () => {
   assert.equal(internalCanonicalPath("/pos/session/4"), "/tdkpos/session/4");
   assert.equal(internalCanonicalPath("/kitchen"), "/tdkkds");
   assert.equal(internalCanonicalPath("/kitchen/status"), "/tdkkds/status");
+  assert.equal(internalCanonicalPath("/kds"), "/tdkkds");
+  assert.equal(externalCanonicalPath("/kds"), "/tdkkds");
   assert.equal(internalCanonicalPath("/admin"), "/tdkadm");
   assert.equal(internalCanonicalPath("/admin/login"), "/tdkadm/login");
   assert.equal(internalCanonicalPath("/admin/security/devices"), "/tdkadm/security/devices");

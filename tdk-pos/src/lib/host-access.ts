@@ -78,6 +78,7 @@ export function externalAliasTarget(pathname: string): { surface: ExternalSurfac
   return { surface: alias.surface, target: isPathOrChild(suffix, "/kitchen") ? suffix : `/kitchen${suffix}` };
 }
 export function internalCanonicalPath(pathname: string): string | null {
+  if (pathname === "/kds") return "/tdkkds";
   if (isPathOrChild(pathname, "/tdkadm/admin")) return `/tdkadm${pathname.slice("/tdkadm/admin".length)}`;
   if (isPathOrChild(pathname, "/admin")) return `/tdkadm${pathname.slice("/admin".length)}`;
   if (pathname === "/login") return "/tdkpos/login";

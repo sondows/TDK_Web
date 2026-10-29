@@ -11,7 +11,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const externalAdmin = isExternalAdminHost(requestHeaders.get("host"));
   const surface = requestHeaders.get("x-tdk-external-surface");
-  const appName = surface === "pos" ? "TDK-POS" : surface === "kds" ? "TDK KDS" : externalAdmin ? "TDK Admin" : "TDK-POS";
+  const appName = surface === "pos" ? "TDKON POS" : surface === "kds" ? "TDKON KDS" : surface === "admin" || externalAdmin ? "TDKON ADM" : "TDKON POS";
+  const iconName = surface === "pos" ? "tdk-pos" : surface === "kds" ? "tdk-kds" : "tdk-adm";
   const manifest = surface === "pos" ? "/tdkpos/manifest.webmanifest" : surface === "admin" ? "/tdkadm/manifest.webmanifest" : "/manifest.webmanifest";
   return {
     title: appName,
@@ -19,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description: appName,
     manifest,
     appleWebApp: { capable: true, title: appName, statusBarStyle: "default" },
-    icons: { apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }] },
+    icons: { apple: [{ url: `/icons/${iconName}-180.png`, sizes: "180x180", type: "image/png" }] },
     other: { google: "notranslate" },
   };
 }
