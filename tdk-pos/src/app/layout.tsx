@@ -1,11 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
-import { Geist, Geist_Mono } from "next/font/google";
 import { isExternalAdminHost } from "@/lib/host-access";
 import "./globals.css";
-
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -29,7 +25,7 @@ export const viewport: Viewport = { themeColor: "#2563EB" };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="ko" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="ko" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
         {children}
       </body>

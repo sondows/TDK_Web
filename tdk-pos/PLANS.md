@@ -1207,3 +1207,66 @@
 5. 최신 구조 재비교 후 02에 정확한 production DDL 및 view SQL을 생성하고 03/04를 맞춘다.
 
 세부 체크포인트: `checkpoints/20261101-schema-sync-prerequisites.md`.
+## Docker runtime 파일 누락 재발 방지 — 2026-11-01
+
+### 상태
+
+- 런타임 의존성 분석: **PASS**. `server.cjs`가 `kds-ingress.cjs`, `src/lib/owner-setup-mode.cjs`, `next`를 require하고 `kds-ingress.cjs`도 owner setup 모듈을 require한다. 복구 스크립트는 `mysql2/promise`, `dotenv`를 필요로 한다.
+- Dockerfile 런타임 복사: **PASS**. `src/lib/owner-setup-mode.cjs`를 기존 `node:node` 소유권 규칙으로 복사하도록 추가했다. 기존 HEALTHCHECK, `USER node`, ingress 환경변수/검증은 변경하지 않았다.
+- 빌드 시 런타임 누락 검증: **PASS (검증기 구현)**. `scripts/verify-runtime-files.cjs`를 추가했고 런타임 이미지 파일 복사 뒤 실행한 다음 `/tmp` 검증기를 제거하도록 Dockerfile에 연결했다. 누락 파일, 로컬 require, production package resolution, CJS 구문 오류를 발견하면 이미지 빌드를 실패시킨다.
+- 정적 CJS 검사: `server.cjs`, `kds-ingress.cjs`, `owner-setup-mode.cjs`, 검증기 모두 `node --check` 통과.
+- 로컬 의존성 검증기는 Next 빌드 산출물이 있던 시점에 4개 CJS 파일 그래프 및 `next` 로딩 경로를 확인해 PASS했다. 이후 빌드 실패로 `.next/BUILD_ID`가 없어졌고, 재실행 시 이를 감지해 의도대로 FAIL-CLOSED했다.
+
+### 미검증 / 차단
+
+- Docker CLI 및 podman/nerdctl/buildah가 이 환경에 없어 별도 태그 이미지 빌드, 이미지 내부 검사, 컨테이너 서버 시작, 실제 Docker HEALTHCHECK는 수행하지 못했다.
+- `npm.cmd run build`는 Next 설정 로딩 후 Google Fonts(`fonts.googleapis.com`) 네트워크 fetch 실패로 중단됐다. 해당 오류는 외부 네트워크 제한이며 Dockerfile 변경과 무관하다. 따라서 production build PASS 및 실제 runtime startup은 판정하지 않았다.
+- 운영 NAS·운영 DB·컨테이너·볼륨에는 접근하거나 변경하지 않았다.
+
+### 변경 파일 및 복구 지점
+
+- `Dockerfile`: runtime owner 모듈 COPY와 임시 이미지 검증 단계 추가.
+- `scripts/verify-runtime-files.cjs`: runtime CJS local/package 의존성 검증기 추가.
+- 상세 체크포인트: `checkpoints/20261101-docker-runtime-copy.md`.
+
+테스트 이미지 확인은 Docker 실행 환경에서 별도 태그(예: `tdk-pos:runtime-check-20261101`)로 빌드한 뒤 이미지 내부 검증기 통과, 서버 준비/종료, HEALTHCHECK 응답을 확인하는 순서로 남아 있다. 운영 태그 `tdk-pos:1.0.0`은 덮어쓰지 않는다.
+### 검증기 보충 확인
+
+최종 검증기에는 package.json의 모든 production dependency resolve 검사도 포함했다. production build 실패 후 재실행 결과 유일한 오류는 `.next/BUILD_ID` 누락이었다. 이는 실패한 Next 빌드 산출물이 없음을 정확히 차단한 것이며, 로컬 모듈 및 production package resolve 오류는 보고되지 않았다.
+## TDKON Google Fonts 로컬화 및 Docker 빌드 안정화 — 2026-11-01
+
+### 조사 결과
+
+- `src/app/layout.tsx`에서 `next/font/google`의 `Geist`와 `Geist_Mono`를 사용했고, CSS 변수는 `--font-geist-sans`, `--font-geist-mono`였다. 두 글꼴 모두 가변 폰트 굵기 `100 900`, normal style, `font-display: swap`을 사용했다.
+- 기존 Next 개발 산출물의 실제 Google font 서브셋을 확인했다. Geist Sans 5개, Geist Mono 6개이며 CSS의 unicode-range 선언과 각 woff2 파일을 그대로 대응시켰다. 외부 폰트 URL은 앱 소스에서 추가로 발견되지 않았다.
+- Geist 공식 저장소의 OFL 1.1 라이선스를 확인하고 `public/fonts/OFL.txt`에 포함했다. Geist 글꼴은 OFL 조건에 따라 소프트웨어에 번들해 배포할 수 있다. (공식 라이선스: https://github.com/vercel/geist-font/blob/main/OFL.txt)
+
+### 변경 및 보존
+
+- `src/app/layout.tsx`: Google 폰트 빌드 플러그인 호출을 제거하고 기존 HTML 레이아웃 클래스는 유지했다.
+- `src/app/globals.css`: 원본 글꼴명, 100–900 굵기, `swap`, 서브셋별 unicode-range, fallback metric, CSS 변수 연결을 로컬 `@font-face`로 옮겼다. 레이아웃 및 색상 규칙은 수정하지 않았다.
+- `public/fonts/`: 기존 빌드 산출물에서 가져온 Geist Sans/Mono woff2 11개와 `OFL.txt`를 추가했다. 폰트 파일 합계는 146,464 bytes다.
+- 기존 Dockerfile의 `owner-setup-mode.cjs` 복사와 `verify-runtime-files.cjs` 검사, `node` 사용자, HEALTHCHECK 및 ingress 설정은 보존했다. Git commit/push는 수행하지 않았다.
+
+### 검증
+
+- TypeScript `npx tsc --noEmit`: PASS.
+- 전체 `npm run lint`: 실행 중 `.pos-runtime/chrome-profile/Default/Extensions`의 Chrome 확장 파일까지 순회하며 장시간 진행되어 중단했다. 폰트 변경 파일 대상 `npx eslint src/app/layout.tsx`: PASS. CSS는 프로젝트 ESLint 대상이 아니다.
+- 후속 `npm run lint -- --ignore-pattern .pos-runtime/** --ignore-pattern .next/**`: FAIL. 기존 코드와 백업 폴더에서 33 errors / 5 warnings가 보고됐다. 변경한 `layout.tsx`는 개별 ESLint 검사 PASS이며 보고된 오류 파일은 이번 작업에서 수정하지 않았다.
+- `npm run build`: PASS. Google Fonts 네트워크 요청 없이 production 빌드가 완료됐고 `.next/BUILD_ID`가 생성됐다. 빌드 과정에서 `src/lib/menu-image-storage.ts`의 동적 파일시스템 접근에 관한 기존 Turbopack 경고 2건이 출력됐으며 이번 폰트 변경과는 별도다.
+- 소스 및 빌드 산출물의 `next/font/google`, `fonts.googleapis.com`, `fonts.gstatic.com` 참조 검색: 없음.
+- production CSS의 로컬 Geist URL 11개가 모두 `public/fonts` 파일로 연결되는지 확인: PASS.
+- `node scripts/verify-runtime-files.cjs .`: PASS (`4 CommonJS files`).
+- Docker 이미지 빌드 및 이미지 내부 폰트 파일/서버 시작/HEALTHCHECK 검증: 미검증. 이 개발 환경에서 Docker, Podman, nerdctl, buildah CLI를 찾지 못했다. Dockerfile은 `public` 전체를 런타임 이미지로 복사하므로 로컬 폰트도 포함되는 구성이다.
+- DB, 앱 인증 및 업무 코드, 운영 자원 변경: 없음.
+
+### 단계 상태
+
+- 폰트 사용처·굵기·라이선스 조사: PASS
+- 로컬 폰트 전환: PASS
+- TypeScript 및 변경 파일 ESLint: PASS
+- 외부 Google Fonts 없이 production 빌드 및 BUILD_ID: PASS
+- 기존 런타임 의존성 검사기: PASS
+- 실제 Docker 이미지 및 HEALTHCHECK: BLOCKED (Docker CLI 부재)
+
+복구 체크포인트: `checkpoints/20261101-google-fonts-localization.md`.

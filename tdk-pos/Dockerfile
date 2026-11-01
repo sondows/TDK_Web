@@ -17,11 +17,18 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./package.json
 COPY --from=build --chown=node:node /app/server.cjs ./server.cjs
 COPY --from=build --chown=node:node /app/kds-ingress.cjs ./kds-ingress.cjs
+COPY --from=build --chown=node:node /app/src/lib/owner-setup-mode.cjs ./src/lib/owner-setup-mode.cjs
 COPY --from=build --chown=node:node /app/scripts/recover-owner-program-password.cjs ./scripts/recover-owner-program-password.cjs
 COPY --from=build --chown=node:node /app/next.config.ts ./next.config.ts
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/public ./public
+COPY --from=build /app/scripts/verify-runtime-files.cjs /tmp/verify-runtime-files.cjs
+
+# Fail the image build if a server entrypoint's local or package dependency is
+# missing from the final runtime filesystem. The checker is removed afterward.
+RUN node /tmp/verify-runtime-files.cjs /app \
+    && rm /tmp/verify-runtime-files.cjs
 
 RUN mkdir -p /app/public/uploads/menu /app/storage/receipt-logo \
     && chown -R node:node /app/public/uploads /app/storage /app/.next
