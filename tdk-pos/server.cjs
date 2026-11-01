@@ -2,7 +2,7 @@
 const http = require("node:http");
 const { isIP } = require("node:net");
 const next = require("next");
-const { isInExplicitKdsNetwork, prepareKdsIngressHeaders } = require("./kds-ingress.cjs");
+const { isInExplicitKdsNetwork, prepareKdsIngressHeaders, validSecret } = require("./kds-ingress.cjs");
 const { isWindowsDevOwnerSetupEnabled } = require("./src/lib/owner-setup-mode.cjs");
 
 const port = Number(process.env.PORT ?? "3000");
@@ -33,7 +33,25 @@ if (production && (
 
 app.prepare().then(() => {
   http.createServer((request, response) => {
+    // The ingress check strips client-supplied attestation headers. Snapshot
+    // their metadata before that check; never log the raw secret value.
+    const receivedHost = request.headers.host;
+    const receivedOriginSecret = request.headers["x-tdk-proxy-origin-secret"];
     const ingress = prepareKdsIngressHeaders(request, ingressConfig);
+    if (ingress === "untrusted") {
+      console.warn("TDK ingress rejected", JSON.stringify({
+        receivedHost: typeof receivedHost === "string" ? receivedHost : null,
+        publicHost: ingressConfig.publicHost,
+        hostMatches: typeof receivedHost === "string" && receivedHost.toLowerCase() === ingressConfig.publicHost,
+        originSecretPresent: receivedOriginSecret !== undefined,
+        originSecretLength: typeof receivedOriginSecret === "string" ? receivedOriginSecret.length : null,
+        expectedSecretLength: typeof ingressConfig.proxySecret === "string" ? ingressConfig.proxySecret.length : null,
+        secretMatches: validSecret(ingressConfig.proxySecret, receivedOriginSecret),
+        ingress,
+        remoteAddress: request.socket?.remoteAddress ?? null,
+        nodeEnv: process.env.NODE_ENV ?? null,
+      }));
+    }
     if (production && ingress === "untrusted") {
       response.writeHead(403, { "Cache-Control": "no-store" });
       response.end("Forbidden");

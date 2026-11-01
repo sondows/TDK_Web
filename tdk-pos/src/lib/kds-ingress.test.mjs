@@ -190,6 +190,7 @@ test("Windows owner setup attestation is limited to elevated-mode development DB
 test("the production server refuses direct outside traffic and accepts LAN or Caddy ingress", async () => {
   let handler;
   const handled = [];
+  const diagnostics = [];
   const fakeHttp = { createServer: callback => ({ listen: (_port, _host, ready) => {
     handler = callback;
     ready();
@@ -204,7 +205,7 @@ test("the production server refuses direct outside traffic and accepts LAN or Ca
     process: { env: { NODE_ENV: "production", PORT: "3000", TDK_APP_BIND_HOST: "192.168.0.83",
       KDS_PROXY_SHARED_SECRET: secret, KDS_INTERNAL_CIDRS: config.lanCidrs,
       KDS_DIRECT_HOST: config.directHost, KDS_DIRECT_EXCLUDED_IPS: config.directExcludedIps } },
-    console: { log: () => {}, error: () => {} },
+    console: { log: () => {}, warn: (label, details) => diagnostics.push({ label, details: JSON.parse(details) }), error: () => {} },
   });
   await Promise.resolve();
   const call = req => {
@@ -218,7 +219,29 @@ test("the production server refuses direct outside traffic and accepts LAN or Ca
   assert.equal(call(request("tdkon.myasustor.com", "172.18.0.2", {
     "x-tdk-proxy-origin-secret": secret,
   })), 200);
+  assert.equal(call(request("wrong.example", "172.18.0.2", {
+    "x-tdk-proxy-origin-secret": secret,
+  })), 403);
   assert.deepEqual(handled, ["192.168.0.83:3000", "tdkon.myasustor.com"]);
+  assert.equal(diagnostics.length, 3);
+  assert.ok(diagnostics.every(entry => entry.label === "TDK ingress rejected" && entry.details.ingress === "untrusted"));
+  assert.deepEqual(diagnostics[1].details, {
+    receivedHost: "tdkon.myasustor.com",
+    publicHost: config.publicHost,
+    hostMatches: true,
+    originSecretPresent: false,
+    originSecretLength: null,
+    expectedSecretLength: 64,
+    secretMatches: false,
+    ingress: "untrusted",
+    remoteAddress: "172.18.0.2",
+    nodeEnv: "production",
+  });
+  assert.equal(diagnostics[2].details.hostMatches, false);
+  assert.equal(diagnostics[2].details.originSecretPresent, true);
+  assert.equal(diagnostics[2].details.originSecretLength, 64);
+  assert.equal(diagnostics[2].details.secretMatches, true);
+  assert.equal(JSON.stringify(diagnostics).includes(secret), false);
 });
 
 test("production refuses to bind all interfaces when direct-LAN settings are missing", () => {

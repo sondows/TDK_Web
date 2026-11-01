@@ -114,4 +114,4 @@ function prepareKdsIngressHeaders(request, config) {
   return "untrusted";
 }
 
-module.exports = { isInExplicitKdsNetwork, prepareKdsIngressHeaders };
+module.exports = { isInExplicitKdsNetwork, prepareKdsIngressHeaders, validSecret };

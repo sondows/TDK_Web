@@ -1270,3 +1270,35 @@
 - 실제 Docker 이미지 및 HEALTHCHECK: BLOCKED (Docker CLI 부재)
 
 복구 체크포인트: `checkpoints/20261101-google-fonts-localization.md`.
+
+## NAS 실제 HTTP ingress 403 진단 계측 — 2026-11-01
+
+### 코드 경로 및 판정 근거
+
+- `server.cjs`의 Node HTTP 요청 콜백은 `prepareKdsIngressHeaders(request, ingressConfig)` 결과가 `untrusted`이고 운영 모드이면 `Cache-Control: no-store`와 함께 403을 반환한다.
+- `kds-ingress.cjs`의 Caddy 판정은 소문자화한 수신 Host와 `publicHost`의 정확한 일치, 그리고 `x-tdk-proxy-origin-secret`의 `validSecret()` 일치를 모두 요구한다. `validSecret()`은 64자리 hex 형식을 확인하고 `timingSafeEqual`로 비교한다.
+- `prepareKdsIngressHeaders()`가 인증 헤더를 삭제하므로 요청 수신 직후 원래 Host와 헤더 존재·길이 및 비교에 필요한 값만 읽어 둔 후, 반환값이 `untrusted`일 때 진단 로그를 남기도록 했다. 원문 비밀키는 로그에 포함하지 않는다.
+
+### 수정 및 로그 형식
+
+- 수정: `server.cjs`에 `TDK ingress rejected`와 JSON 진단 필드 추가. `kds-ingress.cjs`에서 기존 `validSecret()`을 서버 진입점에 재사용하도록 export. `src/lib/kds-ingress.test.mjs`에서 허용/차단 응답과 로그 필드 및 비밀키 미노출 검증 추가.
+- 로그 필드: `receivedHost`, `publicHost`, `hostMatches`, `originSecretPresent`, `originSecretLength`, `expectedSecretLength`, `secretMatches`, `ingress`, `remoteAddress`, `nodeEnv`.
+- ingress 조건, HTTPS 판단, 403 응답, Caddy 설정, 환경변수, DB, 로그인 정책은 변경하지 않았다.
+
+### 검증 및 현재 상태
+
+- `node --check server.cjs` 및 `kds-ingress.cjs`: PASS.
+- `npx tsc --noEmit`: PASS.
+- 변경 파일 ESLint (`server.cjs`, `kds-ingress.cjs`, `src/lib/kds-ingress.test.mjs`): PASS.
+- `node --experimental-strip-types --test src/lib/kds-ingress.test.mjs`: 10/10 PASS. 기존 허용 요청 200, 차단 요청 403, 로그는 `untrusted`에서만 출력, 비밀키 원문 미출력 검증. 일반 `node --test`는 이 Windows Node 22.17 환경에서 테스트가 import하는 `.ts` 파일을 로드하지 못해 실패했으며 타입 제거 옵션으로 재실행했다.
+- `git diff --check`: PASS.
+- 실제 NAS HTTP 요청의 로그는 아직 확보하지 않았다. 403의 구체적인 원인은 **BLOCKED**: 변경 코드가 운영 서버에서 실행되고 동일 요청의 진단 로그가 수집돼야 `hostMatches`, `secretMatches`, 소켓 주소를 판별할 수 있다. 운영 배포·설정 변경은 수행하지 않았다.
+
+### 단계 상태
+
+- 실제 요청 경로·기존 판정 로직 조사: PASS
+- `untrusted` 전용 진단 계측: PASS
+- 로컬 구문·TypeScript·ESLint·ingress 회귀 테스트: PASS
+- 실제 NAS 요청의 차단 원인 확정: BLOCKED (운영 로그 미수집)
+
+복구 체크포인트: `checkpoints/20261101-ingress-diagnostics.md`.
