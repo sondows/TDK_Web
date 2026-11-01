@@ -50,9 +50,8 @@ const navigation: NavigationItem[] = [
     href: "/tdkadm/security/devices",
     children: [
       { label: "직원관리", href: "/tdkadm/security/staff" },
-      { label: "기기관리", href: "/tdkadm/security/devices" },
+      { label: "신뢰 토큰 관리", href: "/tdkadm/security/devices" },
       { label: "최고관리자 관리", href: "/tdkadm/security/owners" },
-      { label: "기기등록 설정", href: "/tdkadm/security/devices/settings" },
     ],
   },
 ];

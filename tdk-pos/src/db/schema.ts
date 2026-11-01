@@ -63,19 +63,19 @@ export const staff = mysqlTable(
       .primaryKey(),
     staffCode: varchar("staff_code", { length: 30 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
-    pinHash: varchar("pin_hash", { length: 255 }),
     posEnabled: tinyint("pos_enabled").notNull().default(0),
     hosEnabled: tinyint("hos_enabled").notNull().default(0),
     employeePinHash: varchar("employee_pin_hash", { length: 255 }),
+    securityPasswordHash: varchar("security_password_hash", { length: 255 }),
+    securityPasswordChangeRequired: tinyint("security_password_change_required").notNull().default(0),
+    terminatedAt: datetime("terminated_at"),
     kdsEnabled: tinyint("kds_enabled").notNull().default(0),
-    kdsPinHash: varchar("kds_pin_hash", { length: 255 }),
     kdsPasswordHash: varchar("kds_password_hash", { length: 255 }),
     kdsTotpSecretEnc: varchar("kds_totp_secret_enc", { length: 512 }),
     kdsTotpPendingSecretEnc: varchar("kds_totp_pending_secret_enc", { length: 512 }),
     kdsTotpPendingExpiresAt: datetime("kds_totp_pending_expires_at"),
     kdsPinChangeRequired: tinyint("kds_pin_change_required").notNull().default(1),
     adminLoginId: varchar("admin_login_id", { length: 32 }),
-    adminPinHash: varchar("admin_pin_hash", { length: 255 }),
     adminEnabled: tinyint("admin_enabled").notNull().default(0),
     role: mysqlEnum("role", ["OWNER", "MANAGER", "STAFF"])
       .notNull()
@@ -161,6 +161,7 @@ export const staffSessions = mysqlTable("staff_sessions", {
   }),
   // KDS managed-device registry has a different key space from legacy POS devices.
   managedDeviceId: bigint("managed_device_id", { mode: "number", unsigned: true }),
+  trustTokenId: bigint("trust_token_id", { mode: "number", unsigned: true }),
   sessionTokenHash: varchar("session_token_hash", { length: 255 }),
   loggedInAt: datetime("logged_in_at")
     .notNull()
@@ -193,6 +194,40 @@ export const adminSecurityOwners = mysqlTable("admin_security_owners", {
   updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   assignedByStaffId: bigint("assigned_by_staff_id", { mode: "number", unsigned: true }),
 });
+
+/** A one-way latch: completing setup never becomes available again when owners leave. */
+export const securityBootstrapState = mysqlTable("security_bootstrap_state", {
+  stateId: tinyint("state_id").primaryKey(),
+  completedAt: datetime("completed_at"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const staffSecurityInvites = mysqlTable("staff_security_invites", {
+  inviteId: bigint("invite_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).notNull(),
+  inviteHash: varchar("invite_hash", { length: 64 }).notNull(),
+  expiresAt: datetime("expires_at").notNull(),
+  usedAt: datetime("used_at"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdByStaffId: bigint("created_by_staff_id", { mode: "number", unsigned: true }),
+}, table => [
+  uniqueIndex("uq_staff_security_invites_hash").on(table.inviteHash),
+  index("idx_staff_security_invites_staff").on(table.staffId, table.expiresAt),
+]);
+
+/** NAS-admin-issued, short-lived proof for recovering an existing owner's master password. */
+export const masterPasswordRecoveryGrants = mysqlTable("master_password_recovery_grants", {
+  grantId: bigint("grant_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+  expiresAt: datetime("expires_at").notNull(),
+  usedAt: datetime("used_at"),
+  revokedAt: datetime("revoked_at"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("uq_master_password_recovery_token").on(table.tokenHash),
+  index("idx_master_password_recovery_staff").on(table.staffId, table.expiresAt),
+]);
 
 export const adminAuthAttempts = mysqlTable("admin_auth_attempts", {
   attemptKey: varchar("attempt_key", { length: 64 }).primaryKey(),
@@ -256,25 +291,21 @@ export const managedDevices = mysqlTable("managed_devices", {
   index("idx_managed_devices_staff").on(table.registeredByStaffId, table.deviceType),
 ]);
 
-/** Legacy KDS-only credentials and sessions are retained for data compatibility; new KDS auth uses staff sessions. */
-export const kdsAccounts = mysqlTable("kds_accounts", {
-  kdsAccountId: bigint("kds_account_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
-  loginId: varchar("login_id", { length: 32 }).notNull(),
-  pinHash: varchar("pin_hash", { length: 255 }).notNull(),
-  isActive: tinyint("is_active").notNull().default(1),
+/** Browser trust is independent of the employee PIN session and legacy device approval. */
+export const programTrustTokens = mysqlTable("program_trust_tokens", {
+  tokenId: bigint("token_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  program: mysqlEnum("program", ["POS", "ADM", "KDS", "HOS"]).notNull(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+  enrolledByStaffId: bigint("enrolled_by_staff_id", { mode: "number", unsigned: true }).notNull(),
   createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [uniqueIndex("uq_kds_accounts_login_id").on(table.loginId)]);
-
-export const kdsSessions = mysqlTable("kds_sessions", {
-  kdsSessionId: bigint("kds_session_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
-  kdsAccountId: bigint("kds_account_id", { mode: "number", unsigned: true }).notNull(),
-  sessionTokenHash: varchar("session_token_hash", { length: 64 }).notNull(),
-  loggedInAt: datetime("logged_in_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  status: mysqlEnum("status", ["ACTIVE", "LOGGED_OUT"]).notNull().default("ACTIVE"),
-}, (table) => [
-  uniqueIndex("uq_kds_sessions_token").on(table.sessionTokenHash),
-  index("idx_kds_sessions_account").on(table.kdsAccountId),
+  lastUsedAt: datetime("last_used_at"),
+  revokedAt: datetime("revoked_at"),
+  clientLabel: varchar("client_label", { length: 120 }),
+  revokeReason: varchar("revoke_reason", { length: 100 }),
+}, table => [
+  uniqueIndex("uq_program_trust_tokens_hash").on(table.tokenHash),
+  index("idx_program_trust_tokens_program").on(table.program, table.revokedAt),
+  index("idx_program_trust_tokens_staff").on(table.enrolledByStaffId),
 ]);
 
 export const systemSettings = mysqlTable("system_settings", {

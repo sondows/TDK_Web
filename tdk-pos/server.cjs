@@ -3,6 +3,7 @@ const http = require("node:http");
 const { isIP } = require("node:net");
 const next = require("next");
 const { isInExplicitKdsNetwork, prepareKdsIngressHeaders } = require("./kds-ingress.cjs");
+const { isWindowsDevOwnerSetupEnabled } = require("./src/lib/owner-setup-mode.cjs");
 
 const port = Number(process.env.PORT ?? "3000");
 const bindHost = process.env.TDK_APP_BIND_HOST ?? "0.0.0.0";
@@ -45,6 +46,9 @@ app.prepare().then(() => {
     });
   }).listen(port, bindHost, () => {
     console.log(`TDK app listening on ${bindHost}:${port}`);
+    if (!production) {
+      console.log(`TDK dev runtime: DB_NAME=${process.env.DB_NAME ?? "(unset)"}, Windows owner setup=${isWindowsDevOwnerSetupEnabled(process.env) ? "enabled" : "disabled"}`);
+    }
   });
 }).catch(error => {
   console.error("TDK app startup failed", error);

@@ -10,11 +10,8 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION;
 
 -- Run the following only when the columns above exist as expected.
 SELECT staff_id, staff_code, name, role, is_active, cancel_requires_pin,
-       (pin_hash IS NOT NULL) AS has_pos_pin,
-       LEFT(SHA2(pin_hash, 256), 12) AS pos_pin_fingerprint,
-       admin_login_id,
-       (admin_pin_hash IS NOT NULL) AS has_admin_pin,
-       LEFT(SHA2(admin_pin_hash, 256), 12) AS admin_pin_fingerprint
+       (employee_pin_hash IS NOT NULL) AS has_employee_pin,
+       admin_login_id
 FROM staff
 ORDER BY staff_id;
 

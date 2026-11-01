@@ -5,9 +5,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
 import { hashSessionToken, sessionCookieSecure, SESSION_MAX_AGE_SECONDS } from "@/lib/auth";
-import { getCurrentKdsDevice } from "@/lib/kds-device";
-import { canUseKdsSessionOnNetwork } from "@/lib/kds-network";
-import { getKdsNetworkContext } from "@/lib/kds-network-server";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
 
 export const KDS_SESSION_COOKIE_NAME = "tdk_kds_session";
 export const kdsSessionCookieOptions = {
@@ -29,6 +27,7 @@ export async function getCurrentKdsStaff() {
     name: staff.name,
     employeePinHash: staff.employeePinHash,
     managedDeviceId: staffSessions.managedDeviceId,
+    trustTokenId: staffSessions.trustTokenId,
   }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
     eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
     eq(staffSessions.status, "ACTIVE"),
@@ -38,7 +37,6 @@ export async function getCurrentKdsStaff() {
     eq(staff.kdsEnabled, 1),
   )).limit(1);
   if (!member || member.staffCode === "000" || !member.employeePinHash) return null;
-  const network = await getKdsNetworkContext();
-  const device = network.isInternal || member.managedDeviceId === null ? null : await getCurrentKdsDevice();
-  return canUseKdsSessionOnNetwork(network.isInternal, member.managedDeviceId, device?.deviceId ?? null) ? member : null;
+  const trust = await getCurrentProgramTrust("KDS", { tokenId: member.trustTokenId ?? undefined });
+  return trust && member.trustTokenId === trust.tokenId ? member : null;
 }

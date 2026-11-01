@@ -45,7 +45,7 @@ test("outside peers, gateway NAT and missing settings cannot claim direct LAN ac
     });
     assert.equal(ingress.prepareKdsIngressHeaders(req, config), "untrusted");
     assert.equal(networkOf(req).isInternal, false);
-    assert.equal(req.headers["x-tdk-verified-client-ip"], undefined);
+    assert.equal(req.headers["x-tdk-verified-client-ip"], peer);
   }
   for (const overrides of [{ directHost: undefined }, { directExcludedIps: "" }, { proxySecret: "bad" }, { lanCidrs: "" }]) {
     const req = request("192.168.0.83:3000", "192.168.0.54");
@@ -76,7 +76,115 @@ test("only a valid Caddy attestation survives on the public host", () => {
   });
   assert.equal(ingress.prepareKdsIngressHeaders(forged, config), "untrusted");
   assert.equal(networkOf(forged).isInternal, false);
-  assert.equal(forged.headers["x-tdk-verified-client-ip"], undefined);
+  assert.equal(forged.headers["x-tdk-verified-client-ip"], "198.51.100.30");
+});
+
+test("only the localhost socket can receive a development trust marker", () => {
+  const local = request("localhost:3000", "::ffff:127.0.0.1", { "x-tdk-local-dev": "1" });
+  assert.equal(ingress.prepareKdsIngressHeaders(local, config), "local-dev");
+  assert.equal(local.headers["x-tdk-local-dev"], "1");
+  assert.equal(local.headers["x-tdk-verified-client-ip"], "127.0.0.1");
+  const forged = request("localhost:3000", "192.168.0.54", { "x-tdk-local-dev": "1" });
+  assert.equal(ingress.prepareKdsIngressHeaders(forged, config), "untrusted");
+  assert.equal(forged.headers["x-tdk-local-dev"], undefined);
+});
+
+test("development rate-limit identity comes from the socket, never a supplied header", () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = "development";
+    const direct = request("localhost:3000", "192.168.0.54", {
+      "x-tdk-verified-client-ip": "198.51.100.30",
+    });
+    assert.equal(ingress.prepareKdsIngressHeaders(direct, config), "untrusted");
+    assert.equal(direct.headers["x-tdk-verified-client-ip"], "192.168.0.54");
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});
+
+test("NAS owner setup marker requires explicit mode and the real local socket", () => {
+  const prior = process.env.TDK_NAS_OWNER_SETUP;
+  try {
+    process.env.TDK_NAS_OWNER_SETUP = "1";
+    const local = request("localhost:3000", "127.0.0.1", { "x-tdk-nas-owner-setup": "forged" });
+    ingress.prepareKdsIngressHeaders(local, config);
+    assert.equal(local.headers["x-tdk-nas-owner-setup"], "1");
+    for (const [host, peer] of [
+      ["localhost:3000", "192.168.0.54"],
+      ["tdkon.myasustor.com", "127.0.0.1"],
+    ]) {
+      const forged = request(host, peer, { "x-tdk-nas-owner-setup": "1" });
+      ingress.prepareKdsIngressHeaders(forged, config);
+      assert.equal(forged.headers["x-tdk-nas-owner-setup"], undefined);
+    }
+    delete process.env.TDK_NAS_OWNER_SETUP;
+    const disabled = request("localhost:3000", "127.0.0.1", { "x-tdk-nas-owner-setup": "1" });
+    ingress.prepareKdsIngressHeaders(disabled, config);
+    assert.equal(disabled.headers["x-tdk-nas-owner-setup"], undefined);
+  } finally {
+    if (prior === undefined) delete process.env.TDK_NAS_OWNER_SETUP;
+    else process.env.TDK_NAS_OWNER_SETUP = prior;
+  }
+});
+
+test("production NAS setup accepts only the NAS self-connection on the direct host", () => {
+  const prior = { mode: process.env.TDK_NAS_OWNER_SETUP, node: process.env.NODE_ENV,
+    bind: process.env.TDK_APP_BIND_HOST };
+  try {
+    process.env.TDK_NAS_OWNER_SETUP = "1";
+    process.env.NODE_ENV = "production";
+    process.env.TDK_APP_BIND_HOST = "192.168.0.83";
+    const local = request(config.directHost, "192.168.0.83");
+    ingress.prepareKdsIngressHeaders(local, config);
+    assert.equal(local.headers["x-tdk-nas-owner-setup"], "1");
+    const lan = request(config.directHost, "192.168.0.54", { "x-tdk-nas-owner-setup": "1" });
+    ingress.prepareKdsIngressHeaders(lan, config);
+    assert.equal(lan.headers["x-tdk-nas-owner-setup"], undefined);
+    const caddy = request(config.publicHost, "192.168.0.83", {
+      "x-tdk-proxy-origin-secret": secret, "x-tdk-nas-owner-setup": "1" });
+    ingress.prepareKdsIngressHeaders(caddy, config);
+    assert.equal(caddy.headers["x-tdk-nas-owner-setup"], undefined);
+  } finally {
+    for (const [key, value] of [["TDK_NAS_OWNER_SETUP", prior.mode],
+      ["NODE_ENV", prior.node], ["TDK_APP_BIND_HOST", prior.bind]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Windows owner setup attestation is limited to elevated-mode development DB localhost inputs", () => {
+  const prior = { windows: process.env.TDK_WINDOWS_DEV_OWNER_SETUP, db: process.env.DB_NAME,
+    node: process.env.NODE_ENV, nas: process.env.TDK_NAS_OWNER_SETUP };
+  try {
+    process.env.NODE_ENV = "development";
+    process.env.DB_NAME = "TDK_POS_TEST";
+    process.env.TDK_WINDOWS_DEV_OWNER_SETUP = "1";
+    delete process.env.TDK_NAS_OWNER_SETUP;
+    const local = request("localhost:3000", "127.0.0.1", { "x-tdk-nas-owner-setup": "forged" });
+    ingress.prepareKdsIngressHeaders(local, config);
+    assert.equal(local.headers["x-tdk-nas-owner-setup"], "1");
+    const lan = request("localhost:3000", "192.168.0.54", { "x-tdk-nas-owner-setup": "1" });
+    ingress.prepareKdsIngressHeaders(lan, config);
+    assert.equal(lan.headers["x-tdk-nas-owner-setup"], undefined);
+    process.env.DB_NAME = "TDK_POS";
+    const productionDb = request("localhost:3000", "127.0.0.1");
+    ingress.prepareKdsIngressHeaders(productionDb, config);
+    assert.equal(productionDb.headers["x-tdk-nas-owner-setup"], undefined);
+    process.env.DB_NAME = "TDK_POS_TEST";
+    process.env.NODE_ENV = "production";
+    const production = request("localhost:3000", "127.0.0.1");
+    ingress.prepareKdsIngressHeaders(production, config);
+    assert.equal(production.headers["x-tdk-nas-owner-setup"], undefined);
+  } finally {
+    for (const [key, value] of [["TDK_WINDOWS_DEV_OWNER_SETUP", prior.windows], ["DB_NAME", prior.db],
+      ["NODE_ENV", prior.node], ["TDK_NAS_OWNER_SETUP", prior.nas]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("the production server refuses direct outside traffic and accepts LAN or Caddy ingress", async () => {

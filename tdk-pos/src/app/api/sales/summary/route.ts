@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { checkoutItems, checkouts, orderItems, orders, paymentMethods, payments, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyActiveStaffCredentials } from "@/lib/auth";
 import { canViewSales } from "@/lib/permissions";
+import { isDesignatedOwnerStaff } from "@/lib/admin-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidEmployeePin } from "@/lib/pin";
 import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
       return Response.json({ success: false, message: "개인 직원 계정과 PIN을 확인해 주세요." }, { status: 401 });
     const employee = await verifyActiveStaffCredentials(loginId, pin);
     if (!employee) return Response.json({ success: false, message: "직원 또는 PIN이 올바르지 않습니다." }, { status: 401 });
-    if (!canViewSales(employee.role))
+    if (!canViewSales(employee.role) && !await isDesignatedOwnerStaff(employee.staffId))
       return Response.json({ success: false, message: "매출현황 조회 권한이 없습니다." }, { status: 403 });
     const startDate = typeof body.startDate === "string" ? body.startDate : "";
     const endDate = typeof body.endDate === "string" ? body.endDate : "";

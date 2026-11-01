@@ -86,7 +86,7 @@ async function cleanup(connection, dineInSessionId, dineInTableId) {
     assert(staff.length, "active shared staff required");
     const [login] = await connection.query("INSERT INTO staff_sessions (staff_id, session_token_hash, status) VALUES (?, ?, 'ACTIVE')", [staff[0].staff_id, tokenHash]);
     staffSessionId = login.insertId;
-    const [owner] = await connection.query("SELECT staff_id FROM staff WHERE role = 'OWNER' AND is_active = 1 AND admin_login_id IS NOT NULL AND admin_pin_hash IS NOT NULL LIMIT 1");
+    const [owner] = await connection.query("SELECT staff_id FROM staff WHERE role = 'OWNER' AND is_active = 1 AND admin_login_id IS NOT NULL AND employee_pin_hash IS NOT NULL LIMIT 1");
     assert(owner.length, "active owner with admin credentials required");
     const [adminLogin] = await connection.query("INSERT INTO staff_sessions (staff_id, session_token_hash, status) VALUES (?, ?, 'ACTIVE')", [owner[0].staff_id, adminTokenHash]);
     adminSessionId = adminLogin.insertId;

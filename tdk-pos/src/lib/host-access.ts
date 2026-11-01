@@ -47,6 +47,13 @@ export function isExternalAdminPathAllowed(pathname: string, method: string): bo
   if (pathname === "/") return isReadOnly(method);
   if (isPublicAsset(pathname, method)) return true;
   if (isExternalPosPath(pathname) || isExternalKdsPath(pathname)) return false;
+  // Credential setup endpoints enforce their own one-time proof and origin checks.
+  if (method.toUpperCase() === "POST" &&
+      ["/api/program-trust/change-temporary-password", "/api/program-trust/pin",
+        "/api/program-trust/master-recovery/status",
+        "/api/program-trust/master-recovery/register"].includes(pathname)) return true;
+  if (pathname === "/api/admin-center/trust/initial-master/status" ||
+    pathname === "/api/program-trust/master-recovery/register-initial") return false;
   return isAdminPageOrApi(pathname) || isPathOrChild(pathname, "/api/customers")
     || pathname === "/api/pos-settings/business-day" || pathname === "/api/pos-settings/takeout-preparation";
 }

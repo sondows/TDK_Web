@@ -11,14 +11,14 @@ const nativeRequire = createRequire(import.meta.url);
 function createFixture({ staffId, role = "OWNER", ownerStaffId = 1, actorStaffId = ownerStaffId, changes = {} }) {
   const staff = Object.fromEntries([
     "staffId", "staffCode", "name", "role", "isActive", "posEnabled", "hosEnabled", "employeePinHash",
-    "pinHash", "kdsEnabled", "kdsPinHash", "kdsPasswordHash", "kdsTotpSecretEnc", "kdsPinChangeRequired",
-    "adminLoginId", "adminPinHash", "adminEnabled",
+    "kdsEnabled", "kdsPasswordHash", "kdsTotpSecretEnc", "kdsPinChangeRequired", "adminLoginId", "adminEnabled",
   ].map(column => [column, column]));
   const adminSecurityOwners = { staffId: "staffId" };
+  const programTrustTokens = { tokenId: "tokenId", enrolledByStaffId: "enrolledByStaffId", program: "program" };
   const target = {
     staffId, staffCode: `AUTO-${staffId}`, name: "Test Employee", role, isActive: 1, posEnabled: 1, hosEnabled: 0,
-    employeePinHash: "existing-hash", pinHash: null, kdsEnabled: 0, kdsPinHash: null, kdsPasswordHash: null,
-    kdsTotpSecretEnc: null, kdsPinChangeRequired: 0, adminLoginId: `staff${staffId}`, adminPinHash: null,
+    employeePinHash: "existing-hash", kdsEnabled: 0, kdsPasswordHash: null,
+    kdsTotpSecretEnc: null, kdsPinChangeRequired: 0, adminLoginId: `staff${staffId}`,
     adminEnabled: 1,
   };
   const updates = [];
@@ -32,7 +32,7 @@ function createFixture({ staffId, role = "OWNER", ownerStaffId = 1, actorStaffId
         limit() { return this; },
         for() { staffSelectCount += 1; return Promise.resolve([target]); },
         then(resolve, reject) {
-          const result = table === adminSecurityOwners ? (target.staffId === ownerStaffId ? [{ staffId: ownerStaffId }] : []) :
+          const result = table === programTrustTokens ? [] : table === adminSecurityOwners ? (target.staffId === ownerStaffId ? [{ staffId: ownerStaffId }] : []) :
             table === staff && staffSelectCount++ > 0 ? [] : [target];
           return Promise.resolve(result).then(resolve, reject);
         },
@@ -49,9 +49,9 @@ function createFixture({ staffId, role = "OWNER", ownerStaffId = 1, actorStaffId
   runInNewContext(code, {
     module: loaded, exports: loaded.exports, Response, Request, console,
     require: name => {
-      if (name === "drizzle-orm") return { and: (...values) => values, eq: (...values) => values, ne: (...values) => values, sql: () => ({}) };
+      if (name === "drizzle-orm") return { and: (...values) => values, eq: (...values) => values, ne: (...values) => values, isNull: value => value, sql: () => ({}) };
       if (name === "@/db") return { db };
-      if (name === "@/db/schema") return { adminSecurityOwners, auditLogs: {}, managedDevices: {}, staff, staffSessions: { staffId: "staffId", sessionType: "sessionType", status: "status" } };
+      if (name === "@/db/schema") return { adminSecurityOwners, auditLogs: {}, programTrustTokens, staff, staffSessions: { staffId: "staffId", sessionType: "sessionType", status: "status" } };
       if (name === "@/lib/admin-auth") return { getCurrentAdminStaff: async () => ({ staffId: actorStaffId }), requireAdminAccess: async () => null, requireOwnerSecurityAccess: async () => null };
       if (name === "@/lib/auth") return { hashEmployeePin: async () => "new-hash" };
       if (name === "@/lib/kds-device") return { isSameOriginRequest: () => true };
@@ -108,7 +108,7 @@ test("the designated owner can save own POS, KDS, and HOS permissions", async ()
   assert.equal(fixture.updates[0].adminEnabled, 1);
 });
 
-test("the designated owner can change own name, login ID, and common PIN", async () => {
+test("the designated owner can change own name and login ID while PIN remains employee-managed", async () => {
   const fixture = createFixture({ staffId: 1, changes: {
     name: "Updated Owner", loginId: "newowner", employeePin: "012345", employeePinConfirm: "012345",
   } });
@@ -117,7 +117,7 @@ test("the designated owner can change own name, login ID, and common PIN", async
   assert.equal((await response.json()).reauthRequired, true);
   assert.equal(fixture.updates[0].name, "Updated Owner");
   assert.equal(fixture.updates[0].adminLoginId, "newowner");
-  assert.equal(fixture.updates[0].employeePinHash, "new-hash");
+  assert.equal(fixture.updates[0].employeePinHash, undefined);
 });
 
 test("the designated owner cannot be disabled or lose ADM access", async () => {
@@ -142,10 +142,13 @@ test("staff list reflects the stored KDS permission even when a PIN is not confi
   const { toStaffSummary } = loadStaffSummaryHelper();
   const summary = toStaffSummary({
     staffId: 9, staffCode: "AUTO-9", name: "Test Employee", role: "STAFF", isActive: 1, posEnabled: 1,
-    hosEnabled: 0, employeePinHash: null, pinHash: null, kdsEnabled: 1, kdsPinHash: null,
+    hosEnabled: 0, employeePinHash: null, kdsEnabled: 1,
     kdsPasswordHash: null, kdsTotpSecretEnc: null, kdsPinChangeRequired: 1,
-    adminLoginId: "staff9", adminPinHash: null, adminEnabled: 0,
+    adminLoginId: "staff9", adminEnabled: 0,
   });
   assert.equal(summary.kdsEnabled, true);
   assert.equal(summary.hasEmployeePin, false);
+  assert.equal("hasLegacyPosPin" in summary, false);
+  assert.equal("hasKdsPin" in summary, false);
+  assert.equal("hasLegacyAdminPin" in summary, false);
 });

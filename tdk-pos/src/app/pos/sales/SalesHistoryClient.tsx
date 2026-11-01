@@ -17,7 +17,7 @@ import PinKeypad from "@/components/PinKeypad";
 import PinAuthPanel from "@/components/PinAuthPanel";
 
 type SalesSummary = { grossSales: number; netSales: number; transactionCount: number; cancellationCount: number; discountAmount: number; discountCount: number; cancelledAmount: number; cardAmount: number; cardCount: number; cashAmount: number; cashCount: number; otherAmount: number; otherCount: number; pendingAmount: number | null; pendingCount: number | null; salesIncludingPending: number | null; countIncludingPending: number | null; tableCount: number; knownGuestCount: number; tableAverage: number | null; guestAverage: number | null; guestCount: number | null; tableGuestAverage: number | null; durationMinutes: number | null; incompleteGuestCount: number };
-type Employee = { loginId: string; role: string; hasPin: boolean };
+type Employee = { loginId: string; hasPin: boolean };
 
 const statusStyle: Record<SaleDisplayStatus, { label: string; className: string }> = {
   COMPLETED: { label: "결제완료", className: "text-blue-700" },
@@ -120,6 +120,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summary, setSummary] = useState<SalesSummary | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [summaryStaffLoading, setSummaryStaffLoading] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState("");
   const [summaryPin, setSummaryPin] = useState("");
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -139,16 +140,24 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
   };
 
   const openSummary = async () => {
+    const requestId = ++summaryRequestId.current;
     setSummaryOpen(true);
     setSummary(null);
     setSummaryPin("");
     setSummaryError("");
+    setEmployees([]);
+    setSummaryStaffLoading(true);
     try {
-      const response = await fetch("/api/staff/active", { cache: "no-store" });
+      const response = await fetch("/api/sales/summary/managers", { cache: "no-store" });
       const result = await response.json() as { success?: boolean; staff?: Employee[]; message?: string };
+      if (requestId !== summaryRequestId.current) return;
       if (!response.ok || !result.success) throw new Error(result.message ?? "직원 목록을 불러올 수 없습니다.");
-      setEmployees((result.staff ?? []).filter(employee => employee.hasPin && (employee.role === "OWNER" || employee.role === "MANAGER")));
-    } catch (error) { setSummaryError(error instanceof Error ? error.message : "직원 목록을 불러올 수 없습니다."); }
+      setEmployees(result.staff ?? []);
+    } catch (error) {
+      if (requestId === summaryRequestId.current) setSummaryError(error instanceof Error ? error.message : "직원 목록을 불러올 수 없습니다.");
+    } finally {
+      if (requestId === summaryRequestId.current) setSummaryStaffLoading(false);
+    }
   };
 
   const authenticateSummary = async (pin: string) => {
@@ -418,7 +427,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
             <strong className="whitespace-nowrap text-right text-base font-extrabold text-slate-900">{value}</strong>
           </div>)}
         </div>{summaryError && <p className="mt-4 font-bold text-red-600">{summaryError}</p>}</div> : <PinAuthPanel
-          emptyMessage={!employees.length ? summaryError || "인증 가능한 관리자가 없습니다." : undefined}
+          emptyMessage={!employees.length ? summaryStaffLoading ? "관리자 목록을 불러오는 중..." : summaryError || "인증 가능한 관리자가 없습니다." : undefined}
           footer={summaryError && employees.length > 0 ? <p className="mt-3 text-center text-sm font-medium text-red-600" role="alert">{summaryError}</p> : undefined}
           keypad={<PinKeypad
             actionDisabled={!selectedEmployee || summaryBusy || summaryPin.length === 0}
@@ -433,7 +442,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
           people={employees}
           pinInput={<PinInput ariaLabel="매출현황 관리자 PIN" className={selectedEmployee ? "border-2 border-blue-600 ring-1 ring-blue-100" : ""} disabled={!selectedEmployee || summaryBusy} maxLength={6} keypadAligned onChange={updateSummaryPin} value={summaryPin} />}
           selectedLoginId={selectedEmployee}
-          selectionDisabled={summaryBusy}
+          selectionDisabled={summaryBusy || summaryStaffLoading}
           scrollablePeople
         />}
       </section></div>}

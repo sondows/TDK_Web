@@ -1,9 +1,10 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { adminSecurityOwners, auditLogs, staffSessions } from "@/db/schema";
+import { adminSecurityOwners, auditLogs, staff, staffSessions } from "@/db/schema";
 import { ADMIN_SESSION_COOKIE_NAME, getCurrentAdminStaff, getOwnerSecurityState } from "@/lib/admin-auth";
-import { hashOwnerSecurityPassword, hashSessionToken, isValidOwnerSecurityPassword, verifySecurityPassword } from "@/lib/auth";
+import { hashProgramPassword, hashSessionToken, isValidProgramPassword } from "@/lib/auth";
+import { verifyMasterPassword } from "@/lib/master-password";
 import { isSameOriginRequest } from "@/lib/kds-device";
 import { getKdsRateLimitIp } from "@/lib/kds-network-server";
 import { clearAdminAuthFailures, isAdminAuthAttemptAllowed, recordAdminAuthFailure } from "@/lib/admin-auth-limit";
@@ -23,38 +24,19 @@ export async function POST(request: Request) {
   if (!token) return Response.json({ success: false }, { status: 401 });
   const sessionHash = hashSessionToken(token);
 
-  if (body.action === "setup") {
-    if (state !== "OWNER_UNCONFIGURED" || typeof body.password !== "string" || !isValidOwnerSecurityPassword(body.password) || body.password !== body.confirm) {
-      return Response.json({ success: false, message: "특수문자를 포함한 10자 이상 비밀번호를 입력하고 확인란과 일치시켜 주세요." }, { status: 400 });
-    }
-    try {
-      const passwordHash = await hashOwnerSecurityPassword(body.password);
-      const [updated] = await db.update(adminSecurityOwners).set({ passwordHash, credentialState: "ACTIVE", updatedAt: new Date() })
-        .where(and(eq(adminSecurityOwners.staffId, actor.staffId), isNull(adminSecurityOwners.passwordHash), inArray(adminSecurityOwners.credentialState, ["SETUP_PENDING", "RESET_REQUIRED"])));
-      if (!updated.affectedRows) return Response.json({ success: false, message: "이미 설정되었거나 OWNER 지정 상태가 변경되었습니다. 새로고침해 주세요." }, { status: 409 });
-      await db.update(staffSessions).set({ ownerReauthenticatedAt: new Date() }).where(and(eq(staffSessions.sessionTokenHash, sessionHash), eq(staffSessions.sessionType, "ADMIN"), eq(staffSessions.status, "ACTIVE")));
-      await db.insert(auditLogs).values({ staffId: actor.staffId, actionType: "OWNER_SECURITY_PASSWORD_SET", entityType: "ADMIN_SECURITY", description: "Initial owner security password configured" });
-      return Response.json({ success: true });
-    } catch (error) {
-      const detail = error as { code?: string; cause?: { code?: string } };
-      console.error("Owner security password setup failed", { code: detail?.code ?? detail?.cause?.code });
-      return Response.json({ success: false, message: "보안 비밀번호를 설정하지 못했습니다." }, { status: 503 });
-    }
-  }
+  if (body.action === "setup") return Response.json({ success: false, message: "Use the employee master-password setup flow." }, { status: 409 });
 
   if (body.action === "verify") {
     if (state !== "NEEDS_REAUTH" && state !== "AUTHORIZED") return invalid(403);
     if (typeof body.password !== "string") return invalid();
     try {
-      if (!await isAdminAuthAttemptAllowed("owner-security", String(actor.staffId), ip)) return invalid(429);
-      const [settings] = await db.select({ hash: adminSecurityOwners.passwordHash, state: adminSecurityOwners.credentialState })
-        .from(adminSecurityOwners).where(eq(adminSecurityOwners.staffId, actor.staffId)).limit(1);
-      if (settings?.state !== "ACTIVE" || !(await verifySecurityPassword(body.password, settings?.hash ?? null))) {
-        const allowed = await recordAdminAuthFailure("owner-security", String(actor.staffId), ip);
+      if (!await isAdminAuthAttemptAllowed("master-password", String(actor.staffId), ip)) return invalid(429);
+      if (!await verifyMasterPassword(actor.staffId, body.password)) {
+        const allowed = await recordAdminAuthFailure("master-password", String(actor.staffId), ip);
         await db.insert(auditLogs).values({ staffId: actor.staffId, actionType: "OWNER_SECURITY_AUTH_FAILED", entityType: "ADMIN_SECURITY" });
         return invalid(allowed ? 401 : 429);
       }
-      await clearAdminAuthFailures("owner-security", String(actor.staffId), ip);
+      await clearAdminAuthFailures("master-password", String(actor.staffId), ip);
       await db.update(staffSessions).set({ ownerReauthenticatedAt: new Date() }).where(and(eq(staffSessions.sessionTokenHash, sessionHash), eq(staffSessions.sessionType, "ADMIN"), eq(staffSessions.status, "ACTIVE")));
       await db.insert(auditLogs).values({ staffId: actor.staffId, actionType: "OWNER_SECURITY_AUTH_SUCCEEDED", entityType: "ADMIN_SECURITY" });
       return Response.json({ success: true });
@@ -66,25 +48,43 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "change") {
-    if (state !== "AUTHORIZED" || typeof body.oldPassword !== "string" || typeof body.newPassword !== "string" || !isValidOwnerSecurityPassword(body.newPassword)) return invalid(403);
+    if (state !== "AUTHORIZED" || typeof body.oldPassword !== "string" || typeof body.newPassword !== "string" ||
+      !isValidProgramPassword(body.newPassword) || body.newPassword !== body.confirm) return invalid(403);
     try {
-      if (!await isAdminAuthAttemptAllowed("owner-security-change", String(actor.staffId), ip)) return invalid(429);
-      const [settings] = await db.select({ hash: adminSecurityOwners.passwordHash, state: adminSecurityOwners.credentialState }).from(adminSecurityOwners).where(eq(adminSecurityOwners.staffId, actor.staffId)).limit(1);
-      if (settings?.state !== "ACTIVE" || !(await verifySecurityPassword(body.oldPassword, settings?.hash ?? null))) {
-        const allowed = await recordAdminAuthFailure("owner-security-change", String(actor.staffId), ip);
+      const scope = "master-password";
+      if (!await isAdminAuthAttemptAllowed(scope, String(actor.staffId), ip)) return invalid(429);
+      const [credential] = await db.select({ hash: staff.securityPasswordHash })
+        .from(staff).where(eq(staff.staffId, actor.staffId)).limit(1);
+      if (!credential?.hash || !await verifyMasterPassword(actor.staffId, body.oldPassword)) {
+        const allowed = await recordAdminAuthFailure(scope, String(actor.staffId), ip);
         return invalid(allowed ? 401 : 429);
       }
-      const nextHash = await hashOwnerSecurityPassword(body.newPassword);
+      if (await verifyMasterPassword(actor.staffId, body.newPassword))
+        return Response.json({ success: false, message: "새 마스터 비밀번호는 현재 비밀번호와 달라야 합니다." }, { status: 400 });
+      const nextHash = await hashProgramPassword(body.newPassword);
       await db.transaction(async tx => {
-        const [updated] = await tx.update(adminSecurityOwners).set({ passwordHash: nextHash, updatedAt: new Date() })
-          .where(and(eq(adminSecurityOwners.staffId, actor.staffId), eq(adminSecurityOwners.passwordHash, settings.hash!)));
-        if (!updated.affectedRows) throw new Error("Owner credential changed during password update");
-        await tx.update(staffSessions).set({ ownerReauthenticatedAt: null }).where(and(eq(staffSessions.staffId, actor.staffId), eq(staffSessions.sessionType, "ADMIN"), eq(staffSessions.status, "ACTIVE")));
-        await tx.insert(auditLogs).values({ staffId: actor.staffId, actionType: "OWNER_SECURITY_PASSWORD_CHANGED", entityType: "ADMIN_SECURITY" });
+        const [current] = await tx.select({ hash: staff.securityPasswordHash, active: staff.isActive,
+          adminEnabled: staff.adminEnabled, terminatedAt: staff.terminatedAt }).from(staff)
+          .where(eq(staff.staffId, actor.staffId)).limit(1).for("update");
+        const [owner] = await tx.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
+          .where(eq(adminSecurityOwners.staffId, actor.staffId)).limit(1).for("update");
+        if (!current || !owner || Number(current.active) !== 1 || current.terminatedAt || Number(current.adminEnabled) !== 1 ||
+          current.hash !== credential.hash) throw new Error("Owner or master credential changed during password update");
+        const now = new Date();
+        await tx.update(staff).set({ securityPasswordHash: nextHash,
+          securityPasswordChangeRequired: 0, updatedAt: now }).where(eq(staff.staffId, actor.staffId));
+        await tx.update(staffSessions).set({ ownerReauthenticatedAt: null })
+          .where(and(eq(staffSessions.staffId, actor.staffId), eq(staffSessions.sessionType, "ADMIN"), eq(staffSessions.status, "ACTIVE")));
+        await tx.insert(auditLogs).values({ staffId: actor.staffId,
+          actionType: "OWNER_MASTER_PASSWORD_CHANGED", entityType: "STAFF", entityId: actor.staffId });
       });
-      await clearAdminAuthFailures("owner-security-change", String(actor.staffId), ip);
+      await clearAdminAuthFailures(scope, String(actor.staffId), ip);
       return Response.json({ success: true, reauthenticate: true });
-    } catch { return Response.json({ success: false, message: "보안 비밀번호를 변경하지 못했습니다." }, { status: 503 }); }
+    } catch (error) {
+      const detail = error as { code?: string; cause?: { code?: string } };
+      console.error("Owner master password change failed", { code: detail.code ?? detail.cause?.code });
+      return Response.json({ success: false, message: "Master password could not be changed." }, { status: 503 });
+    }
   }
   return Response.json({ success: false }, { status: 400 });
 }

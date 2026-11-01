@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Node runs this CommonJS module before Next.js compiles the app. */
 const { timingSafeEqual } = require("node:crypto");
 const { isIP } = require("node:net");
+const { isWindowsDevOwnerSetupEnabled } = require("./src/lib/owner-setup-mode.cjs");
 
 function ipv4Number(value) {
   if (isIP(value) !== 4) return null;
@@ -50,9 +51,13 @@ function prepareKdsIngressHeaders(request, config) {
   delete headers["x-tdk-proxy-origin-secret"];
   delete headers["x-tdk-proxy-client-ip"];
   delete headers["x-tdk-verified-client-ip"];
+  delete headers["x-tdk-verified-https"];
+  delete headers["x-tdk-local-dev"];
+  delete headers["x-tdk-nas-owner-setup"];
   delete headers["x-tdk-kds-client-ip"];
   delete headers["x-tdk-kds-proxy-secret"];
   if (caddyOrigin) {
+    headers["x-tdk-verified-https"] = "1";
     if (typeof proxyClientIp === "string" && isIP(proxyClientIp) !== 0) {
       headers["x-tdk-verified-client-ip"] = proxyClientIp;
     }
@@ -61,6 +66,37 @@ function prepareKdsIngressHeaders(request, config) {
       headers["x-tdk-kds-proxy-secret"] = config.proxySecret;
     }
     return "caddy";
+  }
+
+  // In development, use the kernel-reported peer for rate limits. Forwarded
+  // headers are untrusted here; without this, every local request shares the
+  // same "unverified-client-ip" bucket.
+  if (process.env.NODE_ENV !== "production") {
+    const remoteAddress = request.socket?.remoteAddress;
+    const rateLimitPeer = peerIpv4(remoteAddress) ??
+      (typeof remoteAddress === "string" && isIP(remoteAddress) !== 0 ? remoteAddress : null);
+    if (rateLimitPeer) headers["x-tdk-verified-client-ip"] = rateLimitPeer;
+  }
+
+  // NAS installation mode and Windows test mode both require local socket attestation.
+  // Windows mode is permitted only in development against the isolated test DB.
+  const localPeer = peerIpv4(request.socket?.remoteAddress);
+  const windowsDevSetup = isWindowsDevOwnerSetupEnabled(process.env);
+  const nasSetup = process.env.TDK_NAS_OWNER_SETUP === "1";
+  const localHostConnection = (localPeer === "127.0.0.1" || request.socket?.remoteAddress === "::1") &&
+    /^(localhost|127\.0\.0\.1):\d+$/.test(host);
+  const nasDirectConnection = process.env.NODE_ENV === "production" &&
+    localPeer === process.env.TDK_APP_BIND_HOST && host === config.directHost;
+  if ((windowsDevSetup && localHostConnection) || (nasSetup && (localHostConnection || nasDirectConnection))) {
+    headers["x-tdk-nas-owner-setup"] = "1";
+  }
+
+  const loopbackPeer = request.socket?.remoteAddress;
+  if (process.env.NODE_ENV !== "production" &&
+    (loopbackPeer === "::1" || loopbackPeer === "127.0.0.1" || loopbackPeer === "::ffff:127.0.0.1") &&
+    /^(localhost|127\.0\.0\.1):\d+$/.test(host)) {
+    headers["x-tdk-local-dev"] = "1";
+    return "local-dev";
   }
 
   const peer = peerIpv4(request.socket?.remoteAddress);

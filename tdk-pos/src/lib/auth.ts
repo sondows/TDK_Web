@@ -5,8 +5,9 @@ import { cookies } from "next/headers";
 import { and, eq, gt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { managedDevices, staff, staffSessions } from "@/db/schema";
-import { isValidEmployeePin, isValidPin } from "@/lib/pin";
+import { staff, staffSessions } from "@/db/schema";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
+import { isValidEmployeePin } from "@/lib/pin";
 
 export const SESSION_COOKIE_NAME = "tdk_pos_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
@@ -56,21 +57,11 @@ export function createSessionToken() {
   return randomBytes(32).toString("base64url");
 }
 
-export async function hashPin(pin: string) {
-  if (!isValidPin(pin)) throw new Error("PIN은 숫자 4자리여야 합니다.");
-  return hashNumericPin(pin);
-}
-
 async function hashNumericPin(pin: string) {
   const salt = randomBytes(16).toString("hex");
   const derivedKey = await deriveScryptKey(pin, salt, 16384, 8, 1);
 
   return `scrypt$16384$8$1$${salt}$${derivedKey.toString("hex")}`;
-}
-
-export async function verifyPin(pin: string, storedHash: string | null) {
-  if (!storedHash || !isValidPin(pin)) return false;
-  return verifyNumericPin(pin, storedHash);
 }
 
 export async function hashEmployeePin(pin: string) {
@@ -83,34 +74,17 @@ export async function verifyEmployeePin(pin: string, storedHash: string | null) 
   return verifyNumericPin(pin, storedHash);
 }
 
-/** Unified PIN takes precedence; legacy POS hashes remain valid until that employee is migrated. */
-export async function verifyStaffPin(pin: string, employeePinHash: string | null, legacyPosPinHash: string | null) {
-  return employeePinHash
-    ? verifyEmployeePin(pin, employeePinHash)
-    : verifyPin(pin, legacyPosPinHash);
-}
-
-export const isValidAdminPin = (pin: string) => /^\d{6}$/.test(pin);
-
-export async function hashAdminPin(pin: string) {
-  if (!isValidAdminPin(pin)) throw new Error("관리센터 PIN은 숫자 6자리여야 합니다.");
-  return hashNumericPin(pin);
-}
-
-export async function verifyAdminPin(pin: string, storedHash: string | null) {
-  if (!storedHash || !isValidAdminPin(pin)) return false;
-  return verifyNumericPin(pin, storedHash);
-}
-
-/** The common staff PIN is authoritative; legacy ADM hashes are used only during staged migration. */
-export async function verifyAdminStaffPin(pin: string, employeePinHash: string | null, legacyAdminPinHash: string | null) {
-  return employeePinHash ? verifyEmployeePin(pin, employeePinHash) : verifyAdminPin(pin, legacyAdminPinHash);
-}
-
 export const isValidSecurityPassword = (password: string, minLength = 12) => password.length >= minLength && password.length <= 128;
 
-export const isValidOwnerSecurityPassword = (password: string) =>
-  password.length >= 10 && password.length <= 128 && /[^\p{L}\p{N}\s]/u.test(password);
+/** Staff bootstrap password, separate from both the shared employee PIN and owner second factor. */
+export const isValidProgramPassword = (password: string) =>
+  password.length >= 10 && password.length <= 128 &&
+  /[A-Za-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9\s]/.test(password);
+
+export async function hashProgramPassword(password: string) {
+  if (!isValidProgramPassword(password)) throw new Error("Invalid staff security password policy");
+  return hashSecurityPassword(password, 10);
+}
 
 export async function hashSecurityPassword(password: string, minLength = 12) {
   if (!isValidSecurityPassword(password, minLength)) throw new Error(`Security password must contain ${minLength} to 128 characters.`);
@@ -119,28 +93,9 @@ export async function hashSecurityPassword(password: string, minLength = 12) {
   return `scrypt$16384$8$1$${salt}$${key.toString("hex")}`;
 }
 
-export async function hashOwnerSecurityPassword(password: string) {
-  if (!isValidOwnerSecurityPassword(password)) throw new Error("OWNER security password must be at least 10 characters and contain a special character.");
-  const salt = randomBytes(16).toString("hex");
-  const key = await deriveScryptKey(password, salt, 16384, 8, 1);
-  return `scrypt$16384$8$1$${salt}$${key.toString("hex")}`;
-}
-
 export async function verifySecurityPassword(password: string, storedHash: string | null) {
   if (!storedHash || typeof password !== "string" || password.length > 128) return false;
   return verifyNumericPin(password, storedHash);
-}
-
-export const isValidKdsPin = (pin: string) => /^\d{6}$/.test(pin);
-
-export async function hashKdsPin(pin: string) {
-  if (!isValidKdsPin(pin)) throw new Error("KDS PIN must contain exactly six digits.");
-  return hashNumericPin(pin);
-}
-
-export async function verifyKdsPin(pin: string, storedHash: string | null) {
-  if (!storedHash || !isValidKdsPin(pin)) return false;
-  return verifyNumericPin(pin, storedHash);
 }
 
 export const isValidKdsPassword = (password: string) => password.length >= 12 && password.length <= 128;
@@ -199,6 +154,7 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
       name: staff.name,
       role: staff.role,
       managedDeviceId: staffSessions.managedDeviceId,
+      trustTokenId: staffSessions.trustTokenId,
     })
     .from(staffSessions)
     .innerJoin(staff, eq(staffSessions.staffId, staff.staffId))
@@ -223,25 +179,8 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
     name: currentStaff.name,
     role: currentStaff.role,
   };
-  if (currentStaff.managedDeviceId !== null) {
-    const deviceToken = cookieStore.get("tdk_pos_device")?.value;
-    if (!deviceToken) return null;
-    const deviceTokenHash = createHash("sha256").update(deviceToken).digest("hex");
-    const [device] = await db.select({ deviceId: managedDevices.deviceId, expiresAt: managedDevices.expiresAt })
-      .from(managedDevices).where(and(eq(managedDevices.deviceId, currentStaff.managedDeviceId),
-        eq(managedDevices.tokenHash, deviceTokenHash), eq(managedDevices.deviceType, "POS"),
-        eq(managedDevices.status, "APPROVED"), eq(managedDevices.posEnabled, 1))).limit(1);
-    if (!device?.expiresAt || device.expiresAt.getTime() <= Date.now()) return null;
-    return member;
-  }
-  const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
-    eq(managedDevices.deviceType, "POS"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.posEnabled, 1),
-  ));
-  if (approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now())) return null;
-  // Keep pre-registration POS sessions alive during rollout. New sessions are
-  // owner-only until the first POS device is approved; approving it logs these
-  // legacy sessions out in the device-management transaction.
-  return member;
+  const trust = await getCurrentProgramTrust("POS", { tokenId: currentStaff.trustTokenId ?? undefined });
+  return trust && currentStaff.trustTokenId === trust.tokenId ? member : null;
 }
 
 /** Verifies a real active employee without creating a browser login session. */
@@ -264,7 +203,6 @@ export async function verifyActiveStaffCredentials(
       role: staff.role,
       posEnabled: staff.posEnabled,
       employeePinHash: staff.employeePinHash,
-      pinHash: staff.pinHash,
     })
     .from(staff)
     .where(and(numericId ? eq(staff.staffId, numericId) : sql`LOWER(${staff.adminLoginId}) = ${normalizedLoginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000")))

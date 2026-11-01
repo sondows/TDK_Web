@@ -74,4 +74,13 @@ test("external Host keeps management and read-only assets while rejecting unknow
     assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
   }
   assert.equal(isExternalAdminPathAllowed("/icons/tdk-pos-192.png", "POST"), false);
+  for (const path of ["/api/program-trust/change-temporary-password", "/api/program-trust/pin",
+    "/api/program-trust/master-recovery/status", "/api/program-trust/master-recovery/register"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), true);
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), false);
+  }
+  for (const path of ["/api/admin-center/trust/initial-master/status",
+    "/api/program-trust/master-recovery/register-initial"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+  }
 });

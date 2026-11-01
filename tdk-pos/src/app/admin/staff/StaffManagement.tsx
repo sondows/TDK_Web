@@ -93,8 +93,10 @@ export default function StaffManagement() {
                 <td>{row.kdsEnabled ? "사용" : "미사용"}</td>
                 <td>{hosPermissionAvailable ? row.hosEnabled ? "사용" : "미사용" : "미설정"}</td>
                 <td>{row.adminEnabled ? "사용" : "미사용"}</td>
-                <td><span className={row.isActive ? styles.staffStatusActive : styles.staffStatusInactive}>{row.isActive ? "사용" : "사용중지"}</span></td>
-                <td>{!row.isShared && <button className={styles.staffEditButton} onClick={() => setEditing(row)} type="button">수정</button>}{row.isShared && <span className="text-xs text-slate-500">로그인 제외 계정</span>}</td>
+                <td><span className={row.isActive ? styles.staffStatusActive : styles.staffStatusInactive}>{row.isTerminated ? "퇴사" : row.isActive ? "사용" : "사용중지"}</span></td>
+                <td>{!row.isShared && !row.isTerminated && <button className={styles.staffEditButton} onClick={() => setEditing(row)} type="button">수정</button>}
+                  {row.isShared && <span className="text-xs text-slate-500">로그인 제외 계정</span>}
+                  {row.isTerminated && <span className="text-xs text-slate-500">퇴사 완료</span>}</td>
               </tr>)}
           </tbody>
         </table>

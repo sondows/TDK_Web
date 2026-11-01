@@ -5,11 +5,11 @@ import { validateStaffDraft } from "./staff-management.ts";
 const draft = {
   name: "직원", loginId: "staff01", role: "STAFF", isActive: true,
   posEnabled: true, kdsEnabled: false, hosEnabled: false,
-  employeePin: "012345", employeePinConfirm: "012345",
+  employeePin: "", employeePinConfirm: "",
   adminEnabled: true,
 };
 
-test("POS role, employee PIN, and ADM enablement stay independent", () => {
+test("POS role and ADM enablement stay independent of PIN enrollment", () => {
   assert.deepEqual(validateStaffDraft(draft), {});
   assert.deepEqual(validateStaffDraft({ ...draft, role: "OWNER" }), {});
 });
@@ -23,15 +23,14 @@ test("employee login IDs must be unique-format lowercase identifiers", () => {
   assert.ok(validateStaffDraft({ ...draft, loginId: "ok_user9" }).loginId === undefined);
 });
 
-test("new program-enabled employees require one matching six-digit employee PIN", () => {
+test("administrators cannot set another employee's PIN through staff management", () => {
   assert.deepEqual(validateStaffDraft(draft), {});
-  assert.ok(validateStaffDraft({ ...draft, employeePin: "12345", employeePinConfirm: "12345" }).employeePin);
-  assert.ok(validateStaffDraft({ ...draft, employeePinConfirm: "654321" }).employeePinConfirm);
-  assert.ok(validateStaffDraft({ ...draft, employeePin: "", employeePinConfirm: "", kdsEnabled: true }).employeePin);
-  assert.ok(validateStaffDraft({ ...draft, employeePin: "", employeePinConfirm: "", posEnabled: false, hosEnabled: true }).employeePin);
+  assert.ok(validateStaffDraft({ ...draft, employeePin: "123456", employeePinConfirm: "123456" }).employeePin);
+  assert.deepEqual(validateStaffDraft({ ...draft, kdsEnabled: true }), {});
+  assert.deepEqual(validateStaffDraft({ ...draft, posEnabled: false, hosEnabled: true }), {});
 });
 
-test("employees with program access require a common PIN before they can use the unified login", () => {
-  const existing = { posEnabled: true, kdsEnabled: true, hosEnabled: false, adminEnabled: true, hasLegacyAdminPin: true, hasEmployeePin: false, hasLegacyPosPin: true, hasKdsPin: true };
-  assert.ok(validateStaffDraft({ ...draft, employeePin: "", employeePinConfirm: "" }, existing).employeePin);
+test("an existing employee without a PIN remains editable while PIN setup is pending", () => {
+  const existing = { posEnabled: true, kdsEnabled: true, hosEnabled: false, adminEnabled: true, hasEmployeePin: false };
+  assert.deepEqual(validateStaffDraft(draft, existing), {});
 });

@@ -3,7 +3,8 @@ import "server-only";
 import { cookies } from "next/headers";
 import { and, eq, gt, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { adminSecurityOwners, managedDevices, staff, staffSessions } from "@/db/schema";
+import { adminSecurityOwners, staff, staffSessions } from "@/db/schema";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
 import { createSessionToken, hashSessionToken, sessionCookieSecure, type CurrentStaff } from "@/lib/auth";
 
 export const ADMIN_SESSION_COOKIE_NAME = "tdk_admin_session";
@@ -37,6 +38,7 @@ export async function getCurrentAdminStaff(): Promise<CurrentStaff | null> {
   const [member] = await db.select({
     staffId: staff.staffId,
     managedDeviceId: staffSessions.managedDeviceId,
+    trustTokenId: staffSessions.trustTokenId,
     staffCode: staff.staffCode,
     loginId: staff.adminLoginId,
     name: staff.name,
@@ -44,25 +46,15 @@ export async function getCurrentAdminStaff(): Promise<CurrentStaff | null> {
   }).from(staffSessions).innerJoin(staff, eq(staffSessions.staffId, staff.staffId)).where(and(
     eq(staffSessions.sessionTokenHash, hashSessionToken(token)),
     eq(staffSessions.status, "ACTIVE"),
+    eq(staffSessions.sessionType, "ADMIN"),
     gt(staffSessions.loggedInAt, cutoff),
     eq(staff.isActive, 1),
     ne(staff.staffCode, "000"),
     eq(staff.adminEnabled, 1),
   )).limit(1);
   if (!member) return null;
-  if (member.managedDeviceId !== null) {
-    const [device] = await db.select({ deviceId: managedDevices.deviceId, expiresAt: managedDevices.expiresAt })
-      .from(managedDevices).where(and(eq(managedDevices.deviceId, member.managedDeviceId),
-        eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1))).limit(1);
-    return device?.expiresAt && device.expiresAt.getTime() > Date.now() ? member : null;
-  }
-  const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
-    eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1),
-  ));
-  if (approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now())) return null;
-  const [recoveryOwner] = await db.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
-    .where(eq(adminSecurityOwners.staffId, member.staffId)).limit(1);
-  return recoveryOwner ? member : null;
+  const trust = await getCurrentProgramTrust("ADM", { tokenId: member.trustTokenId ?? undefined });
+  return trust && member.trustTokenId === trust.tokenId ? member : null;
 }
 
 export type OwnerSecurityState = "NOT_OWNER" | "OWNER_UNCONFIGURED" | "NEEDS_REAUTH" | "AUTHORIZED";
@@ -74,8 +66,7 @@ export async function getOwnerSecurityState(): Promise<OwnerSecurityState> {
     staffId: staff.staffId, isActive: staff.isActive,
     adminEnabled: staff.adminEnabled,
     ownerStaffId: adminSecurityOwners.staffId,
-    passwordHash: adminSecurityOwners.passwordHash,
-    credentialState: adminSecurityOwners.credentialState,
+    masterPasswordHash: staff.securityPasswordHash,
     ownerReauthenticatedAt: staffSessions.ownerReauthenticatedAt,
   }).from(staffSessions)
     .innerJoin(staff, eq(staffSessions.staffId, staff.staffId))
@@ -84,7 +75,7 @@ export async function getOwnerSecurityState(): Promise<OwnerSecurityState> {
       eq(staffSessions.status, "ACTIVE"), eq(staff.isActive, 1), eq(staff.adminEnabled, 1), ne(staff.staffCode, "000")))
     .limit(1);
   if (!record || record.ownerStaffId !== record.staffId) return "NOT_OWNER";
-  if (record.credentialState !== "ACTIVE" || !record.passwordHash) return "OWNER_UNCONFIGURED";
+  if (!record.masterPasswordHash) return "OWNER_UNCONFIGURED";
   const freshAfter = new Date(Date.now() - 5 * 60 * 1000);
   return record.ownerReauthenticatedAt && record.ownerReauthenticatedAt >= freshAfter ? "AUTHORIZED" : "NEEDS_REAUTH";
 }

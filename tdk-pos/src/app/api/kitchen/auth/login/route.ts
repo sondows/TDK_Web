@@ -1,12 +1,13 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { auditLogs, managedDevices, staff, staffSessions } from "@/db/schema";
+import { auditLogs, programTrustTokens, staff, staffSessions } from "@/db/schema";
 import { createSessionToken, hashSessionToken, verifyEmployeePin } from "@/lib/auth";
-import { clearKdsLoginAttempts, isKdsLoginAttemptAllowed, recordKdsLoginFailure } from "@/lib/kds-login-limit";
+import { clearAdminAuthFailures, isAdminAuthAttemptAllowed, recordAdminAuthFailure } from "@/lib/admin-auth-limit";
 import { KDS_SESSION_COOKIE_NAME, kdsSessionCookieOptions } from "@/lib/kds-auth";
-import { getCurrentKdsDevice, kdsCookieSecureForRequest, reserveKdsIpAttempt, isSameOriginRequest } from "@/lib/kds-device";
-import { getKdsNetworkContext } from "@/lib/kds-network-server";
+import { kdsCookieSecureForRequest, isSameOriginRequest } from "@/lib/kds-device";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
+import { getKdsRateLimitIp } from "@/lib/kds-network-server";
 import { getKdsAuthSchemaError, getKdsForeignKeyViolation } from "@/lib/kds-auth-errors";
 
 const failure = (status = 401, message = "Employee ID or KDS PIN is incorrect.", code?: string) => NextResponse.json(
@@ -19,55 +20,52 @@ export async function POST(request: Request) {
   const pin = typeof body?.pin === "string" ? body.pin : "";
   if (!/^[a-z][a-z0-9._-]{2,31}$/.test(loginId)) return failure();
   if (!/^\d{6}$/.test(pin)) return failure();
-  let authStage = "ip_attempt_limit";
+  let authStage = "trust_check";
   try {
-    if (!await reserveKdsIpAttempt()) return failure(429, "Too many attempts from this network. Try again in 15 minutes.", "KDS_IP_RATE_LIMIT");
+    const trust = await getCurrentProgramTrust("KDS", { loginId });
+    if (!trust) return failure(403, "먼저 ID와 마스터 비밀번호로 인증해 주세요.", "TRUST_REQUIRED");
     authStage = "employee_lookup";
     const candidates = await db.select({
       staffId: staff.staffId, employeePinHash: staff.employeePinHash,
       isActive: staff.isActive, kdsEnabled: staff.kdsEnabled,
       staffCode: staff.staffCode,
-    }).from(staff).where(sql`LOWER(${staff.adminLoginId}) = ${loginId}`).limit(2);
+    }).from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`,
+      isNull(staff.terminatedAt))).limit(2);
     const candidate = candidates.length === 1 ? candidates[0] : null;
     if (!candidate || Number(candidate.isActive) !== 1 || candidate.staffCode === "000") {
-      if (!await isKdsLoginAttemptAllowed(null, loginId)) return failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
-      const allowed = await recordKdsLoginFailure(null, loginId);
-      return allowed ? failure(401, "Employee ID or KDS PIN is incorrect.") : failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
+      return failure(401, "Employee ID or KDS PIN is incorrect.");
     }
+    if (Number(candidate.kdsEnabled) !== 1)
+      return failure(403, "KDS access is not enabled for this employee. Contact an administrator.", "KDS_PERMISSION_DENIED");
+    if (!candidate.employeePinHash) return failure(403, "개인 PIN이 설정되지 않았습니다. 최초 인증 화면에서 본인이 설정해 주세요.", "EMPLOYEE_PIN_NOT_CONFIGURED");
     authStage = "employee_attempt_limit";
-    if (!await isKdsLoginAttemptAllowed(candidate.staffId, loginId)) return failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
-    if (!candidate.employeePinHash) return failure(403, "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요.", "EMPLOYEE_PIN_NOT_CONFIGURED");
+    const failureScope = "employee-pin";
+    const account = String(candidate.staffId);
+    const ip = await getKdsRateLimitIp();
+    if (!await isAdminAuthAttemptAllowed(failureScope, account, ip))
+      return failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
     authStage = "common_pin_verification";
     const pinMatches = await verifyEmployeePin(pin, candidate.employeePinHash);
     if (!pinMatches) {
-      const allowed = await recordKdsLoginFailure(candidate.staffId, loginId);
+      const allowed = await recordAdminAuthFailure(failureScope, account, ip);
       await db.insert(auditLogs).values({ staffId: candidate.staffId, actionType: "KDS_LOGIN_FAILED", entityType: "KDS_AUTH", entityId: candidate.staffId, description: "invalid PIN" });
       return allowed ? failure() : failure(429, "Too many attempts. Try again in 15 minutes.", "KDS_EMPLOYEE_RATE_LIMIT");
     }
     authStage = "clear_login_attempts";
-    await clearKdsLoginAttempts(candidate.staffId);
-    if (Number(candidate.kdsEnabled) !== 1) return failure(403, "KDS access is not enabled for this employee. Contact an administrator.", "KDS_PERMISSION_DENIED");
-    authStage = "device_and_network_policy";
-    const network = await getKdsNetworkContext();
-    const device = await getCurrentKdsDevice();
-    const allowed = network.isInternal || Boolean(device);
+    await clearAdminAuthFailures(failureScope, account, ip);
     authStage = "login_audit";
     await db.insert(auditLogs).values({
-      staffId: candidate.staffId, actionType: allowed ? "KDS_LOGIN_SUCCESS" : "KDS_LOGIN_FAILED",
+      staffId: candidate.staffId, actionType: "KDS_LOGIN_SUCCESS",
       entityType: "KDS_AUTH", entityId: candidate.staffId,
-      description: `staffId=${candidate.staffId}; network=${network.isInternal ? "internal" : "external"}; trustedDevice=${device ? "yes" : "no"}`,
+      description: `staffId=${candidate.staffId}; programTrust=yes`,
     });
-    if (!allowed) return failure(403, "This device is not approved or its registration has expired. Submit a request from Register device.", "DEVICE_APPROVAL_REQUIRED");
     const token = createSessionToken();
     authStage = "session_create";
     await db.insert(staffSessions).values({
-      staffId: candidate.staffId, managedDeviceId: device?.deviceId ?? null,
+      staffId: candidate.staffId, trustTokenId: trust.tokenId,
       sessionTokenHash: hashSessionToken(token), sessionType: "KDS", status: "ACTIVE",
     });
-    if (device) {
-      authStage = "device_last_used_update";
-      await db.update(managedDevices).set({ lastUsedAt: new Date() }).where(eq(managedDevices.deviceId, device.deviceId));
-    }
+    await db.update(programTrustTokens).set({ lastUsedAt: new Date() }).where(eq(programTrustTokens.tokenId, trust.tokenId));
     const response = NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });
     response.cookies.set(KDS_SESSION_COOKIE_NAME, token, { ...kdsSessionCookieOptions, secure: kdsCookieSecureForRequest(request) });
     return response;

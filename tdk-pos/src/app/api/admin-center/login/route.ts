@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { adminSecurityOwners, auditLogs, managedDevices, staff, staffSessions } from "@/db/schema";
+import { auditLogs, programTrustTokens, staff, staffSessions } from "@/db/schema";
 import { hashSessionToken, verifyEmployeePin } from "@/lib/auth";
 import { ADMIN_SESSION_COOKIE_NAME, adminSessionCookieOptions, createAdminSessionToken } from "@/lib/admin-auth";
 import { clearAdminAuthFailures, isAdminAuthAttemptAllowed, recordAdminAuthFailure } from "@/lib/admin-auth-limit";
 import { getKdsRateLimitIp } from "@/lib/kds-network-server";
-import { getCurrentAdmDevice } from "@/lib/kds-device";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
 import { isValidEmployeePin } from "@/lib/pin";
 
 const failure = () => NextResponse.json({ success: false, message: "직원 또는 PIN을 확인해 주세요." }, { status: 401 });
@@ -23,48 +23,40 @@ export async function POST(request: Request) {
   if (!/^[a-z][a-z0-9._-]{2,31}$/.test(loginId) || !isValidEmployeePin(pin)) return failure();
   const ip = await getKdsRateLimitIp();
   try {
-    if (!await isAdminAuthAttemptAllowed("adm-login", loginId, ip)) return NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429 });
+    const trust = await getCurrentProgramTrust("ADM", { loginId });
+    if (!trust) return NextResponse.json({ success: false, code: "TRUST_REQUIRED",
+      message: "먼저 ID와 마스터 비밀번호로 인증해 주세요." }, { status: 403 });
     const [candidate] = await db.select({ staffId: staff.staffId, employeePinHash: staff.employeePinHash }).from(staff).where(and(
       sql`LOWER(${staff.adminLoginId}) = ${loginId}`,
       eq(staff.isActive, 1),
+      isNull(staff.terminatedAt),
       eq(staff.adminEnabled, 1),
       ne(staff.staffCode, "000"),
     )).limit(1);
     if (candidate && !candidate.employeePinHash) {
-      return NextResponse.json({ success: false, code: "EMPLOYEE_PIN_NOT_CONFIGURED", message: "직원 공통 PIN이 설정되지 않았습니다. 관리자에게 PIN 설정을 요청해 주세요." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ success: false, code: "EMPLOYEE_PIN_NOT_CONFIGURED", message: "개인 PIN이 설정되지 않았습니다. 최초 인증 화면에서 본인이 설정해 주세요." }, { status: 403, headers: { "Cache-Control": "no-store" } });
     }
+    if (!candidate) return failure();
+    const failureScope = "employee-pin";
+    const account = String(candidate.staffId);
+    if (!await isAdminAuthAttemptAllowed(failureScope, account, ip))
+      return NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429 });
     const validPin = candidate?.employeePinHash && await verifyEmployeePin(pin, candidate.employeePinHash);
-    if (!candidate || !validPin) {
-      const allowed = await recordAdminAuthFailure("adm-login", loginId, ip);
-      await db.insert(auditLogs).values({ staffId: candidate?.staffId ?? null, actionType: "ADM_LOGIN_FAILED", entityType: "ADMIN_SESSION" }).catch(() => undefined);
+    if (!validPin) {
+      const allowed = await recordAdminAuthFailure(failureScope, account, ip);
+      await db.insert(auditLogs).values({ staffId: candidate.staffId, actionType: "ADM_LOGIN_FAILED", entityType: "ADMIN_SESSION" }).catch(() => undefined);
       if (!allowed) return NextResponse.json({ success: false, message: "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요." }, { status: 429 });
       return failure();
     }
 
-    const currentDevice = await getCurrentAdmDevice();
-    const approvedDevices = await db.select({ expiresAt: managedDevices.expiresAt }).from(managedDevices).where(and(
-      eq(managedDevices.deviceType, "ADM"), eq(managedDevices.status, "APPROVED"), eq(managedDevices.admEnabled, 1),
-    ));
-    const hasUsableApprovedDevice = approvedDevices.some(device => device.expiresAt && device.expiresAt.getTime() > Date.now());
-    let isRecoveryOwner = false;
-    if (!hasUsableApprovedDevice) {
-      const [owner] = await db.select({ staffId: adminSecurityOwners.staffId }).from(adminSecurityOwners)
-        .where(eq(adminSecurityOwners.staffId, candidate.staffId)).limit(1);
-      isRecoveryOwner = Boolean(owner);
-    }
-    if (!currentDevice && (hasUsableApprovedDevice || !isRecoveryOwner)) {
-      return NextResponse.json({ success: false, code: "DEVICE_APPROVAL_REQUIRED",
-        message: "이 ADM 기기는 아직 승인되지 않았습니다. 기기등록 탭에서 승인 요청을 해 주세요." },
-      { status: 403, headers: { "Cache-Control": "no-store" } });
-    }
-
     const token = createAdminSessionToken();
     await db.transaction(async tx => {
-      await tx.insert(staffSessions).values({ staffId: candidate.staffId, managedDeviceId: currentDevice?.deviceId ?? null,
+      await tx.insert(staffSessions).values({ staffId: candidate.staffId, trustTokenId: trust.tokenId,
         sessionTokenHash: hashSessionToken(token), sessionType: "ADMIN", status: "ACTIVE" });
       await tx.insert(auditLogs).values({ staffId: candidate.staffId, actionType: "ADM_LOGIN_SUCCEEDED", entityType: "ADMIN_SESSION" });
+      await tx.update(programTrustTokens).set({ lastUsedAt: new Date() }).where(eq(programTrustTokens.tokenId, trust.tokenId));
     });
-    await clearAdminAuthFailures("adm-login", loginId, ip);
+    await clearAdminAuthFailures(failureScope, account, ip);
     const response = NextResponse.json({ success: true });
     response.cookies.set(ADMIN_SESSION_COOKIE_NAME, token, adminSessionCookieOptions);
     return response;

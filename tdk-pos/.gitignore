@@ -43,3 +43,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Encrypted local recovery snapshots
+/checkpoints/*.dpapi
+
+# Restricted credential-hash backups for approved local cleanup
+/checkpoints/private-staff-cleanup/

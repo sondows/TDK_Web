@@ -2,10 +2,13 @@ import { and, asc, eq, isNotNull, ne } from "drizzle-orm";
 
 import { db } from "@/db";
 import { staff } from "@/db/schema";
+import { getCurrentProgramTrust } from "@/lib/program-trust";
 
 /** Publicly safe identity list used by the personal POS login screen. */
 export async function GET() {
   try {
+    if (!await getCurrentProgramTrust("POS")) return Response.json(
+      { success: false, code: "TRUST_REQUIRED" }, { status: 403, headers: { "Cache-Control": "no-store" } });
     const employees = await db
       .select({
         loginId: staff.adminLoginId,

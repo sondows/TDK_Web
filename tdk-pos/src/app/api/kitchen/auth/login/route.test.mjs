@@ -5,24 +5,29 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
-function loadRoute(dbError, logged) {
+function loadRoute(dbError, logged, trust = { tokenId: 1 }, ipAttemptResult = "allowed") {
   const source = readFileSync(resolve(import.meta.dirname, "route.ts"), "utf8");
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const loaded = { exports: {} };
   const response = { json: async () => null };
   const nextResponse = { json: (body, init = {}) => ({ body, status: init.status ?? 200, headers: init.headers, cookies: { set() {} } }) };
   const db = { select: () => ({ from: () => ({ where: () => ({ limit: async () => { throw dbError; } }) }) }) };
+  const rateLimitScopes = [];
   runInNewContext(js, {
     module: loaded, exports: loaded.exports, process: { env: { DB_NAME: "TDK_POS" } }, console: { error: (...args) => logged.push(args) },
     Number, String, Set, Promise, Date, Math, Boolean,
-    require: name => name === "drizzle-orm" ? { eq: () => ({}), sql: () => ({}) }
+    require: name => name === "drizzle-orm" ? { and: (...values) => values, eq: () => ({}), isNull: () => ({}), sql: () => ({}) }
       : name === "next/server" ? { NextResponse: nextResponse }
         : name === "@/db" ? { db }
           : name === "@/db/schema" ? { auditLogs: {}, managedDevices: { deviceId: "device_id" }, staff: { staffId: "staff_id", employeePinHash: "employee_pin_hash", isActive: "is_active", kdsEnabled: "kds_enabled", kdsPinChangeRequired: "kds_pin_change_required", staffCode: "staff_code", adminLoginId: "admin_login_id" }, staffSessions: {} }
             : name === "@/lib/auth" ? { createSessionToken: () => "secret", hashSessionToken: () => "hash", verifyEmployeePin: async () => true }
-              : name === "@/lib/kds-login-limit" ? { clearKdsLoginAttempts: async () => {}, isKdsLoginAttemptAllowed: async () => true, recordKdsLoginFailure: async () => true }
+              : name === "@/lib/admin-auth-limit" ? { clearAdminAuthFailures: async () => {},
+                isAdminAuthAttemptAllowed: async () => true, recordAdminAuthFailure: async () => true }
                 : name === "@/lib/kds-auth" ? { KDS_SESSION_COOKIE_NAME: "kds", kdsSessionCookieOptions: {} }
-                  : name === "@/lib/kds-device" ? { getCurrentKdsDevice: async () => null, kdsCookieSecureForRequest: () => true, reserveKdsIpAttempt: async () => true, isSameOriginRequest: () => true }
+                  : name === "@/lib/kds-device" ? { kdsCookieSecureForRequest: () => true,
+                    reserveKdsIpAttempt: async scope => { rateLimitScopes.push(scope); return ipAttemptResult; },
+                    isSameOriginRequest: () => true }
+                    : name === "@/lib/program-trust" ? { getCurrentProgramTrust: async () => trust }
                     : name === "@/lib/kds-network-server" ? { getKdsNetworkContext: async () => ({ isInternal: true }) }
                       : name === "@/lib/kds-auth-errors" ? { getKdsForeignKeyViolation: () => null, getKdsAuthSchemaError: error => {
                         const code = error.code ?? error.cause?.code;
@@ -30,8 +35,28 @@ function loadRoute(dbError, logged) {
                       } }
                         : (() => { throw new Error(`Unexpected import: ${name}`); })(),
   });
-  return { post: loaded.exports.POST, response };
+  return { post: loaded.exports.POST, response, rateLimitScopes };
 }
+
+test("KDS PIN login cannot reach employee lookup without a program trust token", async () => {
+  const logged = [];
+  const { post } = loadRoute(new Error("DB must not be queried"), logged, null);
+  const result = await post({ json: async () => ({ loginId: "employee", pin: "123456" }) });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.code, "TRUST_REQUIRED");
+  assert.equal(logged.length, 0);
+});
+
+test("KDS PIN auth does not reserve the general IP request limiter before credential verification", async () => {
+  const logged = [];
+  const { post, rateLimitScopes } = loadRoute(new Error("PIN lookup must not run"), logged,
+    { tokenId: 1 }, "network-limited");
+  const result = await post({ json: async () => ({ loginId: "employee", pin: "123456" }) });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, "KDS_AUTH_UNAVAILABLE");
+  assert.deepEqual(rateLimitScopes, []);
+  assert.equal(logged.length, 1);
+});
 
 test("missing KDS auth schema returns a distinct 503 without logging SQL or credentials", async () => {
   const logged = [];
