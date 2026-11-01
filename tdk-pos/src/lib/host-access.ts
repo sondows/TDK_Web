@@ -12,6 +12,10 @@ export function hostnameFromHeader(hostHeader: string | null): string | null {
 export function isExternalAdminHost(hostHeader: string | null): boolean {
   return hostnameFromHeader(hostHeader) === EXTERNAL_ADMIN_HOST;
 }
+/** This marker is trustworthy only after server.cjs has sanitized request headers. */
+export function hasVerifiedExternalHttpsIngress(headers: Pick<Headers, "get">): boolean {
+  return headers.get("x-tdk-verified-https") === "1";
+}
 export function isKnownInternalHost(hostHeader: string | null, configuredHosts = process.env.POS_INTERNAL_HOSTS): boolean {
   const hostname = hostnameFromHeader(hostHeader);
   if (!hostname) return false;
@@ -57,8 +61,8 @@ export function isExternalAdminPathAllowed(pathname: string, method: string): bo
   return isAdminPageOrApi(pathname) || isPathOrChild(pathname, "/api/customers")
     || pathname === "/api/pos-settings/business-day" || pathname === "/api/pos-settings/takeout-preparation";
 }
-export function isExternalAliasTargetAllowed(surface: ExternalSurface, target: string, method: string, trustedNetwork: boolean): boolean {
-  if (surface === "pos") return trustedNetwork && (isExternalPosPath(target) || target === "/manifest.webmanifest");
+export function isExternalAliasTargetAllowed(surface: ExternalSurface, target: string, method: string, verifiedIngress: boolean): boolean {
+  if (surface === "pos") return verifiedIngress && (isExternalPosPath(target) || target === "/manifest.webmanifest");
   if (surface === "kds") return isExternalKdsPath(target) || target === "/manifest.webmanifest";
   return isExternalAdminPathAllowed(target, method);
 }

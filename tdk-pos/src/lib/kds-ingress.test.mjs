@@ -60,6 +60,7 @@ test("only a valid Caddy attestation survives on the public host", () => {
   });
   assert.equal(ingress.prepareKdsIngressHeaders(approved, config), "caddy");
   assert.equal(approved.headers["x-tdk-proxy-origin-secret"], undefined);
+  assert.equal(approved.headers["x-tdk-verified-https"], "1");
   assert.equal(networkOf(approved).isInternal, true);
 
   const external = request("tdkon.myasustor.com", "172.18.0.2", {
@@ -72,9 +73,10 @@ test("only a valid Caddy attestation survives on the public host", () => {
 
   const forged = request("tdkon.myasustor.com", "198.51.100.30", {
     "x-tdk-kds-client-ip": "192.168.0.54", "x-tdk-kds-proxy-secret": "b".repeat(64),
-    "x-tdk-verified-client-ip": "192.168.0.54",
+    "x-tdk-verified-client-ip": "192.168.0.54", "x-tdk-verified-https": "1",
   });
   assert.equal(ingress.prepareKdsIngressHeaders(forged, config), "untrusted");
+  assert.equal(forged.headers["x-tdk-verified-https"], undefined);
   assert.equal(networkOf(forged).isInternal, false);
   assert.equal(forged.headers["x-tdk-verified-client-ip"], "198.51.100.30");
 });

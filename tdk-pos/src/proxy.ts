@@ -7,10 +7,10 @@ import {
   isExternalAdminPathAllowed,
   isExternalKdsPath,
   isExternalPosPath,
+  hasVerifiedExternalHttpsIngress,
   isKnownInternalHost,
   internalCanonicalPath,
 } from "@/lib/host-access";
-import { isTrustedPosNetwork } from "@/lib/kds-network";
 
 function withSearch(pathname: string, request: NextRequest): URL {
   const url = new URL(pathname, request.url);
@@ -49,15 +49,14 @@ export function proxy(request: NextRequest) {
   // Never trust a browser-supplied surface marker; only alias rewrites add this header.
   const externalHeaders = new Headers(request.headers);
   externalHeaders.delete("x-tdk-external-surface");
-  const trustedNetwork = isTrustedPosNetwork(request.headers, {
-    proxySecret: process.env.KDS_PROXY_SHARED_SECRET,
-    lanCidrs: process.env.KDS_INTERNAL_CIDRS,
-    vpnCidrs: process.env.KDS_INTERNAL_VPN_CIDRS,
-  });
+  // server.cjs removes any client-supplied value and sets this only after a valid
+  // Caddy origin-secret check. POS access is gated by trusted HTTPS ingress;
+  // employee identity, program permission and session checks remain in the APIs.
+  const verifiedIngress = hasVerifiedExternalHttpsIngress(request.headers);
   externalHeaders.delete("x-tdk-trusted-network");
   const protectedSurfacePath = isExternalPosPath(pathname);
 
-  if (protectedSurfacePath && !trustedNetwork) {
+  if (protectedSurfacePath && !verifiedIngress) {
     return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
   }
 
@@ -65,13 +64,13 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(withSearch("/tdkadm", request), 307);
   }
 
-  if (pathname === "/tdkkds/kds.webmanifest" || pathname === "/tdkadm/manifest.webmanifest" || (pathname === "/tdkpos/manifest.webmanifest" && trustedNetwork)) {
+  if (pathname === "/tdkkds/kds.webmanifest" || pathname === "/tdkadm/manifest.webmanifest" || (pathname === "/tdkpos/manifest.webmanifest" && verifiedIngress)) {
     return NextResponse.next({ request: { headers: externalHeaders } });
   }
 
   const canonicalPath = externalCanonicalPath(pathname);
   if (canonicalPath && (request.method === "GET" || request.method === "HEAD")) {
-    if (isExternalPosPath(pathname) && !trustedNetwork) {
+    if (isExternalPosPath(pathname) && !verifiedIngress) {
       return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
     }
     return NextResponse.redirect(withSearch(canonicalPath, request), 307);
@@ -79,7 +78,7 @@ export function proxy(request: NextRequest) {
 
   const alias = externalAliasTarget(pathname);
   if (alias) {
-    const targetAllowed = isExternalAliasTargetAllowed(alias.surface, alias.target, request.method, trustedNetwork);
+    const targetAllowed = isExternalAliasTargetAllowed(alias.surface, alias.target, request.method, verifiedIngress);
     if (!targetAllowed) {
       return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
     }
@@ -89,7 +88,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.rewrite(target, { request: { headers: forwardedHeaders } });
   }
 
-  if (protectedSurfacePath && trustedNetwork) {
+  if (protectedSurfacePath && verifiedIngress) {
     return NextResponse.next({ request: { headers: externalHeaders } });
   }
   if (isExternalKdsPath(pathname)) {

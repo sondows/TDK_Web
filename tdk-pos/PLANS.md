@@ -1302,3 +1302,36 @@
 - 실제 NAS 요청의 차단 원인 확정: BLOCKED (운영 로그 미수집)
 
 복구 체크포인트: `checkpoints/20261101-ingress-diagnostics.md`.
+
+## POS 외부 HTTPS 접근 차단 및 내부·외부 주소 통합 — 2026-11-02
+
+### 원인 확인
+
+- 외부 POS 경로는 `src/proxy.ts`에서 `isTrustedPosNetwork()`를 요구했다. 이 판정은 별도의 `caddy-vpn-validated` 표시와 Caddy가 증명한 LAN/VPN 클라이언트 IP를 모두 요구하므로, 유효한 HTTPS Caddy ingress라도 일반 외부 클라이언트는 POS 화면 및 `/api/auth/*`에 도달하기 전에 차단된다.
+- 반면 ADM과 KDS의 공개 HTTPS 경로는 같은 POS LAN/VPN gate를 사용하지 않는다. 마스터 비밀번호 및 PIN 등록 API는 공통 `isHttpsSameOriginRequest()`와 ingress가 설정한 `x-tdk-verified-https`를 사용한다.
+- POS 내부 IP HTTP에서는 화면과 상태 조회가 가능해도 운영 모드 마스터 인증·토큰 발급에서 HTTPS same-origin 검사가 실패한다. `Secure` 신뢰 쿠키와 HTTPS PIN 등록 조건도 유지해야 하므로 이 동작은 의도된 차단으로 판단했다. 내부에서도 같은 HTTPS 도메인을 사용하도록 split DNS 또는 NAT loopback이 필요하다.
+- 운영 NAS의 활성 Caddy 설정과 실제 Chrome 요청은 이번 작업에서 조회하지 않았다. 따라서 운영 403의 계층별 실측은 미검증이다.
+
+### 수정 및 보안 범위
+
+- `src/proxy.ts`: 공개 POS 표면과 POS alias 통과 조건을 네트워크 IP가 아닌 Node ingress가 검증한 HTTPS 표시로 변경했다. 잘못된/임의 브라우저 헤더는 `server.cjs` ingress가 먼저 삭제하며, Caddy origin secret 검증이 통과한 경우에만 표시를 재설정한다.
+- POS 직원 ID, 프로그램 권한, 마스터 비밀번호, 신뢰 토큰, PIN, 세션 검증은 변경하지 않았다. HTTPS 검사, Secure/HttpOnly 쿠키, Caddy 비밀키 검증, ADM·KDS 경로 및 QR/주문 API 로직도 수정하지 않았다.
+- `src/lib/host-access.ts` 및 관련 ingress/host 테스트에 verified HTTPS ingress 판정을 명시하고 위조 표시 제거 및 POS 경로 gate를 확인하도록 보강했다.
+
+### 검증 및 상태
+
+- 관련 POS/ADM/KDS ingress·인증 테스트: 28/28 PASS.
+- 전체 테스트 중 alias 미지원 테스트 한 개(`src/lib/initial-owner-setup.test.mjs`)를 제외한 기존 테스트: 233/233 PASS.
+- 전체 테스트를 그대로 실행하면 같은 파일이 테스트 mock에 `@/lib/initial-admin-setup` 모듈을 등록하지 않아 로딩 실패한다. 이번 POS 변경과 무관하며 테스트 하네스는 수정하지 않았다.
+- TypeScript `tsc --noEmit`: PASS. 변경 파일 ESLint: PASS. `npm run build`: PASS. 기존 menu-image-storage 동적 파일시스템 경고 2건은 출력됐으며 이번 변경과 무관하다.
+- 실제 운영 NAS 배포, Caddy 활성 설정, 내부 split DNS, Chrome 로그인 및 주문/QR 실사용: TODO. 배포 전후 실제 HTTPS 주소에서 POS 인증과 기존 ADM/KDS를 확인해야 한다.
+- DB, 환경변수/비밀키, Caddy 설정, Docker 이미지/컨테이너, NAS 운영 상태는 변경하지 않았다.
+
+### 단계 상태
+
+- POS 403 경로와 ADM/KDS 공통 HTTPS 비교: PASS
+- 검증된 HTTPS ingress 기반 POS 접근 정책 수정: PASS
+- 관련 회귀 테스트·TypeScript·변경 파일 ESLint·production build: PASS
+- 운영 HTTPS 및 split DNS 브라우저 검증: TODO
+
+복구 체크포인트: `checkpoints/20261102-pos-https-ingress.md`.

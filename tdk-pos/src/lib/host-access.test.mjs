@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   externalAliasTarget, externalCanonicalPath, hostnameFromHeader, isExternalAdminHost, isExternalAliasTargetAllowed,
-  isExternalAdminPathAllowed, isExternalKdsPath, isExternalPosPath, isKnownInternalHost,
+  hasVerifiedExternalHttpsIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalPosPath, isKnownInternalHost,
   internalCanonicalPath,
 } from "./host-access.ts";
 
@@ -44,12 +44,15 @@ test("public aliases map to their actual application routes", () => {
   assert.equal(externalCanonicalPath("/tdkadm/admin/staff"), "/tdkadm/staff");
 });
 
-test("external aliases expose authenticated KDS while keeping POS LAN-only", () => {
+test("external POS requires verified HTTPS ingress while KDS keeps its existing route policy", () => {
   assert.equal(isExternalAliasTargetAllowed("kds", "/kitchen", "GET", false), true);
   assert.equal(isExternalAliasTargetAllowed("kds", "/api/kitchen/auth/login", "POST", false), true);
   assert.equal(isExternalAliasTargetAllowed("pos", "/pos", "GET", false), false);
   assert.equal(isExternalAliasTargetAllowed("pos", "/pos", "GET", true), true);
   assert.equal(isExternalAliasTargetAllowed("admin", "/api/customers", "GET", false), true);
+  assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "1" })), true);
+  assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "0" })), false);
+  assert.equal(hasVerifiedExternalHttpsIngress(new Headers()), false);
 });
 
 test("POS and KDS paths are blocked on the public Host, including old and API routes", () => {
