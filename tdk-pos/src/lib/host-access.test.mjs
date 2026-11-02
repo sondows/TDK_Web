@@ -68,7 +68,7 @@ test("external POS requires verified HTTPS ingress while KDS keeps its existing 
 });
 
 test("POS and KDS paths are blocked on the public Host, including old and API routes", () => {
-  for (const path of ["/tdkpos", "/tdkpos/pos", "/login", "/pos", "/pos/session/4", "/api/auth/login", "/api/pos/menu-catalog", "/api/table-sessions", "/api/checkouts", "/api/sales", "/api/staff/active", "/api/pos-settings/login-mode", "/api/admin/verify", "/api/admin/menus", "/api/admin/staff"]) {
+  for (const path of ["/tdkpos", "/tdkpos/pos", "/login", "/pos", "/pos/session/4", "/api/auth/login", "/api/pos/menu-catalog", "/api/table-sessions", "/api/checkouts", "/api/sales", "/api/account-transfer-notice", "/api/staff/active", "/api/pos-settings/login-mode", "/api/admin/verify", "/api/admin/menus", "/api/admin/staff"]) {
     assert.equal(isExternalPosPath(path), true, path);
     assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
   }

@@ -5,6 +5,7 @@ import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { formatMoney } from "@/lib/format-money";
 import { createRequestId } from "@/lib/request-id";
+import { parseJsonResponse, readJsonResponse } from "@/lib/api-response";
 import { printReceipt } from "@/lib/receipt-print";
 import { prepareAccountTransferNotice, printAccountTransferNotice } from "@/lib/account-transfer-notice";
 import { buildPartyOrderRows, type PartySummarySourceItem } from "@/lib/pos-order-summary-rows";
@@ -145,8 +146,9 @@ export default function PaymentModal({
   const { ref: paymentMethodsRef, hints: scrollHints, handlers: paymentScrollHandlers } = useHorizontalScroll(state !== null);
   useEffect(() => {
     let active = true;
-    fetch(sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`)
-      .then(async (response) => ({ response, result: (await response.json()) as { success?: boolean; message?: string; settled?: boolean; checkoutIds?: number[] } & State }))
+    const checkoutUrl = sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`;
+    fetch(checkoutUrl)
+      .then(async (response) => ({ response, result: await parseJsonResponse<{ success?: boolean; message?: string; settled?: boolean; checkoutIds?: number[] } & State>(response, checkoutUrl, "Checkout state lookup") }))
       .then(({ response, result }) => {
         if (!active) return;
         if (!response.ok || !result.success) {
@@ -160,7 +162,7 @@ export default function PaymentModal({
           autoPrintAttempted.current.add(checkoutIds.join(","));
         }
       })
-      .catch(() => { if (active) setError("결제 정보를 불러올 수 없습니다."); });
+      .catch((error) => { console.error("Checkout state lookup failed", error); if (active) setError(error instanceof Error ? error.message : "Checkout state lookup failed."); });
     return () => { active = false; };
   }, [tableId, sessionId]);
   useEffect(() => {
@@ -208,7 +210,7 @@ export default function PaymentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), ...body }),
       });
-      const result = (await response.json()) as {
+      const result = await readJsonResponse<{
         success?: boolean;
         message?: string;
         completed?: boolean;
@@ -224,7 +226,7 @@ export default function PaymentModal({
         debugPhase?: string;
         debugMessage?: string;
         openingRequired?: boolean;
-      };
+      }>(response, "/api/checkouts", "Payment request");
       if (response.status === 428 && result.openingRequired) {
         const promptShown = onBusinessOpeningRequired(() => { void requestRetryRef.current?.(body, afterRegistered); });
         if (promptShown === false) setError(result.message ?? "오늘 준비금이 등록되지 않아 결제를 진행할 수 없습니다.");
@@ -283,7 +285,7 @@ export default function PaymentModal({
           void (async () => {
             try {
               const settingResponse = await fetch("/api/pos-settings/receipt-auto-print", { cache: "no-store" });
-              const setting = await settingResponse.json() as { success?: boolean; enabled?: boolean };
+              const setting = await parseJsonResponse<{ success?: boolean; enabled?: boolean }>(settingResponse, "/api/pos-settings/receipt-auto-print", "Receipt auto-print setting lookup");
               if (!settingResponse.ok || !setting.success) throw new Error("자동 영수증 인쇄 설정을 확인하지 못했습니다.");
               if (setting.enabled) {
                 await customerReceiptPrint;
@@ -303,9 +305,11 @@ export default function PaymentModal({
         setStagedCustomerPayment(current => current && current.amount > result.state!.remaining ? null : current);
       }
       return { ok: true };
-    } catch {
-      setError("네트워크 오류가 발생했습니다.");
-      return { ok: false, message: "네트워크 오류가 발생했습니다." };
+    } catch (error) {
+      console.error("Payment request failed", error);
+      const message = error instanceof Error ? error.message : "Payment request failed.";
+      setError(message);
+      return { ok: false, message };
     } finally {
       requestInFlight.current = false;
       setBusy(false);

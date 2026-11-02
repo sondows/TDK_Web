@@ -40,6 +40,7 @@ export function isExternalPosPath(pathname: string): boolean {
     || isPathOrChild(pathname, "/api/table-session-merges") || isPathOrChild(pathname, "/api/table-layout")
     || (isPathOrChild(pathname, "/api/pos-settings") && !["/api/pos-settings/business-day", "/api/pos-settings/takeout-preparation"].includes(pathname))
     || isPathOrChild(pathname, "/api/order-items") || isPathOrChild(pathname, "/api/checkouts") || isPathOrChild(pathname, "/api/sales")
+    || pathname === "/api/account-transfer-notice"
     || pathname === "/api/admin/verify" || pathname === "/api/admin/verify-pin" || pathname === "/api/admin/grant"
     || pathname === "/api/admin/discount-rules" || isPathOrChild(pathname, "/api/admin/menus") || isPathOrChild(pathname, "/api/admin/staff");
 }

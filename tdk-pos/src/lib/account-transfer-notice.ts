@@ -1,4 +1,5 @@
 import { sendPrintDocument } from "@/lib/device-printer";
+import { parseJsonResponse } from "@/lib/api-response";
 import { buildAccountTransferPrintDocument, type PrintDocument } from "@/lib/print-document";
 
 export type AccountTransferNotice = {
@@ -21,7 +22,8 @@ export async function prepareAccountTransferNotice(input:
     cache: "no-store",
     body: JSON.stringify(input),
   });
-  const result = await response.json() as { success?: boolean; message?: string; notice?: AccountTransferNotice; document?: PrintDocument };
+  const result = await parseJsonResponse<{ success?: boolean; message?: string; notice?: AccountTransferNotice; document?: PrintDocument }>(
+    response, "/api/account-transfer-notice", "Account transfer notice preparation");
   if (!response.ok || !result.success || !result.notice)
     throw new Error(result.message ?? "계좌이체 안내서를 준비하지 못했습니다.");
   return { ...result.notice, document: result.document ?? buildAccountTransferPrintDocument(result.notice) };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildAppManifest } from "./app-manifest.ts";
 import { posAppMetadata } from "./pos-app-metadata.ts";
+import { applyKdsDisplayOptions } from "./kds-manifest.ts";
 
 test("POS page metadata explicitly links its own install manifest and icons", () => {
   assert.equal(posAppMetadata.applicationName, "TDKON POS");
@@ -57,4 +58,15 @@ test("the external root manifest remains ADM and does not include the POS icon",
   assert.equal(manifest.start_url, "/tdkadm");
   assert.equal(manifest.scope, "/tdkadm");
   assert.ok(manifest.icons.every(icon => !icon.src.includes("tdk-pos")));
+});
+
+test("the KDS manifest requests fullscreen landscape without changing its identity", () => {
+  const manifest = applyKdsDisplayOptions(buildAppManifest("kds", false));
+  assert.equal(manifest.display, "fullscreen");
+  assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
+  assert.equal(manifest.orientation, "landscape");
+  assert.equal(manifest.id, "/tdkkds");
+  assert.equal(manifest.start_url, "/tdkkds");
+  assert.equal(manifest.scope, "/tdkkds");
+  assert.deepEqual(manifest.icons.map(({ src }) => src), ["/icons/tdk-kds-192.png", "/icons/tdk-kds-512.png"]);
 });
