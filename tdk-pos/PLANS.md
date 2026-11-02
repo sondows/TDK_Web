@@ -1335,3 +1335,77 @@
 - 운영 HTTPS 및 split DNS 브라우저 검증: TODO
 
 복구 체크포인트: `checkpoints/20261102-pos-https-ingress.md`.
+
+## 2026-11-02 — Device Agent와 TDKPOS 실행 분리
+
+- `Program.cs`의 시작 시 POS Edge 자동 실행 등록을 제거했다. Device Agent의 루프백 바인딩, Origin/CORS 검사, 프린터·현금서랍·시스템 종료 API와 `/pos/exit` API는 유지했다.
+- `/pos/exit`는 기존과 같은 `%LOCALAPPDATA%\\TDK-POS\\EdgeProfile` 및 현재 사용자 세션으로 한정해 POS Edge만 찾고 종료하도록 유지했다.
+- `start-pos-kiosk.ps1`을 추가해 원격 HTTPS POS 주소를 별도 Edge 프로필과 kiosk fullscreen으로 실행하고 중복 실행을 막는다. 기존 POS 로그온 작업은 12초 지연 실행을 등록하도록 변경했다. 기존 로컬 Node/Chrome updater 파일은 보존했고 자동 시작에서는 분리했다.
+- Device Agent 전용 로그온 작업 등록/해제 및 준비 확인 런처를 추가했다. Agent 실행 파일 경로는 설치 위치를 가정하지 않도록 등록 인자로 받는다.
+- HTTPS POS Origin을 Device Agent 기본 및 POS 배포 allowlist에 정확히 추가했다. wildcard Origin이나 인증 완화는 없다.
+- 검증: `dotnet build --no-restore` PASS(경고 0/오류 0), `ReceiptRenderChecks` PASS. Device Agent Windows 서비스 실행, 프린터·현금서랍 물리 출력, Edge kiosk, Windows 재로그온 및 예약 작업은 이 개발 환경에서 실제 수행하지 않아 미검증이다.
+- 등록 절차: `tdk-device-agent/deploy/README-startup.md`, `tdk-pos/deploy/README.md`.
+
+## 2026-11-02 — Device Agent 자동 실행 제거 Release 검증
+
+- 프로젝트 전체 소스 검색 결과 `EnsureStarted()` 호출 및 Device Agent의 Edge 실행 인자는 없음. `msedge.exe` 참조는 전용 POS 프로필을 조회·종료하는 `PosEdgeManager`와 별도 POS 키오스크 런처에만 있다. Windows POS 로그온 작업은 별도 등록 스크립트로 유지된다.
+- Release `win-x64` self-contained 빌드: PASS, 경고 0/오류 0. 신규 게시 폴더: `배포/TDK-POS_Printer/DeviceAgent-independent-20261102`.
+- 새 게시 폴더의 기본 `appsettings.json`은 기존 POS 배포 설정과 비교해 프린터, 로깅, 허용 Origin 설정을 유지했고, 허용 목록에는 HTTPS POS Origin이 포함된다. 기존 `배포/TDK-POS_Printer/DeviceAgent` 폴더는 덮어쓰지 않았다.
+- 게시된 EXE를 개발 PC에서 직접 실행해 `http://127.0.0.1:5168/` HTTP 200을 확인했다. 실행 전후 현재 세션의 Edge PID가 늘지 않아 Device Agent 실행으로 POS Edge가 뜨지 않음을 확인했고, 테스트 프로세스는 종료했다.
+- Windows WMI 명령행 조회는 액세스 거부되어 대체로 현재 사용자 세션의 Edge PID 전후 비교를 사용했다. 프린터 실제 출력, 현금서랍, Windows 재로그온 및 스케줄러 등록은 미검증이다.
+
+- 예약 작업 후속: 기존 POS 시작 작업이 현재 사용자에게 미등록이어서 `TDK Device Agent Auto Start`와 `TDK POS Auto Start`를 각각 등록했다. 읽기 전용 재확인에서 둘 다 현재 사용자 SID의 Interactive 로그온 작업이며, Agent는 새 게시 EXE를 사용하고 POS는 kiosk 런처를 12초 뒤 실행하도록 설정됐다. 등록만 했으며 로그오프/로그온 동작은 아직 확인하지 않았다.
+
+## TDKPOS PWA 설치 지원
+
+- 상태: IN_PROGRESS
+- 현황: Next.js 16 `app/manifest.ts` 및 `/tdkpos/manifest.webmanifest` Route Handler를 재사용. POS 전용 192/512/180px 아이콘이 있고 Apple touch icon 메타데이터도 연결되어 있음. POS external path는 `proxy.ts` alias 처리; manifest 응답은 no-store. Service Worker/오프라인 캐싱 미사용.
+- 수정 계획: 공통 manifest helper에서 POS의 short_name을 TDKPOS로 설정하고 POS maskable 아이콘을 추가. POS manifest route/metadata에서 앱 이름·외부 scope·Apple 아이콘 연결을 검증. 보안 및 POS API cache 정책은 그대로 유지.
+- 검증 계획: manifest 단위 테스트, TypeScript, ESLint, production build, 외부 GET 확인 가능 여부 및 공개 자산 URL 확인. 실 Edge 설치는 실제 브라우저에서 검증 여부를 구분해 기록.
+
+### 2026-11-02 PWA 구현·로컬 검증 결과
+
+- POS 전용 manifest는 `TDKON POS` / `TDKPOS`, `start_url`·`scope` `/tdkpos`, standalone display, 테마 `#2563EB`로 제공한다. 기존 root manifest와 `/tdkpos/manifest.webmanifest` 별칭을 재사용했으며 Apple touch icon 메타데이터와 POS 로그인 흐름은 유지했다.
+- 기존 192×192, 512×512, 180×180 POS 아이콘을 유지하고 512×512 maskable 아이콘을 추가했다. manifest에 선언된 아이콘 및 Apple 아이콘 모두 로컬 production 서버에서 HTTP 200, `image/png`로 응답했다.
+- 로컬 production 서버에서 `/tdkpos/manifest.webmanifest`는 HTTP 200, `application/manifest+json`, `Cache-Control: no-store`를 반환했고 name, start_url, scope, display, 아이콘 경로가 요구사항과 일치했다.
+- 경로 확인 중 alias rewrite 이후 내부 경로가 다시 canonical redirect되어 `/tdkpos/login`이 자기 자신으로 307되는 문제를 확인했다. `src/proxy.ts`와 `src/lib/host-access.ts`에서 surface marker를 권한 부여에 사용하지 않는 routing hint로만 판정해 해당 내부 rewrite에 한해 canonical redirect를 건너뛰도록 수정했다. POS HTTPS ingress, route 권한, API 인증 검사는 그대로 유지했다.
+- 수정 후 local production HTTP 확인: `/tdkpos/login` HTTP 200, `/tdkpos`는 비로그인 상태에서 `/tdkpos/login`으로 정상 이동, POS session 경로는 비로그인 상태에서 `/tdkpos/login`으로 인증 redirect했다. 이전의 자기 자신 redirect는 재현되지 않았다.
+- 검증: TypeScript PASS, 변경 파일 ESLint PASS, manifest·host access 단위 테스트 10/10 PASS, `npm run build` PASS. 빌드에서 기존 `menu-image-storage.ts` 동적 파일 경로 경고 2건이 출력됐다. 전체 lint 명령은 `.pos-runtime`의 브라우저 프로필 파일까지 탐색하여 완료되지 않아 변경 파일 대상으로 lint했다.
+- Edge 설치 UI 및 실제 운영 도메인 검증은 미실시다. 외부 도메인 HTTP 요청은 이 개발 환경에서 연결 불가였고, 변경 사항은 운영 서버에 배포하지 않았다. 따라서 실제 Edge 설치와 독립 창 실행은 미검증이며, HTTPS 운영 도메인에 반영 후 Edge의 앱 설치 메뉴에서 확인해야 한다.
+- DB, Docker, NAS, Caddy, POS 업무 로직 변경 없음. 기존 Docker 런타임 파일 복사 및 검증기 변경은 유지했다.
+- 상태: 코드 구현 및 로컬 검증 PASS, 실제 Edge/운영 HTTPS 확인 TODO.
+
+## 2026-11-02 — Device Agent / TDKPOS 자동 실행 및 금고 복구
+
+- 상태: IN_PROGRESS
+- 조사: 현재 `Program.cs`에는 `ApplicationStarted`/`EnsureStarted` 호출이 없고, `PosEdgeManager`는 전용 프로필의 Edge 종료만 한다. Device Agent의 `Process.Start`는 shutdown.exe와 taskkill.exe에 한정된다.
+- 확인된 구형 시작 경로: `deploy/update-and-start-pos.ps1`가 Chrome으로 `http://localhost:3000/pos`를 열 수 있었고, 기존 POS 등록 스크립트는 같은 작업명만 교체하여 이름이 다른 구형/중복 작업을 정리하지 않았다. `start-pos-kiosk.ps1`은 전용 프로필의 이전 내부 URL 인스턴스를 HTTPS로 교체하지 않고 이미 실행 중으로 간주할 수 있었다.
+- 작업 스케줄러 열람: 이 실행 환경의 `Get-ScheduledTask` 및 `schtasks /Query`가 CIM 경로 오류를 반환하여 POS PC에 등록된 실제 작업 목록을 확인하지 못했다. 배포 스크립트에서 작업 XML을 먼저 백업하고 POS 자동 실행 관련 작업을 하나의 `IgnoreNew` 작업으로 교체하도록 준비한다.
+- 금고: `PrinterTest.OpenCashDrawer`의 SRP-350III DLE DC4 펄스와 Windows RAW `OpenPrinter`/`WritePrinter` 코드는 수정 전후 동일하다. 기본 `appsettings.json`의 프린터 이름이 POS 배포 설정과 달랐고, 이를 `BIXOLON SRP-350III`로 정정했다. 프린터 열거는 실행 환경 권한 오류로 확인되지 않아 실물 프린터 존재 및 금고 동작은 미검증이다.
+- 진행 중: HTTPS-only Edge launcher의 낡은 전용 프로필 정리, 작업 백업/복구 및 단일 등록, 기존 설정을 보존하는 Release 적용 패키지 생성.
+- 검증 계획: PowerShell AST 구문 검사, Release build/publish, `ReceiptRenderChecks`, JSON/Origin 검증, 배포 실행 파일로 Agent를 시작해 5168 응답 및 Edge 미실행 확인. 실물 영수증/금고와 POS PC의 실제 작업 교체는 해당 PC/프린터가 없어 미검증으로 구분한다.
+### 2026-11-02 — Agent/POS 수정 및 Release 배포 결과
+
+- 수정: 기본 Agent `appsettings.json`의 프린터 이름을 `BIXOLON SRP-350III`로 정정했다. 기존 네 개 Origin 항목은 보존했다. POS용 배포 설정도 같은 모델명과 HTTPS Origin을 가진다.
+- POS 실행: `start-pos-kiosk.ps1`은 전용 Edge 프로필만 조회한다. 실행 중 프로필이 이미 HTTPS kiosk 설정이면 중복 실행하지 않고, 오래된 URL/비-kiosk 구성이라면 그 전용 프로필 프로세스만 종료한 뒤 HTTPS kiosk로 교체한다. 일반 Edge 프로세스는 건드리지 않는다.
+- 구형 경로: `update-and-start-pos.ps1`의 Chrome `--app=http://localhost:3000/pos` 실행 코드를 제거하고 POS Edge kiosk launcher를 호출하도록 변경했다. Device Agent의 `Program.cs` 시작 시 Edge 호출은 이미 제거된 상태임을 확인했다. `EnsureStarted` 런타임 호출은 없고 `/pos/exit` 전용 프로필 종료 동작은 유지한다.
+- 작업 스케줄러: 등록 스크립트는 TDK POS 자동 실행 후보들의 XML 백업 후 구형/중복 작업을 제거하고 `TDK POS Auto Start` 하나를 현재 사용자 로그온, `IgnoreNew`, 12초 지연, HTTPS 전용 launcher로 등록한다. XML 복구 스크립트와 사용자용 적용 스크립트를 추가했다.
+- Release `win-x64` build: PASS, 경고 0 / 오류 0. `ReceiptRenderChecks`: PASS. Self-contained `dotnet publish`: PASS.
+- 배포 폴더: `배포/TDK-POS_Printer/DeviceAgent-repair-20261102`. EXE, 정정된 기본 설정, POS kiosk/task 교체 스크립트, 설정 보존형 적용 스크립트 및 복구 안내를 포함한다.
+- 최신 publish 실행 시험: 현재 5168 포트는 기존 프로세스가 점유해 종료하지 않았다. 대신 별도 5169 테스트 포트의 개발 모드로 새 publish Agent를 직접 시작해 `/` HTTP 200을 확인했다. 실행 전후 새 Edge 프로세스 0개였고 시험 Agent는 종료했다.
+- 미검증: 작업 스케줄러 조회가 이 환경에서 CIM 오류를 반환해 POS PC에 현재 몇 개의 작업이 등록됐는지 직접 확인하거나 실제 교체할 수 없었다. 프린터 열거도 권한 거부로 막혀 영수증 실출력 및 금고 개방은 검증하지 않았다. ADM/KDS 실기기 회귀도 수행하지 않았다.
+- 상태: 코드·빌드·publish·Agent 분리 검증 PASS. POS PC의 작업 교체와 실물 프린터/금고 확인은 TODO.
+### 2026-11-02 final Device Agent/POS package audit
+- PowerShell parser validation: PASS for repair, POS launcher, task registration, task restore, and legacy updater scripts.
+- Repair package scripts were compared with source copies; hashes match. The package contains no test build artifacts.
+- Static source audit: no Device Agent startup callback or EnsureStarted reference remains. The only Agent Edge references inspect/stop the dedicated profile for `/pos/exit`; `Program.cs` Process.Start is the Windows shutdown path.
+- POS launcher is HTTPS-only (`https://tdkon.myasustor.com/tdkpos`), identifies only the dedicated Edge profile, replaces stale instances in that profile, and the task uses IgnoreNew.
+- Actual POS PC scheduled-task inventory/replacement and physical receipt/cash-drawer checks remain TODO because this environment could not query the target PC task scheduler or printer. Do not mark deployment/hardware validation PASS until checked on that PC.
+
+## 2026-11-02 TDKPOS PWA identity isolation
+
+- Root cause confirmed from rendered local server HTML: `/tdkpos` redirected to `/tdkpos/login`, whose `<link rel="manifest">` originally pointed to `/manifest.webmanifest`. The POS alias rewrites to the shared `/login` route, and neither that route nor the POS layout declared a manifest; root metadata therefore depended on the external-surface request header. On the public host, the root manifest defaults to ADM, so Edge could install TDKADM from the POS login page.
+- Added one shared POS metadata object and attached it to the POS `/login` route layout and `/pos` application layout. Both now explicitly publish `/tdkpos/manifest.webmanifest` and POS-specific app names/icons. Root metadata, ADM layout, ADM manifest route, proxy rules, auth, and Device Agent were not changed.
+- Live local HTTP verification after hot reload: `/tdkpos` and `/tdkpos/login` render `rel="manifest" href="/tdkpos/manifest.webmanifest"`; `/tdkadm` retains its prior root manifest link. POS manifest returns HTTP 200, application/manifest+json, TDKON POS / TDKPOS, id/start_url/scope `/tdkpos`, and POS icons. ADM manifest endpoint returns HTTP 200 with TDKON ADM, id/start_url/scope `/tdkadm`, and ADM icons. POS and ADM identities are distinct. All referenced icon HEAD requests returned HTTP 200 image/png.
+- Validation in a sanitized temporary source copy: production build PASS (existing unrelated menu-image-storage tracing warnings); TypeScript PASS; changed-file ESLint PASS; app-manifest tests 4/4 PASS. Full repository ESLint remains FAIL from 33 pre-existing errors and 5 warnings in unrelated files; none are in the files changed for this task.
+- Public HTTPS host could not be reached from this environment, and Edge installation UI was not exercised. Local rendered HTML and both app manifest routes were verified against the running development server.

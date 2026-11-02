@@ -8,6 +8,7 @@ import {
   isExternalKdsPath,
   isExternalPosPath,
   hasVerifiedExternalHttpsIngress,
+  isAliasRewriteTarget,
   isKnownInternalHost,
   internalCanonicalPath,
 } from "@/lib/host-access";
@@ -21,6 +22,9 @@ function withSearch(pathname: string, request: NextRequest): URL {
 export function proxy(request: NextRequest) {
   const host = request.headers.get("host");
   const pathname = request.nextUrl.pathname;
+  const aliasRewriteSurface = isAliasRewriteTarget(request.headers.get("x-tdk-external-surface"), pathname)
+    ? request.headers.get("x-tdk-external-surface")
+    : null;
 
   if (!isExternalAdminHost(host)) {
     if (isKnownInternalHost(host)) {
@@ -28,12 +32,13 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(withSearch("/tdkadm", request), 307);
       }
       const canonicalPath = internalCanonicalPath(pathname);
-      if (canonicalPath && (request.method === "GET" || request.method === "HEAD")) {
+      if (canonicalPath && !aliasRewriteSurface && (request.method === "GET" || request.method === "HEAD")) {
         return NextResponse.redirect(withSearch(canonicalPath, request), 307);
       }
       const alias = externalAliasTarget(pathname);
       const internalHeaders = new Headers(request.headers);
       internalHeaders.delete("x-tdk-external-surface");
+      if (aliasRewriteSurface) internalHeaders.set("x-tdk-external-surface", aliasRewriteSurface);
       if (pathname === "/tdkpos/manifest.webmanifest" || pathname === "/tdkkds/kds.webmanifest" || pathname === "/tdkadm/manifest.webmanifest") {
         return NextResponse.next({ request: { headers: internalHeaders } });
       }
@@ -46,9 +51,11 @@ export function proxy(request: NextRequest) {
     return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
   }
 
-  // Never trust a browser-supplied surface marker; only alias rewrites add this header.
+  // Surface markers are routing hints only. They never grant access; ingress and
+  // route permissions are checked independently below.
   const externalHeaders = new Headers(request.headers);
   externalHeaders.delete("x-tdk-external-surface");
+  if (aliasRewriteSurface) externalHeaders.set("x-tdk-external-surface", aliasRewriteSurface);
   // server.cjs removes any client-supplied value and sets this only after a valid
   // Caddy origin-secret check. POS access is gated by trusted HTTPS ingress;
   // employee identity, program permission and session checks remain in the APIs.
@@ -69,7 +76,7 @@ export function proxy(request: NextRequest) {
   }
 
   const canonicalPath = externalCanonicalPath(pathname);
-  if (canonicalPath && (request.method === "GET" || request.method === "HEAD")) {
+  if (canonicalPath && !aliasRewriteSurface && (request.method === "GET" || request.method === "HEAD")) {
     if (isExternalPosPath(pathname) && !verifiedIngress) {
       return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
     }

@@ -88,6 +88,15 @@ export function externalAliasTarget(pathname: string): { surface: ExternalSurfac
   if (suffix === "/kds.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
   return { surface: alias.surface, target: isPathOrChild(suffix, "/kitchen") ? suffix : `/kitchen${suffix}` };
 }
+/** Identify an internal path produced by an alias rewrite. This is only a routing hint;
+ * authorization and ingress checks must still run for the rewritten request. */
+export function isAliasRewriteTarget(surfaceHeader: string | null, pathname: string): surfaceHeader is ExternalSurface {
+  if (surfaceHeader !== "pos" && surfaceHeader !== "admin" && surfaceHeader !== "kds") return false;
+  if (externalAliasTarget(pathname)) return false;
+  if (surfaceHeader === "pos") return isExternalPosPath(pathname);
+  if (surfaceHeader === "kds") return isExternalKdsPath(pathname);
+  return isAdminPageOrApi(pathname);
+}
 export function internalCanonicalPath(pathname: string): string | null {
   if (pathname === "/kds") return "/tdkkds";
   if (isPathOrChild(pathname, "/tdkadm/admin")) return `/tdkadm${pathname.slice("/tdkadm/admin".length)}`;

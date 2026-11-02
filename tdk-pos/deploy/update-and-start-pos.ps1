@@ -8,7 +8,6 @@ $logDir = Join-Path $runtime 'logs'
 $log = Join-Path $logDir 'pos-updater.log'
 $stateFile = Join-Path $runtime 'state.json'
 $processFile = Join-Path $runtime 'pos-process.json'
-$url = 'http://localhost:3000/pos'
 . (Join-Path $PSScriptRoot 'pos-process.ps1')
 $mutex = New-Object System.Threading.Mutex($false, 'Local\TDK_POS_Auto_Start')
 if (-not $mutex.WaitOne(0)) { exit 0 }
@@ -114,35 +113,12 @@ function Stop-LegacyPos {
 }
 function Browser {
   if ($NoBrowser) { return }
-  $profile = Join-Path $runtime 'chrome-profile'
-  $appArgument = "--app=$url"
-  $chrome = @(
-    (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
-  ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-  if ($chrome) {
-    # The dedicated profile identifies our Chrome process without touching normal Chrome windows.
-    $existing = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue |
-      Where-Object {
-        $_.CommandLine -and
-        $_.CommandLine.Contains('--user-data-dir=') -and
-        $_.CommandLine.Contains($profile) -and
-        $_.CommandLine.Contains($appArgument) -and
-        (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowHandle -ne 0
-      } | Select-Object -First 1
-    if ($existing) { Write-Log 'Chrome POS window already open'; return }
-    New-Item -ItemType Directory -Path $profile -Force | Out-Null
-    Start-Process -FilePath $chrome -ArgumentList @(
-      $appArgument,
-      "--user-data-dir=`"$profile`"",
-      '--disable-translate',
-      '--no-first-run',
-      '--start-maximized',
-      '--window-position=0,0'
-    ) | Out-Null
-    Write-Log 'Chrome POS window opened'
-  } else { Write-Log 'Chrome not found; open http://localhost:3000/pos manually' }
+  $launcher = Join-Path $PSScriptRoot 'start-pos-kiosk.ps1'
+  if (-not (Test-Path -LiteralPath $launcher)) { throw 'The HTTPS POS kiosk launcher is missing.' }
+  & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+    -NoProfile -ExecutionPolicy Bypass -File $launcher
+  if ($LASTEXITCODE -ne 0) { throw 'The HTTPS POS kiosk launcher failed.' }
+  Write-Log 'The dedicated Edge kiosk launcher was requested for the HTTPS POS address'
 }
 function Start-Server([string]$path) {
   if (-not (Test-Path -LiteralPath (Join-Path $path '.next\BUILD_ID'))) { throw "No production build: $path" }

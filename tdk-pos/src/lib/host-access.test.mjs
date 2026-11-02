@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  externalAliasTarget, externalCanonicalPath, hostnameFromHeader, isExternalAdminHost, isExternalAliasTargetAllowed,
+  externalAliasTarget, externalCanonicalPath, hostnameFromHeader, isAliasRewriteTarget, isExternalAdminHost, isExternalAliasTargetAllowed,
   hasVerifiedExternalHttpsIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalPosPath, isKnownInternalHost,
   internalCanonicalPath,
 } from "./host-access.ts";
@@ -42,6 +42,18 @@ test("public aliases map to their actual application routes", () => {
   assert.equal(internalCanonicalPath("/admin/security/devices"), "/tdkadm/security/devices");
   assert.equal(externalCanonicalPath("/admin/staff"), "/tdkadm/staff");
   assert.equal(externalCanonicalPath("/tdkadm/admin/staff"), "/tdkadm/staff");
+});
+
+test("alias rewrite hints match only internal targets for the same surface", () => {
+  assert.equal(isAliasRewriteTarget("pos", "/login"), true);
+  assert.equal(isAliasRewriteTarget("pos", "/pos/session/4"), true);
+  assert.equal(isAliasRewriteTarget("pos", "/tdkpos/login"), false);
+  assert.equal(isAliasRewriteTarget("pos", "/admin/staff"), false);
+  assert.equal(isAliasRewriteTarget("admin", "/admin/staff"), true);
+  assert.equal(isAliasRewriteTarget("kds", "/kitchen/status"), true);
+  assert.equal(isAliasRewriteTarget("kds", "/pos"), false);
+  assert.equal(isAliasRewriteTarget("unknown", "/login"), false);
+  assert.equal(isAliasRewriteTarget(null, "/login"), false);
 });
 
 test("external POS requires verified HTTPS ingress while KDS keeps its existing route policy", () => {
