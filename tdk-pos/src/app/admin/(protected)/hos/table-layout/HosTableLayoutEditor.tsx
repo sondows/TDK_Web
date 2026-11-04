@@ -12,9 +12,9 @@ type LayoutResponse = { success: boolean; tables?: EditorTable[]; gridSettings?:
 const DEFAULT_GRID_SETTINGS: GridSettings = { spacing: 10, snapToGrid: true };
 const GRID_SPACINGS = [5, 10, 20, 25, 50] as const;
 
-// The HOS editor canvas is capped at 560 CSS px and uses a 3:4 aspect ratio.
-// Keep the current percentage-based API/storage while presenting dimensions
-// in the same logical pixels as the editor's reference canvas.
+// The visible editor canvas is 8 rows tall, but stored coordinates and size
+// percentages remain in the original 6-row logical space for compatibility.
+// Keep pixel inputs tied to the original 3:4 reference dimensions.
 const HOS_REFERENCE_CANVAS = { width: 560, height: 560 * 4 / 3 } as const;
 const HOS_SIZE_LIMITS = HOS_LAYOUT_LIMITS;
 

@@ -94,6 +94,16 @@ test("dragging to a canvas edge keeps the center coordinate valid", () => {
   assert.deepEqual([edge.positionX, edge.positionY], [0, 100]);
 });
 
+test("expanded HOS canvas preserves existing coordinates and allows placement in its lower extension", () => {
+  const existing = { positionX: 50, positionY: 80, layoutWidth: 25, layoutHeight: 10, isVisible: true };
+  const extended = clampHosTableLayout({ ...existing, positionY: 120 });
+  assert.deepEqual([existing.positionY, extended.positionY], [80, 120]);
+  assert.ok(isValidHosTableLayout(extended));
+  const snapped = snapHosPositionToGrid(50, 132, 560, 560 * 4 / 3, 10, 100 / 0.75);
+  assert.ok(snapped.positionY > 100);
+  assert.ok(snapped.positionY <= 100 / 0.75);
+});
+
 test("drag and resize keep fractional coordinates while staying inside canvas bounds", () => {
   const layout = clampHosTableLayout({ positionX: 35.3, positionY: 62.8, layoutWidth: 31.7, layoutHeight: 21.3, isVisible: true });
   assert.deepEqual(layout, { positionX: 35.3, positionY: 62.8, layoutWidth: 31.7, layoutHeight: 21.3, isVisible: true });

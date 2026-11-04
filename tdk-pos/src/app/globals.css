@@ -161,6 +161,17 @@ body {
   outline-offset: 2px;
 }
 
+/* Give KDS task content more room on narrow portrait tablets without changing landscape sizing. */
+@media (orientation: portrait) and (max-width: 900px) {
+  [data-kds-display] .kds-task-row[data-session-kind="DINE_IN"] {
+    grid-template-columns: 3rem minmax(0, 1fr) 5.5rem;
+  }
+
+  [data-kds-display] .kds-task-row[data-session-kind^="TAKEOUT"] {
+    grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem;
+  }
+}
+
 /* Reusable behavior for POS dialog copy and actions; do not apply to form fields. */
 .pos-display-copy,
 .pos-modal-copy {

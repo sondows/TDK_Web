@@ -8,11 +8,17 @@ export type HosTableLayout = {
 
 export type HosTableLayoutRecord = HosTableLayout & { tableId: number; tableNo: string };
 
+// Stored layout percentages keep their original 6-row vertical coordinate space.
+// The visual canvas is now 8 rows tall; scaling old coordinates to 75% preserves
+// every existing table's pixel position and size while making the lower quarter editable.
+export const HOS_LAYOUT_VERTICAL_SCALE = 0.75;
+export const HOS_LAYOUT_MAX_POSITION_Y = 100 / HOS_LAYOUT_VERTICAL_SCALE;
+
 export const HOS_LAYOUT_LIMITS = {
   minX: 0,
   maxX: 100,
   minY: 0,
-  maxY: 100,
+  maxY: HOS_LAYOUT_MAX_POSITION_Y,
   minWidth: 10,
   maxWidth: 95,
   minHeight: 2.5,
@@ -41,14 +47,14 @@ export function clampHosTableLayout(layout: HosTableLayout): HosTableLayout {
   };
 }
 
-export function snapHosPositionToGrid(positionX: number, positionY: number, canvasWidth: number, canvasHeight: number, spacing: number) {
+export function snapHosPositionToGrid(positionX: number, positionY: number, canvasWidth: number, canvasHeight: number, spacing: number, maxY = 100) {
   if (canvasWidth <= 0 || canvasHeight <= 0 || !Number.isFinite(spacing) || spacing <= 0) return { positionX, positionY };
-  const snapAxis = (position: number, canvasSize: number) => {
-    const maxGridPosition = Math.floor(canvasSize / spacing) * spacing;
+  const snapAxis = (position: number, canvasSize: number, maxPosition = 100) => {
+    const maxGridPosition = Math.floor(canvasSize * maxPosition / 100 / spacing) * spacing;
     const snappedPixels = clamp(Math.round(position / 100 * canvasSize / spacing) * spacing, 0, maxGridPosition);
     return snappedPixels / canvasSize * 100;
   };
-  return { positionX: snapAxis(positionX, canvasWidth), positionY: snapAxis(positionY, canvasHeight) };
+  return { positionX: snapAxis(positionX, canvasWidth), positionY: snapAxis(positionY, canvasHeight, maxY) };
 }
 
 export function isValidHosTableLayout(layout: HosTableLayout) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
-import { snapHosPositionToGrid } from "@/lib/hos-table-layout";
+import { HOS_LAYOUT_LIMITS, HOS_LAYOUT_VERTICAL_SCALE, snapHosPositionToGrid } from "@/lib/hos-table-layout";
 
 export type HosTableCanvasRow = {
   tableId: number;
@@ -77,9 +77,10 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
     if (Math.abs(deltaX) + Math.abs(deltaY) > 2) drag.moved = true;
     if (!drag.moved) return;
     const positionX = drag.originX + deltaX / bounds.width * 100;
-    const positionY = drag.originY + deltaY / bounds.height * 100;
+    const positionY = drag.originY + deltaY / bounds.height / HOS_LAYOUT_VERTICAL_SCALE * 100;
     const position = snapToGrid
-      ? snapHosPositionToGrid(positionX, positionY, bounds.width, bounds.height, gridSpacingPx)
+      ? snapHosPositionToGrid(positionX, positionY, bounds.width, bounds.height * HOS_LAYOUT_VERTICAL_SCALE,
+        gridSpacingPx, HOS_LAYOUT_LIMITS.maxY)
       : { positionX, positionY };
     onMove(drag.tableId, position.positionX, position.positionY);
   }
@@ -98,7 +99,7 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
     const bounds = canvasRef.current.getBoundingClientRect();
     if (!bounds.width || !bounds.height) { onSelect(clickedTable); return; }
     const x = (event.clientX - bounds.left) / bounds.width * 100;
-    const y = (event.clientY - bounds.top) / bounds.height * 100;
+    const y = (event.clientY - bounds.top) / bounds.height / HOS_LAYOUT_VERTICAL_SCALE * 100;
     const orderedHits = tables.filter(table => table.isVisible &&
       x >= table.positionX - table.layoutWidth / 2 && x <= table.positionX + table.layoutWidth / 2 &&
       y >= table.positionY - table.layoutHeight / 2 && y <= table.positionY + table.layoutHeight / 2 &&
@@ -120,8 +121,8 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
     onSelect(selectedTable ?? clickedTable);
   }
 
-  return <div ref={canvasRef} className={`relative mx-auto aspect-[3/4] w-full overflow-visible rounded-xl border border-slate-300 bg-white shadow-inner ${editing ? "max-w-[560px] touch-none" : "max-w-[900px]"}`}
-    style={{ containerType: "inline-size", ...(showGrid ? { backgroundImage: "radial-gradient(circle at 0 0, rgba(148,163,184,.55) 1px, transparent 1.2px)", backgroundSize: `${gridSpacingPx}px ${gridSpacingPx}px`, backgroundPosition: "0 0" } : {}) }}>
+  return <div ref={canvasRef} className={`relative mx-auto w-full overflow-visible rounded-xl border border-slate-300 bg-white shadow-inner ${editing ? "max-w-[560px] touch-none" : "max-w-[900px]"}`}
+    style={{ aspectRatio: "9 / 16", containerType: "inline-size", ...(showGrid ? { backgroundImage: "radial-gradient(circle at 0 0, rgba(148,163,184,.55) 1px, transparent 1.2px)", backgroundSize: `${gridSpacingPx}px ${gridSpacingPx}px`, backgroundPosition: "0 0" } : {}) }}>
     {tables.filter(table => table.isVisible).map(table => {
       const occupied = table.sessionId !== null;
       const guestCount = (table.personCount ?? 0) + (table.babyCount ?? 0);
@@ -139,7 +140,7 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onClick={event => selectTable(event, table)}
-        style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.layoutWidth}%`, height: `${table.layoutHeight}%`, zIndex: draggingTableId === table.tableId ? 1000 : editing && selectedTableId === table.tableId ? 500 : undefined, touchAction: editing ? "none" : undefined }}
+        style={{ left: `${table.positionX}%`, top: `${table.positionY * HOS_LAYOUT_VERTICAL_SCALE}%`, width: `${table.layoutWidth}%`, height: `${table.layoutHeight * HOS_LAYOUT_VERTICAL_SCALE}%`, zIndex: draggingTableId === table.tableId ? 1000 : editing && selectedTableId === table.tableId ? 500 : undefined, touchAction: editing ? "none" : undefined }}
         type="button">
         {editing ? <>
           <span className="font-extrabold leading-tight" style={{ fontSize: "clamp(12px, 3cqw, 24px)" }}>{table.tableNo}</span>
