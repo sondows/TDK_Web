@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { KdsViewTask } from "@/lib/kds-server";
 import { activeKdsTableTasks, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups } from "@/lib/kds-party-grouping";
-import { cancelKdsTaskCompletionRequests, canUndoKdsStatusStart, canUseKdsMenuAction, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, KDS_WINDOW_MS, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, type KdsCookingSettings } from "@/lib/kds-model";
+import { cancelKdsTaskCompletionRequests, canUndoKdsStatusStart, canUseKdsMenuAction, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, KDS_WINDOW_MS, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, type KdsCookingSettings } from "@/lib/kds-model";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
 import { latestKdsSpicyAlert, type KdsSpicyAlert } from "@/lib/kds-spicy-alert";
 import { kdsTaskElapsedLabel as labelFor, kdsTaskStatusLabel as statusFor } from "@/lib/kds-task-display";
@@ -16,6 +16,7 @@ type TaskStartOperation = { action: "MENU" | "STATUS"; clickedAtMs: number; clic
 type TableStartOperation = { clickedAtMs: number; clickedAtMonoMs: number; taskIds: number[]; cancelRequested: boolean; queuedUndoDelayMs?: number };
 type TableCompletionRequestOperation = { taskIds: number[]; cancelRequested: boolean };
 type StartUndoAnchor = { clickedAtMonoMs: number };
+type CountdownFlashSchedule = { key: string; timers: number[] };
 const CARD_PALETTES = [
   { card: { backgroundColor: "#EEF5FF", borderColor: "#C9DBFF" }, cooking: { backgroundColor: "#2563EB", borderColor: "#1D4ED8" } },
   { card: { backgroundColor: "#F6EEFF", borderColor: "#DECDFB" }, cooking: { backgroundColor: "#7C3AED", borderColor: "#6D28D9" } },
@@ -55,6 +56,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   });
   const [cookingSettings, setCookingSettings] = useState<KdsCookingSettings>(DEFAULT_KDS_COOKING_SETTINGS);
   const [completionCountdownSeconds, setCompletionCountdownSeconds] = useState(DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS);
+  const [countdownFlashTaskIds, setCountdownFlashTaskIds] = useState<Set<number>>(() => new Set());
+  const [reducedMotion, setReducedMotion] = useState(true);
   const [completedTimeShrinkStartMinutes, setCompletedTimeShrinkStartMinutes] = useState(DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES);
   const [choiceTaskId, setChoiceTaskId] = useState<number | null>(null);
   const [selectedBoilTime, setSelectedBoilTime] = useState<{ taskId: number; minutes: number } | null>(null);
@@ -67,6 +70,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const tableStartBatches = useRef(new Map<number, { batchStartId: string; taskIds: number[]; startedAtMs: number }>());
   const taskStartOperations = useRef(new Map<number, TaskStartOperation>());
   const startUndoAnchors = useRef(new Map<number, StartUndoAnchor>());
+  const countdownFlashSchedules = useRef(new Map<number, CountdownFlashSchedule>());
+  const suppressedCountdownFlashKeys = useRef(new Set<string>());
   const completionRequestOperations = useRef(new Map<number, { cancelRequested: boolean }>());
   const tableStartOperations = useRef(new Map<number, TableStartOperation>());
   const activeMutations = useRef(0);
@@ -483,6 +488,99 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       if (!task || task.status !== "COOKING" || task.previousStatus !== "WAITING") startUndoAnchors.current.delete(taskId);
     }
   }, [displayedTasks]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const active = new Map<number, { key: string; startAt: number; duration: number; monotonic: boolean }>();
+    for (const task of displayedTasks) {
+      if (task.cancelled || task.status !== "COOKING") continue;
+      if (task.completionRequestScope !== null && task.completionRequestedAtMs !== null) {
+        const duration = task.completionCountdownSeconds ?? completionCountdownSeconds;
+        if (!isKdsCompletionCountdownSeconds(duration)) continue;
+        active.set(task.taskId, { key: `completion:${task.completionRequestedAtMs}:${duration}`,
+          startAt: task.completionRequestedAtMs - clockOffset, duration, monotonic: false });
+        continue;
+      }
+      const anchor = startUndoAnchors.current.get(task.taskId);
+      if (anchor) {
+        active.set(task.taskId, { key: `start:${anchor.clickedAtMonoMs}`, startAt: anchor.clickedAtMonoMs,
+          duration: KDS_WINDOW_MS / 1000, monotonic: true });
+      } else if (task.previousStatus === "WAITING" && task.changedAtMs !== null &&
+        remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow,
+          task.startSource, task.bulkStartId) !== null) {
+        active.set(task.taskId, { key: `start:${task.changedAtMs}:${clockOffset}`, startAt: task.changedAtMs - clockOffset,
+          duration: KDS_WINDOW_MS / 1000, monotonic: false });
+      }
+    }
+
+    for (const [taskId, schedule] of countdownFlashSchedules.current) {
+      if (active.get(taskId)?.key === schedule.key) continue;
+      schedule.timers.forEach(timer => window.clearTimeout(timer));
+      countdownFlashSchedules.current.delete(taskId);
+      suppressedCountdownFlashKeys.current.delete(`${taskId}:${schedule.key}`);
+      setCountdownFlashTaskIds(current => { if (!current.has(taskId)) return current; const next = new Set(current); next.delete(taskId); return next; });
+    }
+    if (reducedMotion) {
+      for (const [taskId, schedule] of countdownFlashSchedules.current) {
+        schedule.timers.forEach(timer => window.clearTimeout(timer));
+        countdownFlashSchedules.current.delete(taskId);
+        setCountdownFlashTaskIds(current => { if (!current.has(taskId)) return current; const next = new Set(current); next.delete(taskId); return next; });
+      }
+    } else {
+      for (const [taskId, countdown] of active) {
+        if (countdownFlashSchedules.current.has(taskId) || suppressedCountdownFlashKeys.current.has(`${taskId}:${countdown.key}`)) continue;
+        const schedule: CountdownFlashSchedule = { key: countdown.key, timers: [] };
+        countdownFlashSchedules.current.set(taskId, schedule);
+        const clockNow = countdown.monotonic ? performance.now() : Date.now();
+        const setFlashing = (flashing: boolean) => setCountdownFlashTaskIds(current => {
+          if (current.has(taskId) === flashing) return current;
+          const next = new Set(current);
+          if (flashing) next.add(taskId); else next.delete(taskId);
+          return next;
+        });
+        const addTimer = (callback: () => void, delay: number) => {
+          schedule.timers.push(window.setTimeout(callback, Math.max(0, delay)));
+        };
+        for (let transition = 1; transition < countdown.duration; transition += 1) {
+          const flashAt = countdown.startAt + transition * 1000 - 100;
+          const flashEnds = countdown.startAt + transition * 1000;
+          if (flashEnds <= clockNow) continue;
+          if (flashAt <= clockNow) {
+            setFlashing(true);
+            addTimer(() => setFlashing(false), flashEnds - clockNow);
+          } else {
+            addTimer(() => {
+              setFlashing(true);
+              addTimer(() => setFlashing(false), flashEnds - flashAt);
+            }, flashAt - clockNow);
+          }
+        }
+      }
+    }
+  }, [clockOffset, completionCountdownSeconds, displayedTasks, reducedMotion, serverNow]);
+
+  useEffect(() => () => {
+    for (const schedule of countdownFlashSchedules.current.values()) schedule.timers.forEach(timer => window.clearTimeout(timer));
+    countdownFlashSchedules.current.clear();
+  }, []);
+
+  const stopCountdownFlash = (taskIds: number[]) => {
+    for (const taskId of taskIds) {
+      const schedule = countdownFlashSchedules.current.get(taskId);
+      if (!schedule) continue;
+      schedule.timers.forEach(timer => window.clearTimeout(timer));
+      schedule.timers = [];
+      suppressedCountdownFlashKeys.current.add(`${taskId}:${schedule.key}`);
+      setCountdownFlashTaskIds(current => { if (!current.has(taskId)) return current; const next = new Set(current); next.delete(taskId); return next; });
+    }
+  };
 
   useEffect(() => {
     for (const task of displayedTasks) {
@@ -911,11 +1009,17 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const preparingCount = countKdsTablesByStatus(grouped, "preparing");
   const completedCount = countKdsTablesByStatus(grouped, "completed");
   const visible = section === "preparing" ? preparingKdsPartyCards(grouped) : section === "completed" ? sortKdsPartyCardsByLatestOrder(grouped) : [];
-  const visibleForRender = section === "preparing"
-    ? sortKdsPartyMembers(sortKdsTableGroups(visible.flatMap((party, partyIndex) => party.tables.map(table => ({
-      sessionId: table.sessionId, groupKey: party.key, key: `${party.key}:session:${table.sessionId}`, partyIndex, table,
-    }))), tableOrder), partyOrder).map(entry => ({ key: entry.key, paletteIndex: entry.partyIndex, tables: [entry.table] }))
-      : visible.map((party, paletteIndex) => ({ ...party, paletteIndex }));
+  const visibleForRender = section === "preparing" ? (() => {
+    const partyTables = visible.flatMap(party => party.tables.map(table => ({ sessionId: table.sessionId, groupKey: party.key })));
+    const orderedTables = sortKdsTableGroups(sortKdsPartyMembers(partyTables, partyOrder), tableOrder);
+    const rankBySession = new Map(orderedTables.map((table, index) => [table.sessionId, index]));
+    return visible.map((party, paletteIndex) => ({
+      ...party,
+      paletteIndex,
+      tables: [...party.tables].sort((a, b) => (rankBySession.get(a.sessionId) ?? 0) - (rankBySession.get(b.sessionId) ?? 0)),
+    })).sort((a, b) => Math.min(...a.tables.map(table => rankBySession.get(table.sessionId) ?? 0)) -
+      Math.min(...b.tables.map(table => rankBySession.get(table.sessionId) ?? 0)));
+  })() : visible.map((party, paletteIndex) => ({ ...party, paletteIndex }));
   return <main className="min-h-dvh bg-slate-50 px-3 pb-8 pt-3 text-slate-900 sm:px-5" data-kds-display onClickCapture={handleTouchSound}>
     <header className="mx-auto flex max-w-5xl items-center justify-between border-b border-slate-200 pb-3">
       <div><h1 className="text-xl font-extrabold text-[#2563EB]">TDK KDS</h1><p className="text-xs text-slate-500">{staffName}</p></div>
@@ -998,15 +1102,25 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
                 : remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow,
                   task.startSource, task.bulkStartId, pendingTableStart))
               : null;
-            const statusValue = isInactiveCompleted ? labelFor(task, serverNow) : section === "completed" && !isCompleted ? isCooking ? labelFor(task, serverNow) : null : task.cancelled ? "취소 확인" : isCompletionCountdown
+            const completedElapsedSeconds = isCompleted ? kdsCompletedElapsedSeconds(task.completedAtMs, serverNow) : null;
+            const completedElapsedDisplay = completedElapsedSeconds !== null && completedElapsedSeconds < 60
+              ? Math.max(1, completedElapsedSeconds) : labelFor(task, serverNow);
+            const statusValue = isInactiveCompleted ? completedElapsedDisplay : section === "completed" && !isCompleted ? isCooking ? labelFor(task, serverNow) : null : task.cancelled ? "취소 확인" : isCompletionCountdown
               ? remainingKdsCompletionSeconds(task.completionRequestedAtMs!, serverNow, task.completionCountdownSeconds ?? completionCountdownSeconds)
-              : startUndoSeconds ?? (isCompleted && timedMenuNames.length === 0 ? null : labelFor(task, serverNow));
-            const timeNumberColor = isInactiveCompleted ? "#94A3B8" : kdsTimeNumberColor(task.status,
+              : startUndoSeconds ?? (isCompleted && timedMenuNames.length === 0 ? null : isCompleted ? completedElapsedDisplay : labelFor(task, serverNow));
+            const timeNumberColor = isCompleted && completedElapsedSeconds !== null && completedElapsedSeconds < 60
+              ? "#7C3AED" : kdsTimeNumberColor(task.status,
               section === "preparing" && (isCompletionCountdown || startUndoSeconds !== null));
             const statusText = section === "completed" && isCooking ? "조리중" : statusFor(task);
             const completedShrinkStage = isHighlightedCompleted && typeof statusValue === "number"
               ? kdsCompletedTimeShrinkStage(task.completedAtMs, serverNow, completedTimeShrinkStartMinutes) : 0;
             const displayedStatusValue = completedShrinkStage === 5 ? `${statusValue}분` : statusValue;
+            const countdownDuration = task.completionCountdownSeconds ?? completionCountdownSeconds;
+            const statusCountdownActive = section === "preparing" && (startUndoSeconds !== null ||
+              (isCompletionCountdown && isKdsCompletionCountdownSeconds(countdownDuration) &&
+                serverNow < task.completionRequestedAtMs! + kdsCompletionCountdownMs(countdownDuration)));
+            const statusCountdownFlash = statusCountdownActive && !reducedMotion && countdownFlashTaskIds.has(task.taskId);
+            const statusNumberColor = statusCountdownActive ? "#FFFFFF" : timeNumberColor;
             return <Fragment key={task.taskId}>
               <div className="relative min-w-0" style={{ gridColumn: 2, gridRow: index + 1 }}>
               <button className={`relative h-full w-full min-h-16 min-w-0 rounded-lg border-2 px-2 py-2 text-left leading-tight disabled:cursor-default ${section === "preparing" && choiceTaskId === task.taskId && task.status === "COOKING" && task.completionRequestedAtMs === null ? "invisible" : ""} ${isInactiveCompleted ? "border-slate-200 bg-slate-50/60 text-slate-400" : isHighlightedCompleted ? "border-slate-300 bg-white/75 text-slate-900" : task.cancelled ? "border-red-500 bg-white/75 text-red-700" : isCooking ? "text-white" : "border-slate-300 bg-white/75 text-slate-900"}`} disabled={section === "completed" || task.cancelled || task.status === "DONE" || (pendingId !== null && !(pendingStartTaskIds.has(task.taskId) && task.startSource === "MENU")) || (pendingTableSessionIds.has(table.sessionId) && !(groupedPot && pendingStartTableIds.has(potActionKey))) || (task.completionRequestScope === "TABLE" && task.completionRequestId !== null) || (choiceTaskId === task.taskId && task.status === "COOKING")} onClick={() => groupedPot ? void handleTableButton(tableWideStart ? table : { sessionId: table.sessionId, tasks: row }, !tableWideStart) : void act(task, "MENU")} style={isCooking ? palette.cooking : undefined} type="button">
@@ -1014,7 +1128,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
                 <span className={postCookTimerMinutes !== null ? "block pr-14" : "block"}>
                 <span className={`block break-words text-2xl font-extrabold sm:text-3xl ${isInactiveCompleted ? "text-slate-400" : ""}`}>{display.name}{task.kind === "POT" ? display.qty > 1 ? <span className="tabular-nums">{display.qty}</span> : null : display.qty > 1 ? <> - <span className="tabular-nums">{display.qty}</span></> : null}{spicyStageFor(task) !== undefined && <> - {spicyStageFor(task)}</>}</span>
                 {spicyAlert && index === spicyAlertRow && <span className={`mt-1.5 block break-words text-left text-sm font-bold sm:text-base ${isInactiveCompleted ? "text-slate-400" : isCooking ? "text-red-200" : "text-red-700"}`} role="status">{spicyAlert}</span>}
-                {display.details.length > 0 && <span className={`mt-1 block break-words text-base font-semibold sm:text-xl ${isInactiveCompleted ? "text-slate-400" : isCooking ? "text-white" : "text-slate-700"}`}>{display.details.join(", ")}</span>}
+                {display.details.length > 0 && <span className={`mt-1 block break-words text-base font-semibold sm:text-xl ${isInactiveCompleted ? "text-slate-400" : isCooking ? "text-white" : "text-slate-700"}`}>{display.details.join(" ")}</span>}
                 {(row.some(member => member.orderNote || member.items.some(item => item.note))) && <span className={`mt-2 block border-t pt-1 text-base font-semibold sm:text-xl ${isInactiveCompleted ? "border-slate-200 text-slate-400" : isCooking ? "border-white/60 text-white" : "border-slate-300/70 text-slate-800"}`}>{[...new Set(row.map(member => member.orderNote).filter(Boolean))].map(note => <span className="block" key={note}>요청: {note}</span>)}{row.flatMap(member => member.items).filter(item => item.note).map(item => <span className="block" key={item.itemId}>{item.name}: {item.note}</span>)}</span>}
                 {task.partiallyCancelled && <span className={`mt-1 block text-base font-bold ${isInactiveCompleted ? "text-slate-400" : isCooking ? "text-white" : "text-red-700"}`}>주문 수량 변경</span>}
                 </span>
@@ -1029,10 +1143,11 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
                   })}
                 </div>}
               </div>
-              <button className={`flex min-h-16 flex-col items-center justify-center rounded-lg border px-1 py-1 text-sm font-bold tabular-nums disabled:cursor-default ${isInactiveCompleted ? "border-slate-200 bg-slate-50/60 text-slate-400" : isHighlightedCompleted ? "border-slate-300 bg-white/75 text-slate-800" : task.cancelled ? "border-red-300 bg-white/75 text-red-700" : "border-slate-300 bg-white/75"}`} disabled={section === "completed" || (pendingId !== null && !(pendingStartTaskIds.has(task.taskId) && task.startSource === "STATUS") && !pendingCompletionTaskIds.has(task.taskId)) || (pendingTableSessionIds.has(table.sessionId) && !(groupedPot && pendingStartTableIds.has(potActionKey))) || ((!groupedPot || tableWideCompletion) && task.completionRequestScope === "TABLE" && task.completionRequestId !== null) || (!task.cancelled && task.status === "DONE")} onClick={() => { if (!groupedPot) { handleStatusButton(task); return; } if (task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null) { void cancelPotCompletion(task); return; } if (choiceTaskId === task.taskId) { void handleTableButton({ sessionId: table.sessionId, tasks: row }, true, cookingSettings.defaultBoilTimeMinutes); return; } if (task.status === "COOKING" && task.postCookTimerEligible && task.completionRequestedAtMs === null && !pendingStartTableIds.has(potActionKey) && remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow, task.startSource, task.bulkStartId) === null) { setSelectedBoilTime(null); setChoiceTaskId(task.taskId); return; } void handleTableButton(tableWideStart ? table : { sessionId: table.sessionId, tasks: row }, !tableWideStart); }} style={{ gridColumn: 3, gridRow: index + 1 }} type="button">
-                {statusValue !== null && <span className={typeof statusValue === "number" ? `text-4xl font-extrabold leading-none ${task.status === "DONE" ? "max-w-full break-all text-center" : ""}` : ""} style={typeof statusValue === "number" ? { color: timeNumberColor, ...(isHighlightedCompleted && completedShrinkStage > 0 ? { fontSize: `${36 - completedShrinkStage * 4.8}px` } : {}) } : undefined}>{displayedStatusValue}</span>}
+              <button className={`flex min-h-16 flex-col items-center justify-center rounded-lg border px-1 py-1 text-sm font-bold tabular-nums disabled:cursor-default ${isInactiveCompleted ? "border-slate-200 bg-slate-50/60 text-slate-400" : isHighlightedCompleted ? "border-slate-300 bg-white/75 text-slate-800" : task.cancelled ? "border-red-300 bg-white/75 text-red-700" : "border-slate-300 bg-white/75"}`} disabled={section === "completed" || (pendingId !== null && !(pendingStartTaskIds.has(task.taskId) && task.startSource === "STATUS") && !pendingCompletionTaskIds.has(task.taskId)) || (pendingTableSessionIds.has(table.sessionId) && !(groupedPot && pendingStartTableIds.has(potActionKey))) || ((!groupedPot || tableWideCompletion) && task.completionRequestScope === "TABLE" && task.completionRequestId !== null) || (!task.cancelled && task.status === "DONE")} onClick={() => { stopCountdownFlash(groupedPot ? row.map(member => member.taskId) : [task.taskId]); if (!groupedPot) { handleStatusButton(task); return; } if (task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null) { void cancelPotCompletion(task); return; } if (choiceTaskId === task.taskId) { void handleTableButton({ sessionId: table.sessionId, tasks: row }, true, cookingSettings.defaultBoilTimeMinutes); return; } if (task.status === "COOKING" && task.postCookTimerEligible && task.completionRequestedAtMs === null && !pendingStartTableIds.has(potActionKey) && remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow, task.startSource, task.bulkStartId) === null) { setSelectedBoilTime(null); setChoiceTaskId(task.taskId); return; } void handleTableButton(tableWideStart ? table : { sessionId: table.sessionId, tasks: row }, !tableWideStart); }} style={{ gridColumn: 3, gridRow: index + 1,
+                ...(statusCountdownActive ? { backgroundColor: statusCountdownFlash ? "#C4B5FD" : "#6D28D9", borderColor: "#5B21B6", color: "#FFFFFF", textShadow: "0 1px 2px #4C1D95" } : {}) }} type="button">
+                {statusValue !== null && <span className={typeof statusValue === "number" ? `text-4xl font-extrabold leading-none ${task.status === "DONE" ? "max-w-full break-all text-center" : ""}` : ""} style={typeof statusValue === "number" ? { color: statusNumberColor, ...(isHighlightedCompleted && completedShrinkStage > 0 ? { fontSize: `${36 - completedShrinkStage * 4.8}px` } : {}) } : undefined}>{displayedStatusValue}</span>}
                 {isHighlightedCompleted && mixedCompletionTimer && <span className="max-w-full break-words text-center text-[10px] leading-tight text-slate-600">{timedMenuNames.join(", ")} 시간</span>}
-                <span className={`text-xs font-semibold ${isInactiveCompleted ? "text-slate-400" : isHighlightedCompleted ? "text-slate-700" : task.cancelled ? "text-red-700" : "text-slate-600"}`}>({statusText})</span>
+                <span className={`text-xs font-semibold ${statusCountdownActive ? "text-white" : isInactiveCompleted ? "text-slate-400" : isHighlightedCompleted ? "text-slate-700" : task.cancelled ? "text-red-700" : "text-slate-600"}`}>({statusText})</span>
               </button>
           </Fragment>})}
           </div>;

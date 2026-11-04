@@ -99,10 +99,14 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
     const key = pot.kdsGroupKey?.trim() || "POT";
     potGroups.set(key, [...(potGroups.get(key) ?? []), pot]);
   }
+  const potGroupKeys = [...potGroups.keys()];
+  const defaultPotGroupKey = potGroups.has("POT") ? "POT" : potGroupKeys.length === 1 ? potGroupKeys[0] : null;
   for (const [key, group] of potGroups) {
     const first = group[0];
     const groupAddons = addons.filter(addon =>
-      addon.kdsGroupKey?.trim() ? addon.kdsGroupKey.trim() === key : first === pots[0]);
+      addon.kdsGroupKey?.trim()
+        ? addon.kdsGroupKey.trim() === key
+        : defaultPotGroupKey === key);
     drafts.push({
       orderId,
       taskKey: `pot:${orderId}:${first.itemId}`,
@@ -162,6 +166,10 @@ export function isKdsCompletedTimeShrinkStartMinutes(value: unknown): value is n
 export function kdsCompletedElapsedMinutes(completedAtMs: number | null, nowMs: number) {
   if (completedAtMs === null || !Number.isFinite(completedAtMs) || completedAtMs <= 0 || !Number.isFinite(nowMs)) return null;
   return Math.max(0, Math.floor((nowMs - completedAtMs) / 60_000));
+}
+export function kdsCompletedElapsedSeconds(completedAtMs: number | null, nowMs: number) {
+  if (completedAtMs === null || !Number.isFinite(completedAtMs) || completedAtMs <= 0 || !Number.isFinite(nowMs)) return null;
+  return Math.max(0, Math.floor((nowMs - completedAtMs) / 1_000));
 }
 export function kdsCompletedTimeShrinkStage(completedAtMs: number | null, nowMs: number, startMinutes: number) {
   const elapsed = kdsCompletedElapsedMinutes(completedAtMs, nowMs);

@@ -5,6 +5,6 @@ export function applyKdsDisplayOptions(manifest: MetadataRoute.Manifest) {
     ...manifest,
     display: "fullscreen",
     display_override: ["fullscreen", "standalone"],
-    orientation: "landscape",
+    orientation: "any",
   };
 }

@@ -5,7 +5,7 @@ export const posAppMetadata: Metadata = {
   applicationName: "TDKON POS",
   description: "TDKON POS",
   manifest: "/tdkpos/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "TDKPOS", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "TDKON POS", statusBarStyle: "default" },
   icons: {
     icon: [
       { url: "/icons/tdk-pos-192.png", sizes: "192x192", type: "image/png" },

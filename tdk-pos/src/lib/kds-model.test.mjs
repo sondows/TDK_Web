@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel } from "./kds-model.ts";
 import { parseKdsMenuConfig } from "./kds-menu-config.ts";
-import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, transitionKdsState } from "./kds-model.ts";
+import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, transitionKdsState } from "./kds-model.ts";
 
 const item = (itemId, kdsKind, overrides = {}) => ({
   itemId, parentItemId: null, menuId: itemId, itemType: "NORMAL",
@@ -114,18 +114,47 @@ test("completed elapsed display respects each menu's saved setting in a shared p
     { enabledNames: ["단품"], mixed: false });
 });
 
-test("different pot cooking groups in one batch remain independent", () => {
+test("different pot cooking groups remain independent and ambiguous unkeyed addons stay visible", () => {
   const drafts = buildKdsTaskDrafts(12, [
     item(1, "POT", { kdsGroupKey: "STEW" }),
     item(2, "POT", { kdsGroupKey: "SOUP" }),
     item(3, "ADDON"),
     item(4, "ADDON", { kdsGroupKey: "SOUP" }),
   ]);
-  assert.equal(drafts.length, 2);
-  assert.deepEqual(drafts.map(draft => draft.members.map(member => member.itemId)), [[1, 3], [2, 4]]);
-  assert.deepEqual(drafts.map(draft => draft.compatibilityKey), ["STEW", "SOUP"]);
+  assert.equal(drafts.length, 3);
+  assert.deepEqual(drafts.map(draft => draft.members.map(member => member.itemId)), [[1], [2, 4], [3]]);
+  assert.deepEqual(drafts.map(draft => draft.compatibilityKey), ["STEW", "SOUP", "MENU:3"]);
   const orphan = buildKdsTaskDrafts(13, [item(5, "ADDON", { kdsGroupKey: "SOUP" })]);
   assert.equal(orphan[0].compatibilityKey, "SOLO:SOUP");
+});
+
+test("unkeyed addons join a unique stew group but remain visible when the association is ambiguous", () => {
+  const unique = buildKdsTaskDrafts(40, [
+    item(1, "POT", { kdsGroupKey: "STEW" }), item(2, "ADDON"),
+  ]);
+  assert.deepEqual(unique.map(draft => draft.members.map(member => member.itemId)), [[1, 2]]);
+  const ambiguous = buildKdsTaskDrafts(41, [
+    item(3, "POT", { kdsGroupKey: "STEW" }), item(4, "POT", { kdsGroupKey: "SOUP" }), item(5, "ADDON"),
+  ]);
+  assert.deepEqual(ambiguous.map(draft => draft.members.map(member => member.itemId)), [[3], [4], [5]]);
+});
+
+test("main stew, second stew, and multiple addons render on one secondary text line", () => {
+  const [draft] = buildKdsTaskDrafts(42, [
+    item(1, "POT", { kdsGroupKey: "STEW" }),
+    item(2, "POT", { kdsGroupKey: "STEW" }),
+    item(3, "ADDON", { kdsGroupKey: "STEW" }),
+    item(4, "ADDON", { kdsGroupKey: "STEW" }),
+  ]);
+  assert.deepEqual(draft.members.map(member => member.itemId), [1, 2, 3, 4]);
+  const display = formatKdsTaskDisplay("POT", [
+    { name: "흑돼지김치찌개", qty: 1, kind: "POT", options: [] },
+    { name: "꽁치김치찌개", qty: 1, kind: "POT", options: [] },
+    { name: "흑돼지추가", qty: 1, kind: "ADDON", options: [] },
+    { name: "두부추가", qty: 1, kind: "ADDON", options: [] },
+  ]);
+  assert.equal(display.name, "흑돼지김치찌개");
+  assert.equal(`${display.details.join(" ")}`, "꽁치김치찌개 흑돼지추가 두부추가");
 });
 
 test("KDS display OFF excludes parent tasks and components without touching the source order", () => {
@@ -467,6 +496,17 @@ test("completed tab elapsed minutes start at confirmation and continue after the
   assert.equal(kdsCompletedElapsedMinutes(null, completedAt), null);
   assert.equal(kdsCompletedElapsedMinutes(0, completedAt), null);
   assert.equal(kdsCompletedElapsedMinutes(completedAt + 4 * 60_000, completedAt + 10 * 60_000), 6);
+});
+
+test("completed task elapsed seconds start at one and stop before the one-minute label", () => {
+  const completedAt = 1_000_000;
+  assert.equal(kdsCompletedElapsedSeconds(completedAt, completedAt), 0);
+  assert.equal(kdsCompletedElapsedSeconds(completedAt, completedAt + 1), 0);
+  assert.equal(Math.max(1, kdsCompletedElapsedSeconds(completedAt, completedAt + 1)), 1);
+  assert.equal(kdsCompletedElapsedSeconds(completedAt, completedAt + 10_000), 10);
+  assert.equal(kdsCompletedElapsedSeconds(completedAt, completedAt + 59_999), 59);
+  assert.equal(kdsCompletedElapsedSeconds(completedAt, completedAt + 60_000), 60);
+  assert.equal(kdsCompletedElapsedSeconds(null, completedAt), null);
 });
 
 test("each completed task uses its own confirmed timestamp", () => {

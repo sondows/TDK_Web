@@ -2,6 +2,7 @@ import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { checkoutItems, checkouts, customerPrepaidLedger, customers, orderItems, orders, paymentMethods, payments } from "@/db/schema";
 import { getCurrentAdminStaff, requireAdminAccess } from "@/lib/admin-auth";
+import { canReadCustomerTradeLedger } from "@/lib/customer-ledger-access";
 import { adjustmentReasons, fullyReversedAdjacentLedgerPairs, tradeMethods, type TradeEntryType } from "@/lib/customer-trade";
 
 const json = (body: unknown, status = 200) => Response.json(body, {
@@ -36,9 +37,9 @@ function parseDate(value: string | null) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ customerId: string }> }) {
   try {
-    if (!await getCurrentAdminStaff()) return json({ success: false, message: "로그인이 필요합니다." }, 401);
     const customerId = customerIdFrom((await params).customerId);
     if (!customerId) return json({ success: false, message: "고객을 확인해 주세요." }, 400);
+    if (!await canReadCustomerTradeLedger(customerId)) return json({ success: false, message: "로그인이 필요하거나 잔액 조회 권한이 없습니다." }, 401);
     const url = new URL(request.url);
     const startRaw = url.searchParams.get("startDate");
     const endRaw = url.searchParams.get("endDate");

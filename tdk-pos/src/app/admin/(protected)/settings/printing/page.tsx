@@ -10,7 +10,7 @@ export default async function AdminPrintingSettingsPage() {
   const receiptAutoPrint = await getReceiptAutoPrintAfterPayment();
 
   return <div className={styles.content}>
-    <div className="mx-auto max-w-xl">
+    <div className="max-w-xl">
       <div className={styles.pageHeading}>
         <div className="flex items-center gap-3">
           <Link aria-label="관리센터로 돌아가기" className="text-2xl font-semibold text-slate-700 hover:text-slate-900" href="/tdkadm">←</Link>

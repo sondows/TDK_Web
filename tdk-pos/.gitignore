@@ -25,6 +25,13 @@
 # misc
 .DS_Store
 *.pem
+**/root-ca.cer
+**/server.pfx
+**/pfx-password.txt
+**/root-ca-key.pem
+**/server-key.pem
+/deploy/dev-https-cert/bin/
+/deploy/dev-https-cert/obj/
 /.codex-backups/
 
 # debug

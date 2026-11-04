@@ -202,22 +202,50 @@ export function completeKdsTableOrder(
 
 /** Only tasks with the same pot recipe and identical cooking state share one control. */
 export function groupKdsPotDisplayRows<T extends {
-  sessionId: number; kind: "POT" | "SOLO"; sessionKind: KdsPartyTask["sessionKind"];
+  sessionId: number; orderId: number; kind: "POT" | "SOLO"; sessionKind: KdsPartyTask["sessionKind"];
   compatibilityKey: string; status: "WAITING" | "COOKING" | "DONE";
-  startedAtMs: number | null; completedAtMs: number | null; completionRequestId: string | null;
+  startedAtMs: number | null; completedAtMs: number | null; changedAtMs?: number | null; completionRequestId: string | null;
   completionRequestScope: "TASK" | "TABLE" | null; completionRequestedAtMs: number | null; cancelled: boolean;
-  items: Array<{ name: string; kind: string }>;
+  items: Array<{ name: string; kind: string; kdsKind?: string; kdsGroupKey?: string | null }>;
 }>(tasks: T[]): T[][] {
   const rows: T[][] = [];
   const keys = new Map<string, T[]>();
   for (const task of tasks) {
-    if (task.kind !== "POT" || task.sessionKind !== "DINE_IN" || task.cancelled) { rows.push([task]); continue; }
-    const key = [task.sessionId, task.compatibilityKey, task.status, task.startedAtMs, task.completedAtMs,
+    if (task.kind !== "POT" || task.sessionKind !== "DINE_IN" || task.cancelled) continue;
+    const key = [task.sessionId, task.orderId, task.compatibilityKey, task.status, task.startedAtMs, task.completedAtMs,
       task.completionRequestScope, task.completionRequestId, task.completionRequestedAtMs].join(":");
     let row = keys.get(key);
     if (!row) { row = []; keys.set(key, row); rows.push(row); }
     row.push(task);
   }
+  const addons = tasks.filter(task => task.kind === "SOLO" && task.sessionKind === "DINE_IN" && !task.cancelled &&
+    task.items.some(item => item.kind !== "COMPONENT" && item.kdsKind === "ADDON"));
+  for (const addon of addons) {
+    const addonGroupKeys = [...new Set(addon.items
+      .filter(item => item.kind !== "COMPONENT" && item.kdsKind === "ADDON")
+      .map(item => item.kdsGroupKey?.trim() || null))];
+    if (addonGroupKeys.length !== 1) continue;
+    const addonGroupKey = addonGroupKeys[0];
+    const sameOrderPotRows = rows.filter(row => row[0].sessionId === addon.sessionId && row[0].orderId === addon.orderId);
+    let candidates = addonGroupKey !== null
+      ? sameOrderPotRows.filter(row => row.some(pot => pot.compatibilityKey === addonGroupKey))
+      : sameOrderPotRows.filter(row => row[0].compatibilityKey === "POT");
+    if (addonGroupKey === null) {
+      if (candidates.length === 0) {
+        const groupKeys = new Set(sameOrderPotRows.map(row => row[0].compatibilityKey));
+        if (groupKeys.size === 1) candidates = sameOrderPotRows;
+      }
+    }
+    candidates = candidates.filter(row => row.some(pot => pot.status === addon.status &&
+      pot.startedAtMs === addon.startedAtMs && pot.completedAtMs === addon.completedAtMs &&
+      pot.changedAtMs === addon.changedAtMs &&
+      pot.completionRequestScope === addon.completionRequestScope &&
+      pot.completionRequestId === addon.completionRequestId &&
+      pot.completionRequestedAtMs === addon.completionRequestedAtMs));
+    if (candidates.length === 1) candidates[0].push(addon);
+  }
+  const grouped = new Set(rows.flat());
+  for (const task of tasks) if (!grouped.has(task)) rows.push([task]);
   for (const row of rows) if (row.length > 1) row.sort((a, b) =>
     Number(b.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")) -
     Number(a.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")));
@@ -255,10 +283,9 @@ export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[]): KdsPar
 }
 
 export function preparingKdsPartyCards<T extends KdsPartyTask>(cards: KdsPartyCard<T>[]): KdsPartyCard<T>[] {
-  return cards.flatMap(card => {
-    const tables = card.tables.filter(table => table.tasks.some(task => task.status !== "DONE" || task.cancelled));
-    return tables.length ? [{ ...card, tables }] : [];
-  });
+  // Keep every table in a party card as context until all party tasks are done.
+  // Filtering individual tables here made a completed member disappear too early.
+  return cards.filter(card => partyHasActiveTask(card));
 }
 
 export function sortKdsPartyCardsByLatestOrder<T extends KdsPartyTask & { orderedAtMs: number }>(cards: KdsPartyCard<T>[]): KdsPartyCard<T>[] {

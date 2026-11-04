@@ -5,7 +5,7 @@ import {
   orderItemOptions, orderItems, orders, paymentMethods, paymentOtherDetails,
   payments, tableSessions,
 } from "@/db/schema";
-import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { canReadCustomerTradeLedger } from "@/lib/customer-ledger-access";
 import { salePlaceLabel } from "@/lib/sale-place-label";
 import type { CustomerTradeDetail, CustomerTradeDetailResponse, TradeEntryType } from "@/lib/customer-trade";
 
@@ -20,11 +20,11 @@ function positiveId(value: string) {
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ customerId: string; ledgerId: string }> }) {
-  if (!await getCurrentAdminStaff()) return json({ success: false, message: "로그인이 필요합니다." }, 401);
   const identifiers = await params;
   const customerId = positiveId(identifiers.customerId);
   const ledgerId = positiveId(identifiers.ledgerId);
   if (!customerId || !ledgerId) return json({ success: false, message: "거래를 확인해 주세요." }, 400);
+  if (!await canReadCustomerTradeLedger(customerId)) return json({ success: false, message: "로그인이 필요하거나 잔액 조회 권한이 없습니다." }, 401);
 
   try {
     const [customer] = await db.select({ name: customers.name, phone: customers.phone })

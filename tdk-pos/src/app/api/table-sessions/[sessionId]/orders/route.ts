@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/db";
 import { menuComponents, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
@@ -54,7 +55,9 @@ function parseRequestedItems(value: unknown): RequestedItem[] | null {
 
 export async function POST(request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   try {
-    const currentStaff = await getCurrentStaff();
+    const posStaff = await getCurrentStaff();
+    const hosStaff = posStaff ? null : await getCurrentHosStaff();
+    const currentStaff = posStaff ?? hosStaff;
     const sharedMode = await getPosLoginMode() === "SHARED";
     if (!currentStaff && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
 
@@ -64,7 +67,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
     if (!Number.isSafeInteger(sessionId) || sessionId <= 0 || !requestedItems) return Response.json({ success: false, message: "주문 요청이 올바르지 않습니다." }, { status: 400 });
 
     await db.transaction(async tx => {
-      await ensureDailyOpeningCash(tx);
+      if (!hosStaff) await ensureDailyOpeningCash(tx);
       const [session] = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
       if (!session) throw new OrderValidationError("테이블 세션이 종료되었거나 존재하지 않습니다.");
 

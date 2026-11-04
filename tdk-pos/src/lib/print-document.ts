@@ -47,6 +47,14 @@ export type AccountNoticeInput = {
   accountHolder: string;
 };
 
+export type CustomerLedgerHeaderInput = {
+  storeInfo: SalePrintInput["storeInfo"];
+  receiptLogo: PrintLogo | null;
+  customerName: string;
+  periodLabel: string;
+  printedAt: string;
+};
+
 const money = (amount: number) => amount.toLocaleString("ko-KR");
 const row = (left: string, right: string, size = 24, bold = false): PrintCommand =>
   ({ type: "row", left, right, size, bold });
@@ -64,6 +72,29 @@ function saleIdentityRows(input: SalePrintInput): PrintCommand[] {
     row(`${store.address.trim()}${store.phone.trim() ? `(${store.phone.trim()})` : ""}`, store.businessNumber.trim()),
     row(input.transactionAt, input.tableNos.some(tableNo => /^(포장|방문포장|전화포장)\d{4}(?:-\d+)?$/.test(tableNo)) ? input.tableLabel : `TNo.${input.tableNos.join(".")}`, 24),
     { type: "line" },
+  ];
+}
+
+/** Receipt-style store header for POS customer ledger output. */
+export function buildCustomerLedgerHeader(input: CustomerLedgerHeaderInput): PrintCommand[] {
+  const store = input.storeInfo;
+  return [
+    ...logoOrName(input.receiptLogo, store.storeName),
+    feed(1),
+    text(input.customerName, "center", 32, true),
+    feed(1),
+    row(`${store.address.trim()}${store.phone.trim() ? `(${store.phone.trim()})` : ""}`, store.businessNumber.trim()),
+    row(input.printedAt, `기간: ${input.periodLabel}`, 24),
+    { type: "line" },
+  ];
+}
+
+export function buildCustomerLedgerFooter(currentBalance: number): PrintCommand[] {
+  return [
+    { type: "line" },
+    row("현재 잔액", money(currentBalance), 24, true),
+    feed(2),
+    { type: "cut" },
   ];
 }
 

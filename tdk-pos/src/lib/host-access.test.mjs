@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   externalAliasTarget, externalCanonicalPath, hostnameFromHeader, isAliasRewriteTarget, isExternalAdminHost, isExternalAliasTargetAllowed,
-  hasVerifiedExternalHttpsIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalPosPath, isKnownInternalHost,
+  hasVerifiedExternalHttpsIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalHosPath, isExternalPosPath, isKnownInternalHost,
   internalCanonicalPath,
 } from "./host-access.ts";
 
@@ -30,12 +30,15 @@ test("public aliases map to their actual application routes", () => {
   assert.deepEqual(externalAliasTarget("/tdkadm/security/devices"), { surface: "admin", target: "/admin/security/devices" });
   assert.deepEqual(externalAliasTarget("/tdkkds"), { surface: "kds", target: "/kitchen" });
   assert.deepEqual(externalAliasTarget("/tdkkds/status"), { surface: "kds", target: "/kitchen/status" });
+  assert.deepEqual(externalAliasTarget("/tdkhos"), { surface: "hos", target: "/hos" });
   assert.equal(externalAliasTarget("/tdkpos-evil"), null);
   assert.equal(internalCanonicalPath("/pos"), "/tdkpos");
   assert.equal(internalCanonicalPath("/pos/session/4"), "/tdkpos/session/4");
   assert.equal(internalCanonicalPath("/kitchen"), "/tdkkds");
   assert.equal(internalCanonicalPath("/kitchen/status"), "/tdkkds/status");
   assert.equal(internalCanonicalPath("/kds"), "/tdkkds");
+  assert.equal(internalCanonicalPath("/hos"), "/tdkhos");
+  assert.equal(internalCanonicalPath("/hos/orders"), "/tdkhos/orders");
   assert.equal(externalCanonicalPath("/kds"), "/tdkkds");
   assert.equal(internalCanonicalPath("/admin"), "/tdkadm");
   assert.equal(internalCanonicalPath("/admin/login"), "/tdkadm/login");
@@ -51,6 +54,8 @@ test("alias rewrite hints match only internal targets for the same surface", () 
   assert.equal(isAliasRewriteTarget("pos", "/admin/staff"), false);
   assert.equal(isAliasRewriteTarget("admin", "/admin/staff"), true);
   assert.equal(isAliasRewriteTarget("kds", "/kitchen/status"), true);
+  assert.equal(isAliasRewriteTarget("hos", "/hos"), true);
+  assert.equal(isAliasRewriteTarget("hos", "/api/hos/tables"), true);
   assert.equal(isAliasRewriteTarget("kds", "/pos"), false);
   assert.equal(isAliasRewriteTarget("unknown", "/login"), false);
   assert.equal(isAliasRewriteTarget(null, "/login"), false);
@@ -61,6 +66,10 @@ test("external POS requires verified HTTPS ingress while KDS keeps its existing 
   assert.equal(isExternalAliasTargetAllowed("kds", "/api/kitchen/auth/login", "POST", false), true);
   assert.equal(isExternalAliasTargetAllowed("pos", "/pos", "GET", false), false);
   assert.equal(isExternalAliasTargetAllowed("pos", "/pos", "GET", true), true);
+  assert.equal(isExternalAliasTargetAllowed("hos", "/hos", "GET", false), false);
+  assert.equal(isExternalAliasTargetAllowed("hos", "/hos", "GET", true), true);
+  assert.equal(isExternalAliasTargetAllowed("hos", "/api/hos/auth/login", "POST", false), false);
+  assert.equal(isExternalAliasTargetAllowed("hos", "/api/hos/auth/login", "POST", true), true);
   assert.equal(isExternalAliasTargetAllowed("admin", "/api/customers", "GET", false), true);
   assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "1" })), true);
   assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "0" })), false);
@@ -74,6 +83,11 @@ test("POS and KDS paths are blocked on the public Host, including old and API ro
   }
   for (const path of ["/tdkkds", "/kitchen", "/api/kitchen", "/api/kitchen/auth/login"]) {
     assert.equal(isExternalKdsPath(path), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
+  }
+  for (const path of ["/tdkhos", "/hos", "/api/hos", "/api/hos/auth/login", "/api/hos/tables",
+    "/api/admin-center/trust/initial-master/status", "/api/program-trust/master-recovery/register-initial"]) {
+    assert.equal(isExternalHosPath(path), true, path);
     assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
   }
   assert.equal(isExternalKdsPath("/api/kds/table-order"), false);

@@ -3,8 +3,10 @@
 import { createContext, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { resolveAdmIdStatus, transitionAuthPhase, type AuthEvent, type AuthPhase } from "@/lib/program-auth-flow";
 import { checkMasterRecoveryId, masterRecoveryActionLabel } from "@/lib/master-recovery-client";
+import PosTouchKeyboard, { type PosKeyboardMode } from "@/components/PosTouchKeyboard";
 
-type Program = "POS" | "ADM" | "KDS";
+type Program = "POS" | "ADM" | "KDS" | "HOS";
+type PosKeyboardTarget = "loginId" | "password" | "confirmPassword" | "recoveryPassword" | "recoveryConfirm";
 type TrustStatus = { trusted?: boolean; invalidated?: boolean; pinSetupRequired?: boolean;
   passwordRegistrationRequired?: boolean; masterPasswordConfigured?: boolean; loginId?: string };
 type RecoveryStatus = { available?: boolean; loginId?: string; passwordConfigured?: boolean };
@@ -15,13 +17,13 @@ export const ProgramAuthContext = createContext<{
   setLoginId: (value: string) => void;
 } | null>(null);
 const endpoints: Record<Program, string> = {
-  POS: "/api/auth/trust", ADM: "/api/admin-center/trust", KDS: "/api/kitchen/auth/trust",
+  POS: "/api/auth/trust", ADM: "/api/admin-center/trust", KDS: "/api/kitchen/auth/trust", HOS: "/api/hos/auth/trust",
 };
 const loginPath: Record<Program, string> = {
-  POS: "/tdkpos/login", ADM: "/tdkadm/login", KDS: "/tdkkds",
+  POS: "/tdkpos/login", ADM: "/tdkadm/login", KDS: "/tdkkds", HOS: "/tdkhos",
 };
 const homePath: Record<Program, string> = {
-  POS: "/tdkpos", ADM: "/tdkadm", KDS: "/tdkkds",
+  POS: "/tdkpos", ADM: "/tdkadm", KDS: "/tdkkds", HOS: "/tdkhos",
 };
 const inputStyle = "mt-2 min-h-14 w-full rounded-xl border border-slate-300 px-4 disabled:bg-slate-100";
 const meetsMasterPasswordPolicy = (value: string) => value.length >= 10 && value.length <= 128 &&
@@ -47,6 +49,8 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   const [recoveryConfirm, setRecoveryConfirm] = useState("");
   const [recoveryError, setRecoveryError] = useState("");
   const [initialPasswordRegistration, setInitialPasswordRegistration] = useState(false);
+  const [activeKeyboard, setActiveKeyboard] = useState<PosKeyboardMode | null>(null);
+  const [keyboardTarget, setKeyboardTarget] = useState<PosKeyboardTarget>("loginId");
   const recoveryDialog = useRef<HTMLDialogElement>(null);
   const idInput = useRef<HTMLInputElement>(null);
   const passwordInput = useRef<HTMLInputElement>(null);
@@ -60,6 +64,34 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   const endpoint = endpoints[program];
   const advance = useCallback((event: AuthEvent) =>
     setPhase(current => transitionAuthPhase(current, event)), []);
+
+  const updateKeyboardTarget = (update: (current: string) => string) => {
+    if (keyboardTarget === "loginId") setLoginId(current => update(current).slice(0, 32));
+    else if (keyboardTarget === "password") setPassword(current => update(current).slice(0, 128));
+    else if (keyboardTarget === "confirmPassword") setConfirmPassword(current => update(current).slice(0, 128));
+    else if (keyboardTarget === "recoveryPassword") setRecoveryPassword(current => update(current).slice(0, 128));
+    else setRecoveryConfirm(current => update(current).slice(0, 128));
+  };
+  const keyboardText = (text: string) => updateKeyboardTarget(current => current + text);
+  const keyboardBackspace = () => updateKeyboardTarget(current => Array.from(current).slice(0, -1).join(""));
+  const keyboardClear = () => updateKeyboardTarget(() => "");
+  const openPosKeyboard = (target: PosKeyboardTarget, mode: PosKeyboardMode) => {
+    if (program !== "POS") return;
+    setKeyboardTarget(target);
+    setActiveKeyboard(mode);
+  };
+
+  useEffect(() => {
+    if (!activeKeyboard || program !== "POS") return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) ||
+        (!target.closest("[data-pos-touch-keyboard]") && !target.closest("[data-pos-touch-input]")))
+        setActiveKeyboard(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [activeKeyboard, program]);
 
   const checkInitialState = useCallback(async () => {
     const serial = ++checkSerial.current;
@@ -100,7 +132,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       setPhase("LOGIN_ID");
       return;
     }
-    if (program === "KDS") {
+    if (program === "KDS" || program === "HOS") {
       setRecoveryToken(""); setVerifiedToken(false); setLoginId(""); setPassword("");
       setPhase("LOGIN_ID");
       return;
@@ -272,7 +304,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   };
 
   const checkKdsId = async () => {
-    if (program !== "KDS" || busy || kdsIdSubmitLock.current || phase !== "LOGIN_ID") return;
+    if ((program !== "KDS" && program !== "HOS") || busy || kdsIdSubmitLock.current || phase !== "LOGIN_ID") return;
     const normalizedId = loginId.trim().toLowerCase();
     if (!/^[a-z][a-z0-9._-]{2,31}$/.test(normalizedId)) {
       setMessage("ID를 확인해 주세요.");
@@ -306,7 +338,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       }
       try {
         const setupUrl = new URL("/api/admin-center/trust/initial-master/status", window.location.origin);
-        setupUrl.searchParams.set("program", "KDS");
+        setupUrl.searchParams.set("program", program);
         const setupResponse = await fetch(setupUrl, {
           method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
           body: JSON.stringify({ loginId: normalizedId }),
@@ -421,7 +453,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   }, [program, phase, loginId]);
 
   useEffect(() => {
-    if ((program === "ADM" || program === "KDS") && phase === "LOGIN_PASSWORD") passwordInput.current?.focus();
+    if ((program === "ADM" || program === "KDS" || program === "HOS") && phase === "LOGIN_PASSWORD") passwordInput.current?.focus();
   }, [program, phase]);
   useEffect(() => {
     if (program === "POS" && phase === "LOGIN_ID") idInput.current?.focus();
@@ -430,10 +462,10 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     if (program === "POS" && phase === "LOGIN_PASSWORD") passwordInput.current?.focus();
   }, [program, phase]);
   useEffect(() => {
-    if (program === "KDS" && phase === "LOGIN_ID") idInput.current?.focus();
+    if ((program === "KDS" || program === "HOS") && phase === "LOGIN_ID") idInput.current?.focus();
   }, [program, phase]);
   useEffect(() => {
-    if (program === "KDS" && phase === "SETUP_PIN") pinInput.current?.focus();
+    if ((program === "KDS" || program === "HOS") && phase === "SETUP_PIN") pinInput.current?.focus();
   }, [program, phase]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -441,7 +473,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     if (busy) return;
     if (phase === "LOGIN_ID") {
       if (program === "ADM") await checkAdmId();
-      else if (program === "KDS") await checkKdsId();
+      else if (program === "KDS" || program === "HOS") await checkKdsId();
       else if (program === "POS") await checkPosId();
       return;
     }
@@ -528,7 +560,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       const registrationUrl = new URL(initialPasswordRegistration ?
         "/api/program-trust/master-recovery/register-initial" :
         "/api/program-trust/master-recovery/register", window.location.origin);
-      if (initialPasswordRegistration && (program === "KDS" || program === "POS"))
+      if (initialPasswordRegistration && (program === "KDS" || program === "POS" || program === "HOS"))
         registrationUrl.searchParams.set("program", program);
       const response = await fetch(registrationUrl, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -570,7 +602,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     {phase === "LOGIN_PIN" && <button className="text-blue-700 underline" onClick={() => {
       setPassword(""); setPhase("LOGIN_PASSWORD");
     }} type="button">다른 직원 인증</button>}
-    {program === "KDS" && phase === "LOGIN_PIN" && <button className="text-blue-700 underline" onClick={() => {
+    {(program === "KDS" || program === "HOS") && phase === "LOGIN_PIN" && <button className="text-blue-700 underline" onClick={() => {
       setPassword(""); setPin(""); setMessage(""); setVerifiedToken(false); setPhase("LOGIN_ID");
     }} type="button">ID 변경</button>}
     {phase === "LOGIN_PIN" && <button className="text-blue-700 underline" onClick={() => {
@@ -592,7 +624,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         phase === "CHANGE_TEMPORARY_PASSWORD" ? "마스터 비밀번호 변경" :
           program === "ADM" && (phase === "LOGIN_ID" || phase === "LOGIN_PASSWORD") ?
             "관리센터 로그온" : program === "POS" ? "POS 로그인" :
-              program === "KDS" ? "KDS 로그인" : `${program} 최초 인증`;
+              program === "KDS" ? "KDS 로그인" : program === "HOS" ? "TDK HOS" : `${program} 최초 인증`;
   const showId = true;
   const showPassword = phase === "LOGIN_PASSWORD" || phase === "SETUP_PASSWORD" ||
     phase === "BOOTSTRAP_SETUP" || phase === "CHANGE_TEMPORARY_PASSWORD";
@@ -607,7 +639,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     phase === "SETUP_PIN" ? pinReset ? "PIN 변경" : "PIN 등록" :
       phase === "BOOTSTRAP_SETUP" ? "최고관리자 등록" :
         phase === "CHANGE_TEMPORARY_PASSWORD" ? "비밀번호 설정" : "인증";
-  return <>{status}<main className="flex min-h-dvh items-center justify-center bg-slate-100 p-4">
+  return <>{status}<main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-slate-100 p-4">
     <section className="w-full max-w-[440px] rounded-2xl bg-white p-6 shadow-xl sm:p-8">
       <header className="mb-6 text-center"><h1 className="text-4xl font-extrabold text-blue-600">TDKON</h1>
         <p className="mt-2 text-lg font-bold text-slate-600">{title}</p></header>
@@ -628,6 +660,10 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             {showId && <label className="block text-sm font-bold text-slate-700">ID
               <input autoCapitalize="none" autoComplete="username" autoCorrect="off" className={inputStyle}
                 maxLength={32} onChange={event => { setLoginId(event.target.value); setPassword(""); setMessage(""); }}
+                onFocus={() => { if (program === "POS" && phase === "LOGIN_ID") openPosKeyboard("loginId", "id"); }}
+                onPointerDown={() => { if (program === "POS" && phase === "LOGIN_ID") openPosKeyboard("loginId", "id"); }}
+                data-pos-touch-input={program === "POS" && phase === "LOGIN_ID" ? "true" : undefined}
+                inputMode={program === "POS" && phase === "LOGIN_ID" ? "none" : undefined}
                 ref={idInput}
                 readOnly={phase !== "LOGIN_ID" && phase !== "RECOVERY_ID"}
                 disabled={busy}
@@ -635,16 +671,28 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             {showPassword && <label className="block text-sm font-bold text-slate-700">{phase === "LOGIN_PASSWORD" || phase === "SETUP_PASSWORD" ? "마스터 비밀번호" : "새 마스터 비밀번호"}
               <input autoComplete={phase === "LOGIN_PASSWORD" ? "current-password" : "new-password"}
                 className={inputStyle} disabled={phase === "SETUP_PASSWORD"} maxLength={128} minLength={10}
-                onChange={event => setPassword(event.target.value)} ref={phase === "LOGIN_PASSWORD" ? passwordInput : undefined}
+                onChange={event => setPassword(event.target.value)}
+                onFocus={() => { if (program === "POS") openPosKeyboard("password", "master"); }}
+                onPointerDown={() => { if (program === "POS") openPosKeyboard("password", "master"); }}
+                data-pos-touch-input={program === "POS" ? "true" : undefined}
+                inputMode={program === "POS" ? "none" : undefined}
+                ref={phase === "LOGIN_PASSWORD" ? passwordInput : undefined}
                 required={phase !== "SETUP_PASSWORD"}
                 type="password" value={password} /></label>}
             {phase === "SETUP_PIN" && pinReset && <label className="block text-sm font-bold text-slate-700">마스터 비밀번호
               <input autoComplete="current-password" className={inputStyle} maxLength={128} minLength={10}
-                onChange={event => setPassword(event.target.value)} required type="password" value={password} /></label>}
+                onChange={event => setPassword(event.target.value)}
+                onFocus={() => openPosKeyboard("password", "master")} onPointerDown={() => openPosKeyboard("password", "master")}
+                data-pos-touch-input={program === "POS" ? "true" : undefined} inputMode={program === "POS" ? "none" : undefined}
+                required type="password" value={password} /></label>}
             {(phase === "BOOTSTRAP_SETUP" || phase === "CHANGE_TEMPORARY_PASSWORD") &&
               <label className="block text-sm font-bold text-slate-700">마스터 비밀번호 확인
                 <input autoComplete="new-password" className={inputStyle} maxLength={128} minLength={10}
-                  onChange={event => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} /></label>}
+                  onChange={event => setConfirmPassword(event.target.value)}
+                  onFocus={() => openPosKeyboard("confirmPassword", "master")}
+                  onPointerDown={() => openPosKeyboard("confirmPassword", "master")}
+                  data-pos-touch-input={program === "POS" ? "true" : undefined} inputMode={program === "POS" ? "none" : undefined}
+                  required type="password" value={confirmPassword} /></label>}
             {phase === "SETUP_PIN" && <>
               <label className="block text-sm font-bold text-slate-700">새 6자리 PIN
                 <input autoComplete="new-password" className={inputStyle} inputMode="numeric" maxLength={6}
@@ -660,7 +708,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             <button className="min-h-14 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50"
               disabled={disabled}
               type="submit">{buttonText}</button>
-            {phase === "LOGIN_ID" && (program === "ADM" || program === "KDS" || program === "POS") ?
+            {phase === "LOGIN_ID" && (program === "ADM" || program === "KDS" || program === "POS" || program === "HOS") ?
               <p className="text-center text-xs text-slate-500">ID를 입력한 후 다음 버튼을 눌러주세요.</p> :
               phase === "LOGIN_PASSWORD" && (program === "ADM" || program === "POS") ?
                 <p className="text-center text-xs text-slate-500">마스터 비밀번호를 입력해 주세요.</p> :
@@ -674,6 +722,13 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
                   <p className="text-center text-xs text-slate-500">인증 후 개인 6자리 PIN으로 로그인합니다.</p>}
           </form>}
     </section>
+    {program === "POS" && activeKeyboard && keyboardTarget !== "recoveryPassword" && keyboardTarget !== "recoveryConfirm" &&
+      <PosTouchKeyboard mode={activeKeyboard}
+        onText={text => { keyboardText(text); setMessage(""); setRecoveryError(""); }}
+        onBackspace={() => { keyboardBackspace(); setMessage(""); setRecoveryError(""); }}
+        onClear={() => { keyboardClear(); setMessage(""); setRecoveryError(""); }}
+        onConfirm={() => setActiveKeyboard(null)}
+        onClose={() => setActiveKeyboard(null)} />}
     <dialog aria-labelledby="master-recovery-title"
       className="m-auto w-[min(420px,calc(100vw-2rem))] rounded-2xl bg-white p-6 text-slate-800 shadow-xl backdrop:bg-slate-900/60"
       onCancel={event => { if (busy) event.preventDefault(); else setRecoveryOpen(false); }}
@@ -683,11 +738,19 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
           "마스터 비밀번호 등록" : masterRecoveryActionLabel(recoveryPasswordConfigured)}</h2>
         <label className="block text-sm font-bold">마스터 비밀번호
           <input autoComplete="new-password" className={inputStyle} maxLength={128} minLength={10}
-            onChange={event => setRecoveryPassword(event.target.value)} required type="password"
+            onChange={event => setRecoveryPassword(event.target.value)}
+            onFocus={() => openPosKeyboard("recoveryPassword", "master")}
+            onPointerDown={() => openPosKeyboard("recoveryPassword", "master")}
+            data-pos-touch-input={program === "POS" ? "true" : undefined}
+            inputMode={program === "POS" ? "none" : undefined} required type="password"
             value={recoveryPassword} /></label>
         <label className="block text-sm font-bold">마스터 비밀번호 확인
           <input autoComplete="new-password" className={inputStyle} maxLength={128} minLength={10}
-            onChange={event => setRecoveryConfirm(event.target.value)} required type="password"
+            onChange={event => setRecoveryConfirm(event.target.value)}
+            onFocus={() => openPosKeyboard("recoveryConfirm", "master")}
+            onPointerDown={() => openPosKeyboard("recoveryConfirm", "master")}
+            data-pos-touch-input={program === "POS" ? "true" : undefined}
+            inputMode={program === "POS" ? "none" : undefined} required type="password"
             value={recoveryConfirm} /></label>
         <p className="text-xs text-slate-500">영문·숫자·특수문자를 포함해 10자 이상 입력해 주세요.</p>
         <p aria-live="polite" className="min-h-5 text-center text-sm text-red-600" role={recoveryError ? "alert" : undefined}>
@@ -700,6 +763,16 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             type="submit">등록</button>
         </div>
       </form>
+      {program === "POS" && activeKeyboard === "master" &&
+        (keyboardTarget === "recoveryPassword" || keyboardTarget === "recoveryConfirm") &&
+        <div className="mt-3">
+          <PosTouchKeyboard mode="master"
+            onText={text => { keyboardText(text); setRecoveryError(""); }}
+            onBackspace={() => { keyboardBackspace(); setRecoveryError(""); }}
+            onClear={() => { keyboardClear(); setRecoveryError(""); }}
+            onConfirm={() => setActiveKeyboard(null)}
+            onClose={() => setActiveKeyboard(null)} />
+        </div>}
     </dialog>
   </main></>;
 }

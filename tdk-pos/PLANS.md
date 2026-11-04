@@ -1426,3 +1426,391 @@
 - Changed files: `src/lib/host-access.ts`, `src/lib/host-access.test.mjs`, `src/lib/api-response.ts`, `src/lib/api-response.test.mjs`, `src/lib/receipt-print.ts`, `src/lib/account-transfer-notice.ts`, `src/lib/device-printer.ts`, `src/app/pos/PaymentModal.tsx`.
 - Validation in a sanitized temporary source copy: TypeScript PASS; changed library ESLint PASS; endpoint/response tests 10/10 PASS; production build PASS. Build continues to emit two existing menu-image-storage tracing warnings. PaymentModal ESLint reports an existing unrelated `Date.now()` render purity finding at line 427; this work did not alter that line. The repository's direct `tsc` run was also affected by stale `.next/dev/types`; clean-copy TypeScript and Next production build passed.
 - Hardware / runtime validation TODO: this environment cannot access the actual POS PC's localhost Device Agent, installed `appsettings.json`, BIXOLON SRP-350III, cash drawer, public NAS server, or Chrome Network panel. No Device Agent Release publish was performed because no Agent-side defect was confirmed and changing its deployment package would not address the code-proven proxy route omission. Deploy the POS app change, then verify a normal payment, account-transfer notice, local Agent HTTP status/body, paper output, and cash-drawer operation on the POS PC. If a non-transfer receipt still fails, capture the diagnostic endpoint/status/body to distinguish app proxy, ingress, local Agent Origin, and printer-stage failure.
+
+## 2026-11-02 TDKPOS payment CashBox control
+
+- Added a transparent text-only `CashBox` touch target above “총 결제금액” in the payment center column. It has no fill, border, or shadow, uses a 44px minimum hit height, and remains enabled independently of payment busy/completed state. An in-flight ref blocks rapid duplicate requests; failures display beside the control without changing payment state.
+- Reused the existing `/cash-drawer/open` API through `openCashDrawer()`; no Device Agent endpoint or cash command was changed. The shared helper now distinguishes localhost Agent connection/CORS failure, 5-second timeout, and HTTP/command errors, safely reading the Agent's JSON error or a bounded non-JSON response.
+- Changed files: `src/app/pos/PaymentModal.tsx`, `src/lib/cash-drawer.ts`.
+- Validation in the sanitized temporary source copy: TypeScript PASS; cash drawer response tests 4/4 PASS; targeted ESLint PASS (the unrelated existing PaymentModal `Date.now()` render-purity rule was disabled for that file during this scoped lint); production build PASS with two existing menu-image-storage tracing warnings.
+- Not verified on a physical POS touchscreen or BIXOLON SRP-350III/cash drawer. The actual API command/hardware response and touch usability still require on-site confirmation. The existing Dev Agent project was not modified.
+
+## 2026-11-02 CashBox alignment adjustment
+
+- Applied `-translate-y-2` to the CashBox control only. This moves the label and its unchanged 44px+ hit target upward by 8px while leaving the control's layout slot, total-payment title/amount, and the rest of the three-column layout in place.
+- TypeScript and focused ESLint passed in the sanitized validation copy. The red-line screenshot was not available in this message context, so pixel-level alignment against that reference and PC/tablet visual confirmation remain unverified.
+
+## 2026-11-02 POS customer selector balance switch
+
+- Added a second right-panel switch below 거래관리 using the same 52px row height and 76×40px ON/OFF control; the two controls are separated by 6px. The balance switch is disabled when 거래관리 is OFF, and switching 거래관리 OFF resets balance display to OFF.
+- When balance is ON, customer rows show formatted trade balance in place of phone number; when OFF, existing phone display and selection behavior are retained. The user clarified that POS scope is balance display plus normal customer selection, so no ADM-only ledger management UI was exposed in POS.
+- Adding the switch reduces the logo's flexible spacer, moving the centered logo downward without changing its size/color or the right panel's outer layout. Recent/name/phone/sort controls and left customer list were not changed.
+- TypeScript and focused ESLint passed in the sanitized validation copy. No screenshot was supplied in this turn and no authenticated browser screenshot was available; exact visual screenshot confirmation and PC/tablet appearance remain unverified.
+
+## 2026-11-02 POS customer balance ledger dialog
+
+- CustomerSelectDialog의 기존 거래관리/잔액 스위치 상태를 그대로 사용한다. 거래관리 ON + 잔액 ON일 때 고객 행을 누르면 POS 잔액 창이 열리고, 잔액 OFF에서는 기존 고객 선택 콜백을 유지한다. 스위치 디자인과 위치는 변경하지 않았다.
+- Added a read-only POS ledger dialog with the ADM title “거래관리”, date presets (전체/최근 90일/최근 30일/당월), print action, transaction list, and current balance. It uses the existing ledger GET API response and server-calculated running balances; POS does not calculate or mutate ledger values.
+- Transaction rows open the existing ADM CustomerTradeDetailModal. The ledger and detail GET endpoints now permit authenticated POS sessions as well as existing ADM sessions. Ledger POST remains behind requireAdminAccess and the ADM member check; no POS write access was added.
+- Added print layout styles for the POS dialog. No database or business data was changed.
+- Targeted ESLint: PASS. TypeScript: PASS in the isolated validation copy. The repository-root `tsc --noEmit` remains blocked by stale mixed `.next/dev/types` and production route types (`/login` is rejected by the generated `LayoutRoutes` type); no application source change was made for that generated-artifact conflict. Production build and authenticated browser/print verification were not run. Visual and runtime checks remain pending.
+
+## 2026-11-02 POS customer balance toolbar alignment
+
+- Moved the existing print button after the four date presets, with an 84px spacer (reduced to 48px on narrow viewports), and moved the existing current-balance summary to the toolbar's far right. Kept amount formatting and type size/weight/color unchanged; removed its former bottom placement.
+- The toolbar remains a single non-wrapping row; narrow layouts can scroll horizontally rather than overlap. Table markup, date filtering, print action, and balance calculation were not changed.
+- CustomerBalanceDialog targeted ESLint: PASS. TypeScript in the isolated validation copy: PASS. Actual Chrome screenshot/print preview was not available in this environment, so visual confirmation remains TODO.
+
+## 2026-11-02 POS customer balance ledger printer output
+
+- Replaced browser `window.print()` with the existing `sendPrintDocument()` path to Device Agent `/api/printer/document`. The request contains only per-transaction row commands and the required final cut command; it does not call the cash-drawer API or the legacy receipt endpoint. Printer settings, CORS/origin checks, and Device Agent source/config remain unchanged.
+- Added a printer-width-aware document builder using the Device Agent's 504px raster width with 8px margins on each side (488px printable width), 12px Malgun Gothic canvas measurement, dynamically allocated fixed date/amount/balance columns, and grapheme-safe `..` clipping for descriptions. Printing uses exactly the current visible entry array and preserves its order; large ledgers are sent sequentially in batches under the Agent's 250-command limit.
+- Output errors are surfaced by category: Device Agent connection, Agent/printer response, request, and document-generation errors. No transaction or balance data is changed.
+- Targeted ESLint: PASS; isolated TypeScript check: PASS; customer-balance printer unit tests: 5/5 PASS; existing cash-drawer tests: 4/4 PASS; isolated Next production build: PASS (two existing menu-image-storage tracing warnings). Existing Device Agent Windows GDI renderer accepted and rasterized a Korean/long-description/wide-amount sample document at 504px; the sample rendered exactly three transaction rows on three text lines, and the existing receipt render cases passed.
+- Actual BIXOLON SRP-350III physical printing and Agent response on the POS PC remain unverified. The sample width estimate passed the existing Windows GDI raster renderer without wrapping; the production browser canvas measurement and the real printer still need on-site confirmation before marking hardware output PASS.
+
+## 2026-11-02 POS customer balance ledger print format finalization
+
+- Updated the ledger printer layout to the standard receipt body size (24px Malgun Gothic) and the Device Agent's 488px printable width. Standard receipt store header/logo and customer-title position are reused through `buildCustomerLedgerHeader`; the customer name replaces the ordinary receipt title. A POS-session-protected read-only route supplies the existing store information and receipt logo. No DB or Agent changes were made.
+- The visible period-filtered rows are printed in their existing order. Date is `YY/MM/DD`; amount and running balance use comma formatting, outflows/negative balances keep `-`, and each transaction is exactly one 24px row. The description column takes the remaining width and clips on grapheme boundaries with `..`. The last receipt section shows the current full-history balance in bold, then a separator and cut. It is not recalculated from filtered rows.
+- Initial Windows GDI raster inspection showed the final date digit wrapping with the browser canvas width estimate. Increased only the reserved date column margin, regenerated the fixture and re-rendered it; all three sample ledger entries now occupy one raster line each at the standard font size, including `-9,999,999` and `9,999,999`. Long Korean and mixed English descriptions clip without wrapping.
+- Verification: targeted ESLint PASS; TypeScript PASS after the production build regenerated route types (the earlier root tsc invocation hit stale mixed `.next/dev/types`); customer-ledger print tests 5/5 PASS; Next production build PASS with two existing `menu-image-storage.ts` tracing warnings; Device Agent GDI document-render validation PASS. No physical BIXOLON SRP-350III or POS browser/Agent was available, so actual paper output and on-device canvas/GDI equivalence remain unverified.
+- No authentication, receipt-sale, cash drawer, balance calculation, transaction data, Device Agent, or database schema logic was changed. Status: code and local render validation PASS; physical printer validation TODO.
+
+## 2026-11-02 POS customer ledger receipt two-line format
+
+- Changed each filtered ledger transaction to exactly two 24px body rows: `YY/MM/DD  내용`, then a date-width indent followed by right-aligned signed amount and transaction balance. Description uses the full first-line remainder and is clipped with `..` only when required. Input order and ADM-calculated running balances are preserved.
+- The standard receipt-style header now includes the selected customer name in the receipt-title position and the chosen period label (전체/최근 90일/최근 30일/당월). The final section is separator → bold actual current balance → one feed line → existing Device Agent cut command. Device Agent's `BuildDocumentCommand` adds no extra feed for cut, so no duplicate/extra feed was introduced.
+- Verification: TypeScript PASS, targeted ESLint PASS, ledger print unit tests 5/5 PASS, Production Build PASS (two pre-existing menu-image-storage tracing warnings), Windows Device Agent GDI document renderer PASS. GDI sample includes Korean and mixed English descriptions, deposits, withdrawals, maximum-format values, negative balance, selected period, and final balance/feed/cut sequence. No physical printer or live POS session was available; paper output and actual Device Agent hardware response remain TODO.
+- No DB, balance calculation, ADM transaction data, regular receipt printing, cash drawer, or Agent security/API changes. Status: implementation and local rendering PASS; physical printer validation TODO.
+
+## 2026-11-02 POS customer ledger receipt truncation and cut-position follow-up
+
+- Root cause confirmed in document batching: the Agent limit is 250 commands; the final document fits 119 two-line trades plus header/footer, while a no-footer document fits 121 trades. The previous loop always consumed 121 when the remainder was just above 119. At 120 trades it sent all trades on a cut document, then emitted a separate header/footer-only document; at other boundary counts it could similarly separate the ending trade from the balance or create a nearly empty extra slip. The transaction commands were generated, but the final balance was detached from the ledger and could appear absent to the operator.
+- Fixed batching to calculate the minimum document count and balance batches while preserving each transaction's two commands together. The final document always contains the last trade's two rows, current-balance row, two feed lines, and final cut. Added boundary tests for 119/120/121/240/241/242 transactions and exact row counts.
+- Confirmed no async cut race: POS awaits each `sendPrintDocument`; Device Agent validates one final cut, constructs raster and cut bytes in order, checks `WritePrinter` wrote the full buffer, and only then returns the request response. Agent cut command adds no feed of its own. The customer-ledger footer now emits `feed(2)` immediately before the existing cut; regular receipts and Agent code remain unchanged.
+- Verification: TypeScript PASS, targeted ESLint PASS, customer ledger tests 6/6 PASS, Next production build PASS (two existing `menu-image-storage.ts` tracing warnings), Device Agent GDI render PASS with final balance + two feed lines + final cut. Actual ledger row count at the POS and physical BIXOLON paper result were not available in this environment; hardware output remains TODO.
+- No database, trade data, balance calculation, general receipt, account-transfer notice, cash drawer, Device Agent, or authentication changes.
+
+## 2026-11-02 POS customer ledger print Agent-free revision
+
+- Per the follow-up requirement, removed the new Agent batch route and batch RAW builder. `Program.cs` retains only the unrelated pre-existing POS auto-start removal; `PosPrintDocument.cs` and its render test are restored to their pre-batch contents. No receipt, cash drawer, printer configuration, or Origin code was changed for ledger printing.
+- The ledger is now sent by TDKON as one `PrintDocument` to the existing `/api/printer/document` API through `sendPrintDocument()`. The document contains all visible transactions, current balance, `feed(2)`, and one final cut. POS checks displayed and generated transaction counts and verifies that sequence before making the request.
+- Existing Agent contract: `/api/printer/document` accepts one document with at most 250 commands, and validation requires exactly one cut at the final command. With the current 7 header and 4 footer commands and two commands per trade, a single request supports at most 119 transactions. Larger ledgers are rejected before printing rather than split into multiple jobs.
+- Local development-machine Agent probe: `GET /` returned HTTP 200; `OPTIONS /api/printer/document` returned 204 with the configured public Origin, POST/Content-Type and Private Network headers; `OPTIONS /api/printer/document/batch` returned 404; an intentionally invalid empty POST to the existing document endpoint returned 400 validation JSON without creating a print job. This confirms that the Agent currently running on this development machine does not have the batch route. The actual POS PC Agent was not inspected.
+- Validation after this revision: TypeScript PASS; targeted ESLint PASS; customer ledger tests 6/6 PASS; Next production build PASS with two existing `menu-image-storage.ts` tracing warnings; Agent Release build from restored source PASS (0 warnings/errors). The generated Agent DLL was not retained or deployed. Actual Chrome-to-POS-Agent printing and BIXOLON paper output remain unverified. Deploy the TDKON update only; no Agent update is required for this structure.
+
+## 2026-11-02 KDS 찌개 첨가 그룹 표시
+
+- ADM 메뉴 편집은 `찌개 첨가`를 `ADDON`으로 저장하고 메뉴 API/페이지는 `kds_kind`, `kds_group_key`를 읽고 쓰는 것을 소스에서 확인했다. KDS는 `materializeOrder()`에서 그 값을 주문 작업 스냅샷으로 저장하며 `INSERT IGNORE`로 이미 만들어진 작업을 다시 구성하지 않는다. 따라서 분류 변경 전 생성된 대기 주문은 예전 독립 작업으로 남을 수 있었다. 개발 DB 연결은 읽기 전용 확인 시 `EACCES`로 거부되어 특정 메뉴의 실제 저장값은 검증하지 못했다.
+- KDS 응답에 현재 메뉴의 분류와 그룹키를 포함하고, 기존 스냅샷이 SOLO인 ADDON 작업은 동일 세션·동일 주문·동일 조리 그룹 및 일치하는 조리 상태를 가진 찌개 작업 하나가 명확할 때만 화면/동작 행에서 함께 묶도록 했다. 이 경우 행의 기존 상태 버튼이 두 작업 ID를 함께 처리한다. 불명확하거나 조리 상태가 다르면 독립 작업으로 남겨 누락을 방지한다.
+- 새 작업 구성에서 그룹키가 있는 ADDON은 정확히 같은 POT 그룹에 연결한다. 그룹키가 비어 있으면 기본 POT 그룹, 또는 유일한 찌개 그룹에만 연결한다. 여러 그룹 중 어느 것인지 불명확하면 첨가를 독립 작업으로 유지한다. 메뉴명 문자열로 분류하지 않는다.
+- 가로 상세 표시의 구분자를 쉼표에서 공백으로 바꿔 `꽁치김치찌개 흑돼지추가 두부추가`처럼 같은 두 번째 줄에 이어 붙인다. 별도 카드 디자인과 조리 상태 제어 규칙은 유지했다. 표시 박스 그룹 기준에 주문 ID도 추가해 같은 테이블의 서로 다른 주문을 합치지 않는다.
+- 검증: KDS 모델/그룹핑 테스트 69/69 PASS, `tsc --noEmit` PASS, 수정 파일 ESLint 오류 0 (기존 경고 2건), `npm run build` PASS (기존 `menu-image-storage.ts` 동적 파일 접근 경고 2건). 실제 개발 DB 질의와 Chrome/KDS 실기기 화면 검증은 접근 권한 및 실행 서버 부재로 미수행이며 PASS로 표시하지 않는다. DB 및 주문 데이터 변경은 없다.
+- 그룹으로 표시되는 분류 변경 전 첨가 작업은 테이블 시작·선택 냄비 완료 API도 같은 주문 ID, POT 그룹키, 현재 `ADDON` 분류, 조리상태를 서버에서 재검증하며 해당 task ID들을 일괄 처리한다. 기존 3초 시작 취소는 서버의 동일 batch ID/task ID 경로를 유지한다.
+- Project-wide ESLint excluding `.pos-runtime/**` was attempted and exits with pre-existing errors in unrelated migration scripts, admin/customer screens, POS files, and existing test files (33 errors / 5 warnings). ESLint on the changed KDS files exits 0 with two pre-existing warnings; no new changed-file errors were reported.
+## 2026-11-03 TDKHOS 1차 개발 계획 및 선행 조사
+
+### 목표
+
+- `/tdkhos` 직원용 모바일 HOS를 공통 직원 인증과 HOS 권한 검사에 연결한다.
+- 기존 테이블 배치, 주문 세션, 메뉴·옵션 가격 검증, 주문 취소 트랜잭션을 재사용한다.
+- POS/ADM/KDS와 Device Agent 업무 기능을 변경하지 않고, QR 대기 주문은 실제 승인 API가 있는 경우에만 연동한다.
+
+### 현재 조사 결과
+
+- HOS 전용 화면 경로는 아직 없다. `src/proxy.ts` 및 `src/lib/host-access.ts`의 외부 별칭은 POS/ADM/KDS만 매핑한다.
+- `src/lib/program-trust.ts`에는 HOS 권한 열, 토큰 프로그램 식별자, `tdk_hos_trust` 쿠키가 정의되어 있다. `trustStatus()`는 HOS 직원/접근 권한 조회 분기가 없고, PIN 로그인과 임시 비밀번호 API는 HOS를 명시적으로 거부한다.
+- `staff_sessions.session_type` 스키마 ENUM은 `POS`, `ADMIN`, `KDS`만 허용한다. HOS 세션을 정확히 격리하려면 DB ENUM 변경 마이그레이션이 필요하며, 본 작업에서 DB에 적용하지 않는다.
+- POS 테이블/주문 API는 기존 세션 및 트랜잭션 검증을 제공하지만 POS 전용 세션 가드를 사용한다. HOS에 필요한 API만 HOS 세션을 허용하도록 범위를 한정해야 한다.
+- POS 화면은 `qr_orders`를 조회하지만 프로젝트에서 고객 QR 주문 접수/승인/거절 API는 확인되지 않았다. QR 데이터를 운영 중 주문처럼 표시하거나 자체 승인 로직을 만들지 않는다.
+- HOS 권한은 직원관리 API가 `hos_enabled` 컬럼 존재를 동적으로 확인한다. DB 컬럼이 없는 배포에서는 HOS 로그인을 허용할 수 없다.
+
+### 단계 및 상태
+
+1. 기존 HOS 권한·인증·테이블/주문/취소·QR 경로 조사 — IN_PROGRESS
+2. HOS 전용 안전 세션과 공통 로그인 화면 연결; 필요한 session_type ENUM 마이그레이션 SQL은 별도 작성, DB 적용 금지 — TODO
+3. 모바일 테이블 배치·세션 미수금·주문 상세 조회 API 및 화면 — TODO
+4. POS 트랜잭션 검증을 재사용하는 HOS 추가 주문 staging/단일 전송 — TODO
+5. 기존 주문 취소 API의 부분 수량 취소 준비 및 단일 전송 — TODO
+6. QR API 존재 재조사 및 미구현 상태/통합 지점 문서화 — TODO
+7. 타입 검사, ESLint, 관련 테스트, production build, 회귀 확인 — TODO
+
+### 안전 조건
+
+- 운영 DB 접근/수정, 마이그레이션 실행, 직원 인증정보/권한 변경, Device Agent 수정은 하지 않는다.
+- 개발 DB 연결/실제 브라우저 검증은 별도 가능 여부를 확인하고, 수행하지 못한 항목은 PASS로 기록하지 않는다.
+- HOS API는 매 요청에서 HOS 전용 세션, 직원 활성/미퇴사 상태, `hos_enabled` 및 신뢰 토큰을 확인한다.
+- 기존 POS API의 인증 범위를 전체적으로 넓히지 않는다. 필요한 주문/취소 진입점만 명시적으로 HOS 세션을 추가 허용한다.
+- 완성 가능한 코드 변경과 검증을 진행한 뒤, DB ENUM 마이그레이션이 실제 실행을 막는 경우 배포 전 선행 작업으로 명확히 기록한다.
+## 2026-11-03 TDKHOS 1차 구현 결과
+
+### 구현
+
+- 공통 `ProgramTrustGate`에 HOS ID 상태 조회, 마스터 비밀번호 등록/인증, HOS 신뢰 토큰, 개인 PIN 절차를 연결했다.
+- `/tdkhos` 모바일 로그인 및 테이블 화면을 추가했다. 테이블/주문 자료는 기존 POS 테이블 세션·주문·메뉴 카탈로그를 사용하며 별도 HOS 주문 테이블은 만들지 않았다.
+- HOS 전용 API에서 직원 활성·퇴사 상태, `hos_enabled`, HOS 신뢰 토큰 및 HOS 세션을 확인한다. 직원 세션 유형에 HOS를 추가하는 TEST/운영용 SQL을 작성했지만 어느 DB에도 적용하지 않았다.
+- 주문 추가는 기존 테이블 세션 및 주문 API를 통해 전송하고, 취소는 기존 배치 취소 API를 사용한다. 전체 주문 취소에는 현재 HOS 직원의 PIN 재확인을 적용했다.
+- 기존 QR 대기 주문 API 또는 승인 흐름을 확인하지 못해 QR 주문을 임의로 표시하거나 승인하지 않는다. 화면은 QR 미연동 상태를 명시한다.
+- HOS를 HTTPS ingress 및 외부 경로 별칭에 추가했다. Device Agent, POS/ADM/KDS 업무 동작은 의도적으로 변경하지 않았다.
+
+### 변경 파일
+
+- 신규: `src/app/hos/**`, `src/app/api/hos/**`, `src/lib/hos-auth.ts`
+- 공통 인증/세션/접근 제어 연결: `src/db/schema.ts`, `src/lib/program-trust-routes.ts`, `src/app/api/admin-center/trust/initial-master/status/route.ts`, `src/app/api/program-trust/master-recovery/register-initial/route.ts`, `src/app/api/program-trust/pin/route.ts`, `src/components/ProgramTrustGate.tsx`
+- 기존 주문 API의 HOS 세션 허용: `src/app/api/table-sessions/route.ts`, `src/app/api/table-sessions/[sessionId]/orders/route.ts`, `src/app/api/order-items/cancellations/batch/route.ts`
+- 경로 및 ingress: `src/lib/host-access.ts`, `src/proxy.ts`, `src/app/layout.tsx`
+- 테스트: `src/lib/host-access.test.mjs`
+- 별도 DB 변경 스크립트: `db-migrations/20261103_hos_staff_sessions_test.sql`, `db-migrations/20261103_hos_staff_sessions_production.sql`
+
+### 검증 및 제한
+
+- TypeScript: PASS (`npx tsc --noEmit --pretty false`)
+- 변경 파일 ESLint: PASS (오류/경고 없음)
+- Host 접근 테스트: PASS 7/7
+- Next.js production build: PASS. 기존 `src/lib/menu-image-storage.ts` 동적 파일 접근 관련 경고 2건은 남아 있다.
+- 소스 복구 체크포인트: `checkpoints/20261103-tdkhos-v1-source.zip`
+- 실제 DB 연결, migration 실행, Chrome/태블릿 로그인과 주문 전송, 실물 QR 흐름은 검증하지 않았다. TEST/운영 DB와 직원·주문 데이터는 변경하지 않았다. HOS 세션 ENUM migration은 배포 전 대상 스키마를 확인한 뒤 TEST DB에서 먼저 검증해야 한다.
+
+## 2026-11-03 TDKHOS 2차 개발 DB Migration 및 통합 검증 결과
+
+### 개발 DB 구조 및 Migration
+
+- `.env.local`의 대상은 `TDK_POS_TEST`였고 실제 연결 후 `SELECT DATABASE()`도 `TDK_POS_TEST`를 반환했다. 서버는 MariaDB 10.11.18, 테이블은 InnoDB다. 운영 DB에는 접속하지 않았다.
+- `staff_sessions.session_type`은 이미 `ENUM('POS','ADMIN','KDS','HOS')`였다. 이에 `20261103_hos_staff_sessions_test.sql`의 ALTER는 실행하지 않았다. 현재 세션 186행 및 POS/ADM/KDS 세션 분포를 확인했다.
+- HOS 로그인에 필요한 `staff.hos_enabled`는 개발 DB에 없었다. 기존 `staff_common_pin_hos_test.sql`의 HOS 컬럼 추가를 검토하고 사전 구조/행 수 복구 지점을 `.codex-backups/20261103-hos2-devdb-preflight.json`에 기록했다. 적용 시도는 `ER_TABLEACCESS_DENIED_ERROR`로 거부되었다. 권한 조회에서 계정에는 `TDK_POS_TEST`의 ALTER 권한이 없었으므로 우회하지 않고 중단했다.
+- 적용 전후 재확인: `staff.hos_enabled` 없음, `staff` 2행, `staff_sessions` 186행, `session_type` ENUM 정의 동일. DB 데이터나 스키마 변경은 완료되지 않았다. `hos_enabled` 누락 때문에 개발 DB에서 HOS 권한 직원 수/마스터 비밀번호·PIN 준비 상태를 판정할 수 없다.
+
+### 화면 및 API 점검
+
+- 임시 로컬 개발 서버에서 `/tdkhos`, `/tdkpos`, `/tdkadm`, `/tdkkds` 페이지 요청은 HTTP 200이었다.
+- HOS 세션 쿠키 없는 요청은 `/api/hos/tables`, `/api/hos/menu-catalog`, `/api/hos/tables/1`에서 각각 HTTP 401을 반환했다. `/api/hos/auth/trust`의 로그인 전 상태 요청은 HTTP 200이었다.
+- 실제 직원 마스터 비밀번호/PIN 로그인, HOS 허용/거부 직원 분기, HOS 세션 발급·로그아웃은 검증하지 않았다. 권한 컬럼과 DB ALTER 권한이 없고, 실제 인증정보를 대신 입력하지 않았다.
+- 테이블 배치/금액, 추가 주문·KDS 반영, 취소·부분 수량, 취소 해제, 중복 전송, 실패 후 초안 보존은 실제 DB 주문을 쓰지 않아 미검증이다. POS·ADM·KDS 회귀는 페이지 응답만 확인했고 실제 로그인/업무 API 회귀는 미검증이다.
+- QR 참조를 재조사했다. POS 화면은 `qr_orders`와 `qr_sessions`를 조인해 기존 QR 주문 표식/언어를 표시하고, 관리 결제 정리 코드가 연결된 주문 ID를 초기화한다. 고객 주문 API로 검색된 `/api/customers/order`는 고객 정렬용 PATCH다. QR 주문 접수·승인·거절 서버 API는 찾지 못해 HOS에는 연동하지 않았다.
+
+### 코드 검사
+
+- TypeScript: PASS (`npx tsc --noEmit --pretty false`)
+- HOS 및 관련 인증/세션/API 파일 ESLint: PASS (오류/경고 없음)
+- 테이블 금액/세션/접근 관련 테스트: PASS 17/17
+- Next.js production build: PASS. 기존 `menu-image-storage.ts` 동적 파일 접근 경고 2건은 유지됨.
+- 주문 추가·취소 API 통합 테스트 및 실제 모바일/Chrome/태블릿 검증: 미수행. 권한 migration이 막혀 안전한 인증 세션으로 검증할 수 없었다.
+
+### 다음 절차
+
+1. DB 관리자가 승인된 경로로 `TDK_POS_TEST.staff`에 `hos_enabled TINYINT NOT NULL DEFAULT 0`를 추가한다. 기존 직원 권한은 자동으로 켜지지 않도록 유지한다.
+2. 개발 DB에서 컬럼 정의와 기존 직원 권한 기본값을 읽기 전용으로 검증한 뒤, 격리된 HOS 테스트 직원/테이블로 인증 및 주문·취소 통합 검증을 진행한다.
+3. POS·KDS 영향 및 TEST 회귀 결과를 확인한다. 운영 DB/NAS migration 또는 배포는 별도 승인·작업으로 남긴다.
+
+- DB 사전 복구 지점: `.codex-backups/20261103-hos2-devdb-preflight.json` (DDL/행 수만 포함; 인증 해시·직원 ID 없음)
+- 구현 소스 체크포인트: `checkpoints/20261103-tdkhos-v1-source.zip`
+- 결론: 개발 DB의 HOS 세션 ENUM은 이미 준비됐으나 권한 컬럼 migration이 DB grant에 의해 차단되어, HOS 통합 검증은 BLOCKED다. 운영 환경은 변경하지 않았다.
+
+## 2026-11-03 TDKHOS DB 권한 재확인 및 DBA 절차
+
+- 재확인한 실제 DB는 `TDK_POS_TEST` (MariaDB 10.11.18)이다. 접속 계정은 `tdk_pos@%`이며 해당 DB grant는 `SELECT, INSERT, UPDATE, DELETE`로 `ALTER`가 없다. 운영 DB에는 접속하지 않았다.
+- `staff`에는 공통 `employee_pin_hash`가 있으나 `hos_enabled`는 없다. `staff`는 2행(활성·미퇴사 2명)이다. 직원 ID, 이름, 인증 해시 값은 확인/기록하지 않았다.
+- `staff_sessions.session_type`은 이미 `ENUM('POS','ADMIN','KDS','HOS')`; 186행이다. 이 정의는 변경하지 않는다.
+- HOS 컬럼 추가는 DBA 권한 오류로 거부된 상태이며 재시도하지 않았다. `hos_enabled`가 없으므로 직원별 HOS 권한 부여와 인증/주문 통합 테스트는 계속 중단한다.
+- DBA용 최소 SQL을 `db-migrations/20261103_hos_enabled_column_test_admin.sql`로 작성했다. 이 파일은 `TDK_POS_TEST.staff`에만 `hos_enabled TINYINT NOT NULL DEFAULT 0`를 idempotent하게 추가하며, 기존 직원 모두 HOS OFF로 유지한다. 인증정보나 세션 행은 업데이트하지 않는다.
+- 적용 방법: DBA가 개발 DB 관리 클라이언트에서 파일의 Step 1 `SELECT DATABASE()`만 먼저 실행한다. 결과가 반드시 `TDK_POS_TEST`일 때만 Step 2 ALTER를 실행하고, 이어 `SHOW COLUMNS`와 집계 SELECT 결과를 확인한다. 대상 DB가 다르면 파일의 나머지 문장을 실행하지 않는다. 개발 계정에 GRANT하지 않는다. 운영 DB/NAS에는 이 파일을 적용하지 않는다.
+- DBA 작업 전까지 DB 변경, 테스트 직원 권한 부여, 로그인 성공 테스트 및 주문 쓰기 통합 테스트를 보류한다. 관리자 작업 후 컬럼/기본값/기존 행 수를 읽기 전용으로 확인한 뒤 격리된 테스트 직원으로 검증을 재개한다.
+- 복구 지점: `.codex-backups/20261103-hos2-devdb-preflight.json`; 검증 기록은 이 파일에 포함되어 있다.
+
+## 2026-11-03 TDKHOS 2차 통합 검증 재개 결과
+
+### 개발 DB 구조
+
+- 접속 대상과 `SELECT DATABASE()` 결과는 모두 `TDK_POS_TEST`였다. 운영 DB `TDK_POS`에는 접속하지 않았다.
+- `staff.hos_enabled`는 `TINYINT(4) NOT NULL DEFAULT 0`으로 존재한다. 관리자가 추가한 컬럼을 확인했으며 Migration을 다시 실행하지 않았다.
+- `staff_sessions.session_type` 정의에 `HOS`가 포함되어 있어 세션 ENUM 변경도 실행하지 않았다.
+- 테스트 전후 기존 기준 행 수는 유지됐다: 직원 2, 테이블 12, 테이블 세션 310, 주문 343, 주문 항목 707, 직원 세션 186, HOS 신뢰 토큰 0. 최종 임시 테스트 데이터 cleanup 검사도 PASS했다.
+
+### 격리 계정 인증 및 권한
+
+- 임시 테스트 직원 1명과 전용 테스트 테이블 1개를 `TDK_POS_TEST`에만 만들고, 무작위 마스터 비밀번호와 PIN은 테스트 메모리에서만 사용했다. 실제 직원 인증정보는 조회·변경하지 않았다.
+- HOS 마스터 비밀번호 인증과 보안토큰 발급, 최초 공통 PIN 등록, PIN 로그인, 로그아웃 후 재로그인 및 세션 유지가 실제 로컬 API에서 통과했다.
+- HOS 전용 신뢰토큰이 없을 때 로그인은 HTTP 403으로 차단됐다. 임시 직원의 HOS 권한을 OFF로 바꿔 확인했을 때 PIN 로그인은 HTTP 403, 보호된 테이블 API는 HTTP 401이었다. 해당 임시 권한은 cleanup으로 제거됐다.
+- 같은 임시 직원으로 POS, ADM, KDS의 마스터 인증·프로그램별 신뢰토큰 발급·PIN 로그인 API도 각각 통과했다. 실제 기존 직원 계정은 사용하지 않았다.
+
+### 테이블 및 주문 흐름
+
+- HOS 테이블 배치, 메뉴 카탈로그, 빈 테이블 상세 조회가 통과했다. POS 공용 테이블 API에서도 테스트 테이블이 조회됐다.
+- HOS에서 8,000원 메뉴 2개를 전송했고 주문 상세와 테이블 받을 금액 16,000원을 확인했다.
+- 2개 중 1개 부분 취소가 통과했다. HOS 주문 상세의 취소 수량/잔여 수량과 받을 금액 8,000원을 확인했다.
+- `HosHome`의 전송 중 `sendLock`/`busy` 중복 클릭 차단과 요청 실패 시 오류 표시·잠금 해제는 소스에서 확인했다. 실제 브라우저 연속 클릭 테스트는 하지 않았다.
+- KDS 대상 메뉴의 주문 상태(`ACCEPTED`), `kds_visible=1`, `kds_kind=SOLO`를 확인했다. 단, `/api/kitchen`은 기존 대기·조리 KDS 큐 166건(그중 조리 중 7건)을 동기화/정리하는 쓰기 부수효과가 있어 호출하지 않았다. 실제 KDS task 생성 및 KDS 화면 표시 여부는 미검증이다.
+- 전송 후 화면이 테이블 목록으로 돌아가는 것과 UI 실패 표시 동작은 코드로 확인했으며 실제 터치 화면은 검증하지 않았다.
+
+### 검사 결과
+
+- TypeScript `npx.cmd tsc --noEmit`: PASS
+- HOS 및 인증/주문 API 대상 ESLint: PASS
+- 전체 저장소 ESLint는 실행이 프로젝트 내부 `.pos-runtime/chrome-profile/Default/Extensions`까지 스캔하며 지연되어 중단했다. 대상 파일 lint는 별도로 완료했다.
+- 인증/제한 관련 자동화 테스트: PASS 15/15
+- KDS 모델 관련 자동화 테스트(`node --experimental-strip-types --test`): PASS 43/43
+- Next.js production build: PASS. 기존 `menu-image-storage.ts` 동적 파일 접근 경고 2건은 남아 있다.
+- Chrome 실행 파일은 설치되어 있으나 기본 프로필 실행은 이미 점유/권한 오류로 실패했다. Playwright/Puppeteer 자동화 패키지와 Android `adb` 연결은 사용할 수 없어 실제 브라우저 로그인 UI 및 모바일 검증은 미수행이다.
+
+### 데이터 정리 및 결론
+
+- 테스트 직원, 프로그램 신뢰 토큰, 직원 세션, 테스트 테이블·주문·부분 취소·관련 KDS task를 제거했고 테스트 전 기준 행 수로 복구됨을 검증했다. 인증 실패 카운터 중 테스트 중 새로 생긴 항목도 정리했다.
+- 이번 검증에서는 애플리케이션 인증/주문 소스를 변경하지 않았다. 운영 DB/NAS, Device Agent, 실제 직원 및 운영 주문 데이터는 변경하지 않았다.
+- 결론: 개발 DB에서 HOS 인증, 권한 차단, 테이블/주문 추가·부분 취소 및 POS·ADM·KDS 인증 API 회귀는 PASS다. KDS 실시간 task 표시와 실제 브라우저·모바일 UI는 미검증이므로 운영 적용 준비 완료로 판정하지 않는다. 운영 배포 전 격리된 KDS 브라우저/태블릿 확인이 남아 있다.
+
+
+\r\n
+
+## 2026-11-03 TDKHOS 3차 실제 Chrome 및 POS·KDS 연동 검증
+
+### 검증 환경 및 범위
+
+- 개발 서버는 127.0.0.1:3119에만 바인딩하고 .env.local의 TDK_POS_TEST 연결을 확인했다. 운영 DB/NAS에는 접속하지 않았다.
+- Chrome 기본 프로필은 사용하지 않고 별도 임시 프로필을 사용했다. viewport는 390×844 CSS px로 에뮬레이션했다.
+- 앱 코드와 Device Agent는 수정하지 않았다. 실제 KDS 공용 큐 API /api/kitchen은 기존 큐를 동기화/정리할 수 있어 호출하지 않았다.
+
+### 실제 Chrome 및 서버 관찰
+
+- /tdkhos 요청이 앱의 /hos 화면으로 라우팅되고 TDK HOS 로그온 화면이 렌더링됐다.
+- 테스트 직원에 대해 ID 상태 GET, HOS 최초 상태 POST, HOS 마스터 인증/신뢰토큰 발급 POST, 공통 PIN 등록 POST가 각각 HTTP 200으로 서버 로그에 기록됐다. PIN 등록 뒤 보호된 HOS 테이블 목록 GET도 HTTP 200이었다. 임시 HOS 세션 및 토큰은 검증 종료 후 제거됐다.
+- 모바일 viewport에서 임시 테이블의 버튼 높이가 44px 이상이고 테이블/상세 화면의 가로 overflow가 없음을 브라우저 DOM 측정으로 확인했다. 테이블 상세 및 메뉴 카탈로그 GET도 HTTP 200이었다.
+- 브라우저 자동화가 메뉴 카탈로그 응답 이후 CDP 프로토콜 예외(Object reference chain is too long)로 중단됐다. 따라서 메뉴 선택, 주문 추가/취소 버튼 상호작용, 전송 실패 화면 유지, 전송 후 배치 복귀는 실제 Chrome에서 미검증이다. 이 자동화 오류를 애플리케이션 오류로 판정하지 않았다.
+
+### POS·KDS 데이터 연동 및 안전성
+
+- 이번 Chrome 세션에서는 주문 POST가 발생하지 않아 POS 금액 반영과 KDS 주문 표시를 검증하지 않았다.
+- 2차 개발 DB API 검증에서 주문 추가, 일부 수량 취소, 받을 금액 갱신은 이미 PASS로 기록되어 있다. 다만 이를 이번 차수의 브라우저 UI PASS로 간주하지 않는다.
+- KDS 전역 큐 API를 호출하지 않았다. 종료 후 DB에는 KDS task 166건(그중 COOKING 7건)이 있었고 임시 HOS 작업은 0건이었다. 기존 큐 보호를 위해 실제 KDS 화면 반영 여부는 미검증으로 남긴다.
+
+### 테스트 데이터 정리
+
+- 이번 검증용으로 생성된 마커 직원 4명과 임시 테이블 4개를 TDK_POS_TEST에서 제거했다. 이 브라우저 시도에서는 해당 테이블에 연결된 주문 세션/주문은 생성되지 않았다.
+- 종료 후 직원 2명, 테이블 12개, table_sessions 310개, orders 343개, order_items 707개, staff_sessions 186개로 이전 개발 DB 기준 수치와 같았다. 임시 직원 0명, 임시 테이블 0개, 활성 HOS 토큰 0개, 활성 HOS 세션 0개를 확인했다.
+- 공유 인증 요청 제한 저장소는 이전 카운터 상태를 보존하기 위해 삭제/초기화하지 않았다. 종료 시 저장 행은 admin 2개, KDS IP 8개였으며 합계 시도 수는 각각 12와 43이었다. 이 값은 직원별 비밀번호/PIN 원문이나 IP 원문을 포함하지 않으며, 사전 스냅샷이 없어 기존 값과 이번 요청 증가분을 분리할 수 없다.
+- 격리 Chrome 프로필과 3119 서버를 종료했다. 임시 자동화 스크립트를 삭제했다.
+
+### 코드 검증
+
+- TypeScript npx.cmd tsc --noEmit: PASS
+- HOS 및 인증 관련 변경 경로 ESLint: PASS
+- 관련 인증·PIN·테이블 계산 자동화 테스트: PASS 33/33
+- Production Build: PASS. 기존 src/lib/menu-image-storage.ts 동적 파일 경로 tracing 경고 2건이 남아 있으며 이번 작업 범위에서 변경하지 않았다.
+
+### 결론
+
+- 결과: PARTIAL. HOS 브라우저 로그인, HOS 보호 API, 테이블 목록/상세 및 메뉴 카탈로그 응답까지 확인했다. 주문 UI 상호작용과 POS·KDS 실제 화면 반영은 완료하지 못했다.
+- 모바일 검증은 Chrome 390×844 에뮬레이션만 수행했다. 실제 Android 태블릿/스마트폰 터치 검증은 미수행이다.
+- 운영 적용 전에는 자동화/CDP 문제를 해결하거나 수동 Chrome으로 메뉴 선택 → 주문 추가 → 부분 취소 → POS 금액 확인을 재검증해야 한다. KDS 확인은 별도 안전한 격리 큐/DB에서 해야 한다.
+
+## TDKHOS 4차 — 실제 모바일 수동 검증 환경 준비 (2026-11-03)
+
+- 개발 서버 구조: `npm run dev` → `node server.cjs`; 기본 포트 3000, 기본 bind는 `0.0.0.0`. 모바일 테스트용 권장 실행은 프로젝트 폴더에서 `PORT=3000`, `TDK_APP_BIND_HOST=192.168.0.54`로 지정해 LAN 인터페이스에만 바인딩하는 방식이다.
+- 개발 DB 연결을 `.env.local` 기준으로 읽기 전용 검증했으며 `SELECT DATABASE()` 결과는 `TDK_POS_TEST`였다. 운영 DB/NAS에는 접속하거나 변경하지 않았다.
+- 준비된 격리 직원: `admin_login_id=hos_mobile_20261103_e4ff31`, 활성 일반 직원, HOS 권한 ON, POS/ADM/KDS 권한 OFF. 마스터 비밀번호와 공통 PIN 해시가 설정됨을 원문 조회 없이 확인했다. 인증정보는 이 문서에 기록하지 않는다.
+- 준비된 빈 테스트 테이블: `table_id=28`, `table_no=HME4FF31`, 이름 `HOS Smartphone Test e4ff31`. 확인 당시 연결된 테이블 세션 0건, 직원 로그인 세션 0건이었다. HOS 전송 후 생성되는 세션/주문은 이 테스트 테이블 범위에서만 정리해야 한다.
+- 개발 PC LAN IPv4: `192.168.0.54/24`. 스마트폰 접속용 개발 URL은 `http://192.168.0.54:3000/tdkhos`.
+- 현재 Windows Private 방화벽은 인바운드를 차단하고 로컬 방화벽 규칙은 GPO 관리 대상이다. 포트 3000/3120에서 실행 중인 개발 서버 listener도 확인되지 않았다. 방화벽/GPO를 변경하지 않았고 서버도 실행 상태로 남기지 않았다.
+- 따라서 모바일 접속은 아직 준비 완료가 아니다. 관리자가 Private 프로필에 한해 출발지 `192.168.0.0/24`, 목적지 `192.168.0.54`, TCP 3000만 허용해야 한다. Public 프로필 및 외부망 허용은 불필요하다.
+- HTTPS 개발 인증서 도구/구성이 없어 이 주소는 HTTP다. 개발 모드는 HTTP를 허용하지만, 테스트용 인증정보만 사용해야 한다. 운영 도메인/NAS로 우회하지 않았다. HTTPS가 필수인 경우 내부 개발 DNS와 스마트폰이 신뢰하는 사설 인증서 구성이 별도로 필요하다.
+- 사용 전 개발 PC에서 실행:
+  ```powershell
+  Set-Location 'D:\\10_프로그래밍_소스\\01_TDK_Web\\tdk-pos'
+  $env:PORT = '3000'
+  $env:TDK_APP_BIND_HOST = '192.168.0.54'
+  npm.cmd run dev
+  ```
+  서버 시작 로그에서 개발 모드와 포트 3000을 확인한 뒤 같은 사내 Wi-Fi/VLAN의 스마트폰에서 위 URL에 접속한다. 게스트 Wi-Fi의 client isolation이 켜져 있으면 연결되지 않는다.
+- 수동 순서: 테스트 직원 로그인 → 테스트 테이블 번호 확인 → 테이블 선택 → 메뉴 추가 및 수량/옵션 선택 → 전송 → 같은 테이블의 주문 및 받을 금액 확인 → 주문 항목 선택 → 취소 지정(가능하면 일부 수량) → 전송 → 갱신된 주문/금액 확인 → 테이블 배치 복귀. 이 단계에서 실제 스마트폰 조작은 수행하지 않았다.
+- 검증 구분: 테스트 계정·권한·빈 테이블 준비 및 DB 식별은 확인 완료. 스마트폰 네트워크 접속, 모바일 UI, 주문 추가/취소 실제 브라우저 조작은 방화벽 GPO 예외와 사용자의 수동 테스트가 필요하여 미검증. TDK Device Agent, 운영 NAS, 기존 POS/ADM/KDS 코드는 변경하지 않았다.
+- 정리 대상 식별자는 직원 `staff_id=271` / 코드 `HOS_MOB_e4ff31`, 테이블 `table_id=28` / 번호 `HME4FF31`이다. 테스트를 마친 뒤 이 범위에서 발생한 HOS 세션·주문 및 직원 세션/토큰을 FK 의존 순서에 따라 개발 DB에서만 정리하고 테이블·직원 레코드를 제거한다. 테스트 종료 전에는 삭제하지 않는다.
+
+
+## TDKADM HOS 테이블 배치 관리 — 구현 계획 (2026-11-03)
+
+1. 기존 ADM 보호 레이아웃, 사이드바, 관리 권한, POS 테이블 편집 API와 HOS 테이블 조회 계산을 조사한다.
+2. POS 좌표와 분리된 HOS 표시 좌표·크기·표시 여부를 선택한다. 현재 개발 DB 계정은 기존 테이블 ALTER 권한이 없으므로 신규 테이블을 만들지 않고, 스키마가 있는 `system_settings`의 `hos.table-layout.<tableId>` 키를 사용한다. DB에서 현재 접두사 키는 0건이며 TDK_POS_TEST에 한정해 확인했다. POS 테이블 레코드/좌표는 쓰지 않는다.
+3. HOS API와 ADM 미리보기가 동일한 계산·레이아웃 함수를 사용하도록 연결한다. 미저장 테이블은 번호순 3열 열 우선 초기 배치에 넣고, 비활성·숨김 상태와 겹침을 검증한다.
+4. ADM 메뉴/페이지/권한/API와 터치 드래그·크기 조절·격자 정렬·표시 전환·초기화·미리보기·저장 확인을 구현한다.
+5. TypeScript, ESLint, 관련 단위/API 테스트와 production build를 실행한다. 개발 DB 동작은 TDK_POS_TEST에서만 확인하며 운영 DB/NAS 변경은 하지 않는다.
+6. QR 주문 대기 표시는 선행 코드 조사 결과 현재 HOS API가 `qrOrdersAvailable:false`를 반환하고 승인 대기 기능이 연결되어 있지 않다. 실제 대기 데이터 모델 확인 전에는 임의 상태를 만들지 않고 기존 안내/데이터를 보존한다.
+
+복구 체크포인트: `checkpoints/20261103-hos-admin-layout-prechange.zip`.
+
+
+## TDKADM HOS 테이블 배치 관리 구현 결과 (2026-11-03)
+
+### 구현
+- OWNER 전용 사이드바 항목 `HOS → 테이블 배치`와 관리 페이지를 추가했다. 페이지 및 저장 API 모두 현재 ADM 세션의 OWNER 권한을 서버에서 확인한다.
+- ADM 미리보기와 실제 HOS 테이블 화면이 `HosTableCanvas`를 공유한다. 스마트폰 기준 3:4 배치 캔버스, 3열 기본 정렬, 숫자순 세로 배치, 그리드 스냅, 드래그 이동, 가로·세로 크기 조절, 숨김/표시, 기본 배치 초기화, 저장/취소 및 변경 확인을 제공한다.
+- 빈 테이블은 밝은 배경에 번호를, 사용 중인 테이블은 파란 배경에 번호와 기존 계산된 받을 금액을 표시한다. 주문이 있는 테이블은 HOS에서 숨길 수 없도록 서버에서도 검사한다.
+- HOS 좌표·크기·표시 여부는 기존 `system_settings`의 `hos.table-layout.<tableId>` 설정 키에 저장한다. POS 테이블 좌표와 테이블 레코드는 쓰지 않는다. 신규 테이블은 기존 설정과 겹치지 않는 안전한 3열 기본 위치를 배정한다.
+- HOS 테이블 조회는 공통 데이터 서비스를 사용해 실제 화면과 ADM 미리보기 계산을 일치시킨다.
+
+### DB 및 보호 범위
+- 개발 DB 계정은 DDL 권한이 없어 새 테이블을 만들지 않았다. 저장 전 개발 DB 설정 키의 테스트 upsert/read를 트랜잭션 안에서 수행하고 롤백하여 영구 데이터 변경이 없음을 확인했다. 대상 DB는 `TDK_POS_TEST`였으며 운영 DB/NAS에는 접근하지 않았다.
+- POS 테이블 좌표, POS 주문·결제 데이터, KDS 기능, Device Agent를 수정하지 않았다.
+- 현재 HOS QR 승인 대기 API/데이터 연결은 미구현이며 API가 `qrOrdersAvailable:false`를 반환한다. 편집 화면은 이 제한을 명시하고 QR 상태를 만들어내지 않는다.
+
+### 검증 결과
+- TypeScript: PASS (`npm.cmd exec tsc -- --noEmit`)
+- 변경 파일 ESLint: PASS
+- HOS 배치 단위 테스트: PASS 6/6. 숫자순 3열 배치, 신규 테이블 기본 위치, 그리드 스냅, 테이블 수 1~90개 기본 배치의 유효성/비중첩, 가장자리 제한을 검증했다.
+- Production Build: PASS. 신규 `/admin/hos/table-layout`, `/api/admin-center/hos/table-layout`, HOS API 경로가 빌드에 포함됐다. 기존 `src/lib/menu-image-storage.ts`의 동적 파일경로 tracing 경고 2건은 남아 있으며 이번 작업과 무관하다.
+- `git diff --check`: 코드 변경 오류 없음. 저장소의 기존 CRLF/LF 변환 경고만 출력됐다.
+- 실제 Chrome/스마트폰/태블릿 화면의 드래그, 저장 후 재접속, 실제 QR 대기 표시 검증은 수행하지 않았다. 실제 기기 UI PASS로 처리하지 않는다.
+
+복구 체크포인트: `checkpoints/20261103-hos-admin-layout-prechange.zip`.
+
+
+## TDKADM 관리 화면 공통 콘텐츠 정렬 조정 (2026-11-03)
+
+### 변경
+- 공통 `.content` 래퍼에서 1200px 최대 폭과 좌우 자동 여백을 제거하고 남은 작업 영역 너비를 사용하도록 변경했다. 데스크톱 콘텐츠 시작점은 사이드바 너비 + 기존 본문 왼쪽 여백이며, 사이드바 너비와 패딩은 그대로다.
+- 메뉴와 영업마감 목록은 내부 최대 너비도 제거해 넓은 화면을 활용한다. 할인, 기타 결제, POS/KDS 및 인쇄/포장 설정은 페이지 래퍼의 중앙 정렬을 제거하고, 폼에 필요한 기존 폭 제한은 유지한다.
+- HOS 배치 화면은 공통 콘텐츠 폭을 그대로 받으며, 기존 스마트폰 미리보기와 우측 설정 패널 구성은 변경하지 않았다. HOS 편집/저장 로직과 권한은 변경하지 않았다.
+- 모달의 `fixed` 중앙 정렬과 모바일 반응형 사이드바/본문 간격은 유지했다. DB, API, 인증 권한 및 업무 기능은 변경하지 않았다.
+
+### 검증
+- 공통 래퍼가 적용된 ADM 페이지 17개를 조사했다.
+- TypeScript: PASS (`npm.cmd exec tsc -- --noEmit`)
+- 변경 페이지 ESLint: PASS. CSS Module은 ESLint 설정 대상이 아니어서 해당 파일을 ESLint가 건너뛰었다.
+- Production Build: PASS. 기존 `src/lib/menu-image-storage.ts` 동적 파일경로 tracing 경고 2건은 유지된다.
+- 1920px/1366px/태블릿 브라우저 실제 렌더링 캡처는 이 환경에서 수행하지 않았다. CSS상 본문은 동일한 사이드바 옆 좌측 시작을 유지하고, 태블릿에서는 기존 반응형 규칙을 사용한다.
+
+## TDKHOS 메인 화면 및 갱신 동작 정리 (2026-11-04)
+
+- `src/app/hos/HosHome.tsx`의 테이블 메인 화면에서 `테이블 배치` 제목과 수동 새로고침 버튼을 제거했다. 기존 흰색 헤더, 로그인 직원 ID, 로그아웃 및 헤더 구분선은 유지했다.
+- 기존 테이블 상태 자동 조회 주기인 6초를 유지한다. 테이블 화면에 진입하거나 상세 화면에서 돌아올 때 즉시 조회하고, 테이블 화면을 벗어나면 자동 타이머를 정리한다. 주문 상세 화면의 기존 5초 주문 조회는 변경하지 않았다.
+- 테이블 화면 최상단에서 64px 이상 아래로 당겼다 놓으면 `/api/hos/tables`만 즉시 다시 조회하는 Pull to Refresh를 추가했다. 제스처 중 브라우저의 페이지 당김 새로고침을 막고, 당김 안내와 갱신 중 표시를 제공한다. 상세/메뉴 입력 화면에서는 갱신을 실행하지 않고 브라우저 기본 당김 새로고침만 막아 입력 중 데이터를 보호한다. 내부 스크롤 목록은 스크롤 위치에 따라 계속 스크롤할 수 있다.
+- 자동·수동 요청은 진행 중 Promise를 공유하여 중복 호출을 막는다. 결과 갱신은 테이블 상태만 바꾸므로 주문 draft, 취소 예정 상태, 선택 화면 및 HOS 테이블 배치 좌표를 초기화하지 않는다. 실패는 기존 화면 오류 안내를 사용한다.
+- 검증: `npx.cmd tsc --noEmit` PASS, `npx.cmd eslint src/app/hos/HosHome.tsx` PASS, `npm.cmd run build` PASS. Production build에서 `src/lib/menu-image-storage.ts`의 동적 파일 경로 추적 관련 기존 경고 2건이 출력됐다.
+- 실제 Android 스마트폰/태블릿 브라우저 터치 검증은 이 환경에서 수행하지 않아 미검증이다. 특히 OS/브라우저별 native pull-to-refresh 억제와 실제 터치 감도는 기기에서 확인해야 한다.
+
+## TDKHOS 테이블 버튼 정보 배치 개선 (2026-11-04)
+
+- `src/app/hos/HosTableCanvas.tsx`의 실제 HOS 표시에서 사용 중 테이블을 상단 좌·우(테이블 번호, 실제 받을 금액), 하단 좌·우(인원, 상태) 영역으로 배치했다. HOS 편집 미리보기의 기존 표시 방식은 유지했다.
+- 받을 금액은 기존 `/api/hos/tables` 응답의 `amountDue`를 그대로 사용한다. 해당 응답은 기존 `calculateTableFinancials` 공유 계산 결과를 사용하며, POS 계산 로직이나 별도 계산은 추가하지 않았다.
+- 테이블 인원은 기존 세션의 `personCount + babyCount`를 사용하고 합계가 0이면 표시하지 않는다. 일반 빈 테이블은 번호만 중앙 표시한다. 테이블별 저장 위치·크기 및 반응형 좌표 적용은 변경하지 않았다.
+- QR 표시는 `hasQrOrder`가 실제로 제공될 때만 표시할 수 있도록 상태 영역을 준비했다. 현재 HOS 테이블 API는 `qrOrdersAvailable: false`이며 QR 대기 플래그를 전달하지 않으므로 QR 표시를 만들지 않았다. 병합 테이블의 기존 상태 표시는 하단 상태 영역에서 유지한다.
+- 검증: `npx.cmd tsc --noEmit` PASS, `npx.cmd eslint src/app/hos/HosTableCanvas.tsx src/app/hos/HosHome.tsx` PASS, `npm.cmd run build` PASS. 빌드 중 `src/lib/menu-image-storage.ts`의 동적 파일 경로 추적 경고 2건이 출력됐다.
+- 실제 스마트폰·태블릿 렌더링, POS 화면과의 실데이터 금액 대조 및 주문 상태 시각 확인은 이 환경에서 수행하지 않아 미검증이다.
+
+## TDKKDS PWA 방향 강제 원인 및 수정 (2026-11-04)
+
+- KDS 페이지(`/tdkkds`, 내부 경로 `/kitchen`)는 `src/app/kitchen/layout.tsx`에서 `/tdkkds/kds.webmanifest`를 명시한다. 렌더링된 로컬 HTML에서도 동일한 `rel=manifest` 경로를 확인했다. `/kds.webmanifest`는 `public/kds.webmanifest`에서 제공되는 별도 정적 파일이며 KDS 페이지의 링크 대상이 아니다.
+- 실제 수정 전 `http://127.0.0.1:3000/tdkkds/kds.webmanifest` 응답은 `display: fullscreen`, `display_override: [fullscreen, standalone]`, `orientation: landscape`였다. 원인은 `src/lib/kds-manifest.ts`가 공통 Manifest의 방향을 `landscape`로 덮어쓴 설정이다. `screen.orientation.lock()` 호출은 KDS 또는 공통 코드에서 발견되지 않았다. `requestFullscreen()` 검색 결과는 POS 코드뿐이며 방향 잠금과는 무관하다.
+- KDS 전용 적용 함수의 orientation을 `any`로 변경해 세로·가로 모두 허용하며, fullscreen/display_override 설정은 유지했다. POS·ADM·HOS Manifest 및 인증/조리 코드는 변경하지 않았다. `public/kds.webmanifest`도 이미 `any`이며 이번 변경 대상이 아니다.
+- Manifest 라우트는 `Cache-Control: no-store`로 응답하고 프로젝트에서 Service Worker 등록 코드나 서비스워커 파일을 찾지 못했다. 변경 후 로컬 실제 응답이 `orientation: any`인 것을 확인했다. 운영 도메인은 이 환경에서 원격 연결이 되지 않아 현재 배포 응답은 미확인이다.
+- 검증: Manifest 단위 테스트 5/5 PASS, TypeScript PASS, 관련 ESLint PASS, Production Build PASS. 빌드에서 기존 `src/lib/menu-image-storage.ts` 동적 파일 경로 추적 경고 2건이 출력됐다. Android 태블릿 실기기 검증은 미수행이다.
+- 태블릿 적용: 수정 소스를 운영 서버에 배포한 뒤 브라우저에서 정확한 KDS 주소를 한 번 열어 새 Manifest를 읽게 하고, 설치 앱을 닫았다 다시 실행한다. 계속 가로 고정이면 KDS 설치 앱만 제거 후 같은 주소에서 다시 설치한다(Chrome/Edge 브라우저 데이터 전체 삭제는 불필요). 시스템 빠른 설정의 자동 회전이 켜져 있는지 확인하고, 제조사에 앱별 방향 잠금 설정이 있으면 KDS에 고정 방향이 지정되지 않았는지 확인한다. Chrome과 Edge는 일반 탭과 설치 앱의 매니페스트 적용/업데이트 시점이 다를 수 있으므로 태블릿별 재검증이 필요하다.
+
+## TDKPOS 신뢰 토큰 일일 재인증 원인 조사 (2026-11-04)
+
+- 토큰 원문은 브라우저의 `tdk_pos_trust_<tokenId>` HttpOnly 쿠키에만 두고, DB `program_trust_tokens.token_hash`에는 SHA-256 해시만 저장한다. 쿠키는 host-only, `Path=/`, `Secure`, `SameSite=Strict`, `Max-Age=400일`이며 유효한 토큰 상태 조회 때 같은 쿠키를 재설정해 수명을 갱신한다.
+- DB 신뢰 토큰 테이블에는 만료시각 필드가 없고 검증은 프로그램 POS 일치, 미폐기, 등록 직원 활성·미퇴사·POS 권한 ON을 확인한다. 토큰은 서버 메모리/프로세스 키가 아닌 DB 해시로 검증되므로 애플리케이션 재시작 자체로 무효화되지 않는다.
+- 직원 POS 세션 쿠키는 HttpOnly, SameSite=Lax, 운영 Secure, 12시간 Max-Age이며 DB `loggedInAt`도 12시간 이내인지 확인한다. 따라서 하루 뒤 ID/PIN 재로그인은 정상 세션 만료일 수 있지만, 정상 토큰 쿠키가 있으면 마스터 비밀번호는 다시 요구하지 않아야 한다.
+- POS 자동 실행 경로 차이를 확인했다. `deploy/start-pos-kiosk.ps1`은 `%LOCALAPPDATA%\TDK-POS\EdgeProfile`의 지속 프로필을 사용하지만 `배포/TDKPOS_Start.bat`은 기존에 Edge 기본 프로필을 사용했다. 다른 프로필에서 신뢰를 등록하고 다른 런처로 실행하면 쿠키가 공유되지 않아 `trustStatus`가 `trusted:false`를 반환하고 마스터 인증을 요구할 수 있다. POS 장비의 실제 로그인 경로/작업은 이 개발 호스트에서 확인할 수 없어 이것이 현장 증상의 직접 원인인지는 미확정이다.
+- 재발 방지를 위해 `배포/TDKPOS_Start.bat`을 PowerShell 런처와 같은 지속 전용 프로필 `%LOCALAPPDATA%\TDK-POS\EdgeProfile`로 통일했다. `--inprivate`, 프로필 삭제, 쿠키 삭제는 적용하지 않았다. 기존 기본 프로필에만 신뢰가 등록되어 있었다면 새 전용 프로필에서 한 번 마스터 인증/등록 후부터 해당 프로필에 유지된다.
+- 실제 POS PC의 예약 작업은 이 호스트에 없어 조회되지 않았다. 현장 적용 후 POS 작업이 `deploy/register-pos-task.ps1`가 등록한 `start-pos-kiosk.ps1`를 호출하는지 확인해야 한다. 두 런처를 섞어 실행하지 않고 동일 프로필을 유지한다.
+- 검증: 프로그램 신뢰·등록·인증 흐름 테스트 17/17 PASS, TypeScript PASS, 관련 ESLint PASS, Production Build PASS. 기존 `src/lib/menu-image-storage.ts` 동적 파일 경로 추적 경고 2건이 있었다. 운영 DB, NAS, 직원 토큰/데이터는 조회·변경하지 않았다. 현장 Edge 재부팅 후 쿠키 존속은 이 개발 호스트에서 실제 확인할 수 없어 미검증이다.

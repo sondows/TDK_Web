@@ -168,7 +168,7 @@ export const staffSessions = mysqlTable("staff_sessions", {
     .default(sql`CURRENT_TIMESTAMP`),
   lastActiveAt: datetime("last_active_at"),
   loggedOutAt: datetime("logged_out_at"),
-  sessionType: mysqlEnum("session_type", ["POS", "ADMIN", "KDS"]).notNull().default("POS"),
+  sessionType: mysqlEnum("session_type", ["POS", "ADMIN", "KDS", "HOS"]).notNull().default("POS"),
   status: mysqlEnum("status", ["ACTIVE", "LOGGED_OUT", "EXPIRED"])
     .notNull()
     .default("ACTIVE"),

@@ -1,8 +1,9 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { orderItemCancellations, orderItems, orders, staff, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { shouldRequireCancellationPin } from "@/lib/cancellation-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { canEditDisplayedOrderSession } from "@/lib/party-order-access";
@@ -18,7 +19,9 @@ type CancellationRequest = { orderItemId: number; qty: number };
 type ComponentQuantityRequest = { orderItemId: number; quantity: number };
 
 export async function POST(request: Request) {
-  const current = await getCurrentStaff();
+  const posStaff = await getCurrentStaff();
+  const hosStaff = posStaff ? null : await getCurrentHosStaff();
+  const current = posStaff ?? hosStaff;
   const sharedMode = await getPosLoginMode() === "SHARED";
   if (!current && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
 
@@ -150,7 +153,9 @@ export async function POST(request: Request) {
       if (requiresReauth) {
         if (typeof body.loginId !== "string" || typeof body.pin !== "string") return { reauth: true as const, isFullOrderCancellation };
         const loginId = body.loginId.trim().toLowerCase();
-        const [checker] = await tx.select({ staffId: staff.staffId, employeePinHash: staff.employeePinHash }).from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1), ne(staff.staffCode, "000"))).limit(1);
+        const [checker] = await tx.select({ staffId: staff.staffId, employeePinHash: staff.employeePinHash })
+          .from(staff).where(and(sql`LOWER(${staff.adminLoginId}) = ${loginId}`, eq(staff.isActive, 1),
+            ne(staff.staffCode, "000"), ...(hosStaff ? [eq(staff.hosEnabled, 1), isNull(staff.terminatedAt), eq(staff.staffId, hosStaff.staffId)] : []))).limit(1);
         if (!checker?.employeePinHash || !(await verifyEmployeePin(body.pin, checker.employeePinHash))) throw new Error("직원 ID 또는 PIN이 올바르지 않습니다.");
         cancelledByStaffId = checker.staffId;
       }

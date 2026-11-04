@@ -37,6 +37,14 @@ const navigation: NavigationItem[] = [
     ],
   },
   {
+    id: "hos-settings",
+    label: "HOS",
+    href: "/tdkadm/hos/table-layout",
+    children: [
+      { label: "테이블 배치", href: "/tdkadm/hos/table-layout" },
+    ],
+  },
+  {
     id: "printing",
     label: "인쇄 설정",
     href: "/tdkadm/settings/printing",
@@ -71,7 +79,7 @@ function groupContainsPath(group: NavigationGroup, pathname: string) {
     || pathname.startsWith(`${group.href}/`);
 }
 
-export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; onNavigate?: () => void }) {
+export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, canManageHosLayout = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [expansion, setExpansion] = useState(() => ({
     pathname,
@@ -98,7 +106,8 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
 
   const items: NavigationItem[] = menuOnly
     ? [{ label: "메뉴 관리", href: "/tdkadm/menus" }]
-    : navigation.filter(item => canAccessSecurity || !isGroup(item) || item.id !== "security");
+    : navigation.filter(item => (canAccessSecurity || !isGroup(item) || item.id !== "security") &&
+      (canManageHosLayout || !isGroup(item) || item.id !== "hos-settings"));
 
   return <aside className={`${styles.sidebar}${mobileDrawer ? ` ${styles.mobileDrawerSidebar}` : ""}`}>
     <nav aria-label="관리센터 메뉴" className={styles.navigation}>

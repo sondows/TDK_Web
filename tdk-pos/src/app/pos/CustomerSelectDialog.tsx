@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
+import { formatTradeBalance } from "@/lib/customer-trade";
+import CustomerBalanceDialog from "./CustomerBalanceDialog";
 import PosSubHeader from "./PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
 
@@ -37,6 +39,8 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
   const [expanded, setExpanded] = useState(false);
   const [input, setInput] = useState("");
   const [tradeManagedOnly, setTradeManagedOnly] = useState(true);
+  const [balanceEnabled, setBalanceEnabled] = useState(false);
+  const [balanceCustomer, setBalanceCustomer] = useState<Customer | null>(null);
   const [sortMode, setSortMode] = useState<SortMode | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -105,22 +109,39 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
             aria-selected={selected?.customerId === customer.customerId}
             className={`mb-2 flex min-h-[60px] w-[80%] items-center justify-between gap-4 rounded-xl border px-4 py-3 text-left ${selected?.customerId === customer.customerId ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"}`}
             key={customer.customerId}
-            onClick={() => onSelect(selected?.customerId === customer.customerId ? null : customer)}
+            onClick={() => {
+              if (balanceEnabled) {
+                setBalanceCustomer(customer);
+                return;
+              }
+              onSelect(selected?.customerId === customer.customerId ? null : customer);
+            }}
             role="option"
             type="button"
           >
             <span className="min-w-0 flex-1 truncate text-xl font-bold">{customer.name}</span>
-            {customer.phone && <span className="shrink-0 text-base font-medium text-slate-600">{formatPhone(customer.phone)}</span>}
+            {balanceEnabled
+              ? <span className="shrink-0 text-base font-medium text-slate-600">{formatTradeBalance(customer.tradeBalance)}</span>
+              : customer.phone && <span className="shrink-0 text-base font-medium text-slate-600">{formatPhone(customer.phone)}</span>}
           </button>)}
         </div>
         <div className="flex min-h-0 flex-col gap-3 border-l border-slate-200 bg-white p-4">
-          <button aria-checked={tradeManagedOnly} className="flex min-h-[52px] items-center justify-between rounded-xl border border-slate-200 bg-white px-4 text-left text-sm font-semibold text-slate-800" onClick={() => setTradeManagedOnly(value => !value)} role="switch" type="button">
+          <div className="flex flex-col gap-1.5">
+          <button aria-checked={tradeManagedOnly} className="flex min-h-[52px] items-center justify-between rounded-xl border border-slate-200 bg-white px-4 text-left text-sm font-semibold text-slate-800" onClick={() => { const next = !tradeManagedOnly; setTradeManagedOnly(next); if (!next) setBalanceEnabled(false); }} role="switch" type="button">
             <span>거래관리</span>
             <span aria-hidden="true" className={`relative h-10 w-[76px] rounded-full transition-colors ${tradeManagedOnly ? "bg-blue-600" : "bg-slate-200"}`}>
               <span className={`absolute top-1 left-1 h-8 w-8 rounded-full bg-white shadow-sm transition-transform ${tradeManagedOnly ? "translate-x-9" : "translate-x-0"}`} />
               <span className={`absolute top-0 flex h-full items-center text-xs font-bold ${tradeManagedOnly ? "left-3 text-white" : "right-2 text-slate-600"}`}>{tradeManagedOnly ? "ON" : "OFF"}</span>
             </span>
           </button>
+          <button aria-checked={balanceEnabled} className="flex min-h-[52px] items-center justify-between rounded-xl border border-slate-200 bg-white px-4 text-left text-sm font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={!tradeManagedOnly} onClick={() => setBalanceEnabled(value => !value)} role="switch" type="button">
+            <span>잔액</span>
+            <span aria-hidden="true" className={`relative h-10 w-[76px] rounded-full transition-colors ${balanceEnabled ? "bg-blue-600" : "bg-slate-200"}`}>
+              <span className={`absolute top-1 left-1 h-8 w-8 rounded-full bg-white shadow-sm transition-transform ${balanceEnabled ? "translate-x-9" : "translate-x-0"}`} />
+              <span className={`absolute top-0 flex h-full items-center text-xs font-bold ${balanceEnabled ? "left-3 text-white" : "right-2 text-slate-600"}`}>{balanceEnabled ? "ON" : "OFF"}</span>
+            </span>
+          </button>
+          </div>
           <div aria-hidden="true" className="flex min-h-0 flex-1 items-center justify-center">
             <span className="text-xl font-extrabold tracking-wider text-blue-700">TDK POS</span>
           </div>
@@ -134,5 +155,6 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
         </div>}
       </div>
     </section>
+    {balanceCustomer && <CustomerBalanceDialog customer={balanceCustomer} onClose={() => setBalanceCustomer(null)} />}
   </div>;
 }

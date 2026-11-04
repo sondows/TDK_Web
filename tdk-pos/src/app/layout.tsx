@@ -7,9 +7,11 @@ export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const externalAdmin = isExternalAdminHost(requestHeaders.get("host"));
   const surface = requestHeaders.get("x-tdk-external-surface");
-  const appName = surface === "pos" ? "TDKON POS" : surface === "kds" ? "TDKON KDS" : surface === "admin" || externalAdmin ? "TDKON ADM" : "TDKON POS";
-  const iconName = surface === "pos" ? "tdk-pos" : surface === "kds" ? "tdk-kds" : "tdk-adm";
-  const manifest = surface === "pos" ? "/tdkpos/manifest.webmanifest" : surface === "admin" ? "/tdkadm/manifest.webmanifest" : "/manifest.webmanifest";
+  const appName = surface === "pos" ? "TDKON POS" : surface === "kds" ? "TDKON KDS" : surface === "hos" ? "TDKON HOS" : surface === "admin" || externalAdmin ? "TDKON ADM" : "TDKON POS";
+  const iconName = surface === "pos" ? "tdk-pos" : surface === "kds" ? "tdk-kds" : surface === "hos" ? "tdk-hos" : "tdk-adm";
+  const manifest = surface === "pos" ? "/tdkpos/manifest.webmanifest"
+    : surface === "admin" ? "/tdkadm/manifest.webmanifest"
+    : surface === "hos" ? "/tdkhos/manifest.webmanifest" : "/manifest.webmanifest";
   return {
     title: appName,
     applicationName: appName,

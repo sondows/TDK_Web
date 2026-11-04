@@ -5,6 +5,7 @@ import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
 import { formatMoney } from "@/lib/format-money";
 import { createRequestId } from "@/lib/request-id";
+import { openCashDrawer } from "@/lib/cash-drawer";
 import { parseJsonResponse, readJsonResponse } from "@/lib/api-response";
 import { printReceipt } from "@/lib/receipt-print";
 import { prepareAccountTransferNotice, printAccountTransferNotice } from "@/lib/account-transfer-notice";
@@ -115,6 +116,9 @@ export default function PaymentModal({
   const [orderTab, setOrderTab] = useState<"summary" | "detail">("summary");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cashDrawerBusy, setCashDrawerBusy] = useState(false);
+  const [cashDrawerError, setCashDrawerError] = useState("");
+  const cashDrawerInFlight = useRef(false);
   const requestInFlight = useRef(false);
   const requestRetryRef = useRef<((body: Record<string, unknown>, afterRegistered?: () => void) => Promise<{ ok: boolean; message?: string }>) | null>(null);
   const autoPrintAttempted = useRef(new Set<string>());
@@ -641,6 +645,22 @@ export default function PaymentModal({
       </div>
     </div>
   );
+  const handleCashBoxClick = async () => {
+    if (cashDrawerInFlight.current) return;
+    cashDrawerInFlight.current = true;
+    setCashDrawerBusy(true);
+    setCashDrawerError("");
+    try {
+      await openCashDrawer();
+    } catch (drawerError) {
+      const message = drawerError instanceof Error ? drawerError.message : "현금서랍을 열지 못했습니다.";
+      console.error("Payment dialog cash drawer request failed", drawerError);
+      setCashDrawerError(message);
+    } finally {
+      cashDrawerInFlight.current = false;
+      setCashDrawerBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section
@@ -693,6 +713,14 @@ export default function PaymentModal({
           <section className="flex min-h-0 flex-col border-r border-slate-200 px-[18px] py-6" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="shrink-0 pt-2 text-center">
+                <button
+                  aria-label="CashBox: 현금서랍 열기"
+                  className="min-h-11 -translate-y-2 touch-manipulation px-4 py-2 text-[15px] font-semibold text-slate-700 transition-colors hover:text-blue-600 active:text-blue-700 disabled:cursor-wait disabled:text-slate-400"
+                  disabled={cashDrawerBusy}
+                  onClick={() => void handleCashBoxClick()}
+                  type="button"
+                >CashBox</button>
+                {cashDrawerError && <p aria-live="polite" className="mx-auto max-w-full text-xs text-red-600" role="alert">{cashDrawerError}</p>}
                 <div className="text-base font-medium text-slate-700">총 결제금액</div>
                 <div className="mt-1 text-[30px] font-bold leading-tight text-blue-700">{money(state.total)}원</div>
               </div>

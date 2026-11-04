@@ -10,6 +10,7 @@ import { isAcceptableEmployeePin } from "@/lib/employee-pin-policy";
 import { isHttpsSameOriginRequest, reserveKdsIpAttempt } from "@/lib/kds-device";
 import { getKdsNetworkContext, getKdsRateLimitIp } from "@/lib/kds-network-server";
 import { KDS_SESSION_COOKIE_NAME, kdsSessionCookieOptions } from "@/lib/kds-auth";
+import { HOS_SESSION_COOKIE_NAME, hosSessionCookieOptions } from "@/lib/hos-auth";
 import { kdsCookieSecureForRequest } from "@/lib/kds-device";
 import { getCurrentProgramTrust, isProgram, isSecureTrustRequest, programPermission } from "@/lib/program-trust";
 
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
   const loginId = typeof body?.loginId === "string" ? body.loginId.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const pin = body?.pin;
-  if (!isProgram(program) || program === "HOS" || !/^[a-z][a-z0-9._-]{2,31}$/.test(loginId) ||
+  if (!isProgram(program) || !/^[a-z][a-z0-9._-]{2,31}$/.test(loginId) ||
     password.length > 128 || (password && password.length < 10) || pin !== body?.confirmPin ||
     !isAcceptableEmployeePin(pin))
     return Response.json({ success: false, message: "입력 정보 또는 PIN 형식을 확인해 주세요. 연속·반복 번호는 사용할 수 없습니다." },
@@ -113,6 +114,8 @@ export async function POST(request: Request) {
       if (program === "ADM") response.cookies.set(ADMIN_SESSION_COOKIE_NAME, sessionToken, adminSessionCookieOptions);
       else if (program === "KDS") response.cookies.set(KDS_SESSION_COOKIE_NAME, sessionToken,
         { ...kdsSessionCookieOptions, secure: kdsCookieSecureForRequest(request) });
+      else if (program === "HOS") response.cookies.set(HOS_SESSION_COOKIE_NAME, sessionToken,
+        { ...hosSessionCookieOptions, secure: kdsCookieSecureForRequest(request) });
       else response.cookies.set(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions);
     }
     return response;

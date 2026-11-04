@@ -80,6 +80,18 @@ export async function trustStatus(program: Program, request?: Request) {
       }
       passwordRegistrationAllowed = eligible.passwordHash === null && eligible.passwordChangeRequired === 1;
     }
+    if (program === "HOS" && loginId !== null) {
+      const normalizedId = loginId.trim().toLowerCase();
+      const [eligible] = /^[a-z][a-z0-9._-]{2,31}$/.test(normalizedId)
+        ? await db.select({ staffId: staff.staffId, passwordHash: staff.securityPasswordHash,
+          passwordChangeRequired: staff.securityPasswordChangeRequired }).from(staff).where(and(
+          sql`LOWER(${staff.adminLoginId}) = ${normalizedId}`,
+          eq(staff.isActive, 1), isNull(staff.terminatedAt), eq(staff.hosEnabled, 1),
+          ne(staff.staffCode, "000"))).limit(1)
+        : [];
+      if (!eligible) return invalidIdStatus(program);
+      passwordRegistrationAllowed = eligible.passwordHash === null && eligible.passwordChangeRequired === 1;
+    }
     const trust = await getCurrentProgramTrust(program, loginId ? { loginId } : undefined);
     const usableTrust = program === "POS" && posAccount &&
       (!posAccount.passwordHash || posAccount.passwordChangeRequired === 1) ? null : trust;
@@ -89,9 +101,9 @@ export async function trustStatus(program: Program, request?: Request) {
     const [member] = usableTrust ? await db.select({ loginId: staff.adminLoginId,
       pinHash: staff.employeePinHash }).from(staff).where(eq(staff.staffId, usableTrust.enrolledByStaffId)).limit(1) : [];
     const response = NextResponse.json({ success: true, trusted: Boolean(usableTrust),
-      passwordRegistrationRequired: Boolean((program === "KDS" || program === "POS") && !usableTrust &&
+      passwordRegistrationRequired: Boolean((program === "KDS" || program === "POS" || program === "HOS") && !usableTrust &&
         loginId && passwordRegistrationAllowed),
-      ...(program === "POS" && posAccount ? { masterPasswordConfigured: Boolean(posAccount.passwordHash) } : {}),
+      ...((program === "POS" || program === "HOS") && loginId ? { masterPasswordConfigured: !passwordRegistrationAllowed } : {}),
       invalidated: !usableTrust && hadCookie, pinSetupRequired: Boolean(usableTrust && !member?.pinHash),
       loginId: usableTrust ? member?.loginId : undefined }, { headers: noStore });
     if (usableTrust) {

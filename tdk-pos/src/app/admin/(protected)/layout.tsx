@@ -12,5 +12,5 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
   if (!member) redirect("/tdkadm/login");
   if (await getOwnerSecurityState() === "OWNER_UNCONFIGURED") return <OwnerSecurityPrompt state="OWNER_UNCONFIGURED" />;
   const canAccessSecurity = await isDesignatedOwnerStaff(member.staffId);
-  return <AdminWorkspaceShell canAccessSecurity={canAccessSecurity} userName={member.name}>{children}</AdminWorkspaceShell>;
+  return <AdminWorkspaceShell canAccessSecurity={canAccessSecurity} canManageHosLayout={member.role === "OWNER"} userName={member.name}>{children}</AdminWorkspaceShell>;
 }

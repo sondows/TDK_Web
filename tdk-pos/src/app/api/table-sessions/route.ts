@@ -1,13 +1,16 @@
 import { db } from "@/db";
 import { tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { and, eq, inArray } from "drizzle-orm";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 
 export async function POST(request: Request) {
   try {
-    const currentStaff = await getCurrentStaff();
+    const posStaff = await getCurrentStaff();
+    const hosStaff = posStaff ? null : await getCurrentHosStaff();
+    const currentStaff = posStaff ?? hosStaff;
     const sharedMode = await getPosLoginMode() === "SHARED";
 
     if (!currentStaff && !sharedMode) {
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
     }
 
     const sessionId = await db.transaction(async tx => {
-      await ensureDailyOpeningCash(tx);
+      if (!hosStaff) await ensureDailyOpeningCash(tx);
       const [existing] = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
         .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN"))).limit(1);
       if (existing) throw new Error("이미 사용 중인 테이블입니다.");

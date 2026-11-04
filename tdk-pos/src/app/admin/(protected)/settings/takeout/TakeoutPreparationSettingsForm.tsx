@@ -54,7 +54,7 @@ export default function TakeoutPreparationSettingsForm({
     }
   };
 
-  return <form className="mx-auto mt-6 max-w-xl rounded-2xl bg-white p-6 shadow-sm" onSubmit={event => void save(event)}>
+  return <form className="mt-6 max-w-xl rounded-2xl bg-white p-6 shadow-sm" onSubmit={event => void save(event)}>
     <h2 className="select-none text-xl font-bold">기본 포장 준비시간</h2>
     <p className="mt-2 select-none text-sm leading-6 text-slate-500">포장 주문 생성 시 현재 시간에 자동으로 추가되는 준비시간입니다.</p>
     <div aria-label="기본 포장 준비시간 선택" className="mt-6 flex flex-wrap gap-2" role="group">

@@ -25,10 +25,8 @@ export default async function AdminMenuManagementPage() {
   const menusWithComponents = menuRows.map(menu => ({ ...menu, components: componentsByMenu.get(menu.menuId) ?? [], optionConfig: choiceConfigs.get(menu.menuId) ?? { enabled: false, title: "", buttons: [], defaultIndex: 0 } }));
   return <AdminWorkspaceShell userName={centerMember.name}>
     <div className={styles.content}>
-      <div className="mx-auto max-w-6xl">
         <div className={styles.pageHeading}><h1>메뉴 관리</h1><p className={styles.pageDescription}>POS 메뉴와 구성 메뉴를 관리합니다.</p></div>
         <MenuManagementClient categories={categories} initialMenus={menusWithComponents} componentMenus={componentMenuRows} />
-      </div>
     </div>
   </AdminWorkspaceShell>;
 }

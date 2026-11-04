@@ -24,7 +24,8 @@ export async function POST(request: Request) {
   if (!/^[a-z][a-z0-9._-]{2,31}$/.test(loginId))
     return NextResponse.json({ available: false }, { headers: noStore });
   try {
-    if (new URL(request.url).searchParams.get("program") === "KDS") {
+    const requestedProgram = new URL(request.url).searchParams.get("program");
+    if (requestedProgram === "KDS") {
       const ipLimit = await reserveKdsIpAttempt("initial-master-status");
       if (ipLimit === "ip-unavailable") return NextResponse.json({ available: false,
         code: "KDS_RATE_LIMIT_IP_UNAVAILABLE", message: "KDS 로그인 네트워크를 확인할 수 없습니다. 연결 설정을 확인해 주세요." },
@@ -43,14 +44,18 @@ export async function POST(request: Request) {
     }
     const [account] = await db.select({ staffId: staff.staffId, passwordHash: staff.securityPasswordHash,
       role: staff.role, isActive: staff.isActive, adminEnabled: staff.adminEnabled,
+      hosEnabled: staff.hosEnabled, kdsEnabled: staff.kdsEnabled,
       terminatedAt: staff.terminatedAt, staffCode: staff.staffCode,
       resetRequired: staff.securityPasswordChangeRequired,
       isOwner: sql<boolean>`${adminSecurityOwners.staffId} IS NOT NULL`.as("is_owner") }).from(staff)
       .leftJoin(adminSecurityOwners, eq(adminSecurityOwners.staffId, staff.staffId))
       .where(sql`LOWER(${staff.adminLoginId}) = ${loginId}`)
       .limit(1);
+    const permissionEnabled = requestedProgram === "HOS" ? account?.hosEnabled === 1
+      : requestedProgram === "KDS" ? account?.kdsEnabled === 1
+      : account?.adminEnabled === 1;
     const resetPasswordRequired = Boolean(account && account.isActive === 1 && !account.terminatedAt &&
-      account.staffCode !== "000" && account.adminEnabled === 1 && account.resetRequired === 1 &&
+      account.staffCode !== "000" && permissionEnabled && account.resetRequired === 1 &&
       account.passwordHash === null);
     if (resetPasswordRequired) return NextResponse.json({ resetPasswordRequired: true }, { headers: noStore });
     if (!setupWrite) return NextResponse.json({ resetPasswordRequired: false }, { headers: noStore });

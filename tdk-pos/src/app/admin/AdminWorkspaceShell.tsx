@@ -7,7 +7,7 @@ import AdminExitButton from "./AdminExitButton";
 import AdminSidebar from "./AdminSidebar";
 import styles from "./admin.module.css";
 
-export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, canAccessSecurity = false }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; canAccessSecurity?: boolean }) {
+export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, canAccessSecurity = false, canManageHosLayout = false }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -38,7 +38,7 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
       <div className={styles.userArea}><span className={styles.userName}>{userName}</span>{showLogout && <AdminLogoutButton />}<AdminExitButton /></div>
     </header>
     <div className={styles.workspace}>
-      <AdminSidebar canAccessSecurity={canAccessSecurity} menuOnly={menuOnly} />
+      <AdminSidebar canAccessSecurity={canAccessSecurity} canManageHosLayout={canManageHosLayout} menuOnly={menuOnly} />
       <main className={styles.main} id="admin-main">{children}</main>
     </div>
     {drawerOpen && <>
@@ -53,7 +53,7 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }}>
         <div className={styles.mobileDrawerHeader}><strong>메뉴</strong><button type="button" className={styles.mobileDrawerClose} aria-label="메뉴 닫기" onClick={() => setDrawerOpen(false)}>×</button></div>
-        <AdminSidebar canAccessSecurity={canAccessSecurity} menuOnly={menuOnly} mobileDrawer onNavigate={() => setDrawerOpen(false)} />
+        <AdminSidebar canAccessSecurity={canAccessSecurity} canManageHosLayout={canManageHosLayout} menuOnly={menuOnly} mobileDrawer onNavigate={() => setDrawerOpen(false)} />
       </aside>
     </>}
   </div>;

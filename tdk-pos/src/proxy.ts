@@ -6,6 +6,7 @@ import {
   isExternalAliasTargetAllowed,
   isExternalAdminPathAllowed,
   isExternalKdsPath,
+  isExternalHosPath,
   isExternalPosPath,
   hasVerifiedExternalHttpsIngress,
   isAliasRewriteTarget,
@@ -61,7 +62,7 @@ export function proxy(request: NextRequest) {
   // employee identity, program permission and session checks remain in the APIs.
   const verifiedIngress = hasVerifiedExternalHttpsIngress(request.headers);
   externalHeaders.delete("x-tdk-trusted-network");
-  const protectedSurfacePath = isExternalPosPath(pathname);
+  const protectedSurfacePath = isExternalPosPath(pathname) || isExternalHosPath(pathname);
 
   if (protectedSurfacePath && !verifiedIngress) {
     return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });

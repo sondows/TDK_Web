@@ -13,7 +13,7 @@ export default async function AdminKdsSettingsPage() {
     getKdsArrivalSoundSettings(), getKdsCookingSettings(), getKdsCompletionCountdownSeconds(), getKdsCompletedTimeShrinkStartMinutes(),
   ]);
   return <div className={styles.content}>
-    <div className="mx-auto max-w-xl">
+    <div className="max-w-xl">
       <div className={styles.pageHeading}>
         <h1>KDS 설정</h1>
         <p className={styles.pageDescription}>신규 주문 도착음과 외부 끓임 시간을 설정합니다.</p>

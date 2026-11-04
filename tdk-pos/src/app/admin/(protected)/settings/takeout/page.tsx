@@ -12,7 +12,7 @@ export default async function AdminTakeoutSettingsPage() {
   const minutes = await getTakeoutPreparationMinutes();
 
   return <div className={styles.content}>
-    <div className="mx-auto max-w-xl">
+    <div className="max-w-xl">
       <div className={styles.pageHeading}>
         <h1 className="select-none">포장 설정</h1>
       </div>

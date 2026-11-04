@@ -2,7 +2,7 @@ export const EXTERNAL_ADMIN_HOST = "tdkon.myasustor.com";
 
 const DEFAULT_INTERNAL_HOSTS = ["192.168.0.83", "192.168.0.54", "localhost", "127.0.0.1", "::1"];
 const SAFE_READ_METHODS = new Set(["GET", "HEAD"]);
-export type ExternalSurface = "pos" | "admin" | "kds";
+export type ExternalSurface = "pos" | "admin" | "kds" | "hos";
 
 export function hostnameFromHeader(hostHeader: string | null): string | null {
   if (!hostHeader) return null;
@@ -47,6 +47,11 @@ export function isExternalPosPath(pathname: string): boolean {
 export function isExternalKdsPath(pathname: string): boolean {
   return isPathOrChild(pathname, "/kitchen") || isPathOrChild(pathname, "/tdkkds") || isPathOrChild(pathname, "/api/kitchen");
 }
+export function isExternalHosPath(pathname: string): boolean {
+  return isPathOrChild(pathname, "/hos") || isPathOrChild(pathname, "/tdkhos") || isPathOrChild(pathname, "/api/hos")
+    || pathname === "/api/admin-center/trust/initial-master/status"
+    || pathname === "/api/program-trust/master-recovery/register-initial";
+}
 /** External host is management-only; shared customer/settings APIs remain for management workflows. */
 export function isExternalAdminPathAllowed(pathname: string, method: string): boolean {
   if (pathname === "/") return isReadOnly(method);
@@ -65,11 +70,12 @@ export function isExternalAdminPathAllowed(pathname: string, method: string): bo
 export function isExternalAliasTargetAllowed(surface: ExternalSurface, target: string, method: string, verifiedIngress: boolean): boolean {
   if (surface === "pos") return verifiedIngress && (isExternalPosPath(target) || target === "/manifest.webmanifest");
   if (surface === "kds") return isExternalKdsPath(target) || target === "/manifest.webmanifest";
+  if (surface === "hos") return verifiedIngress && isExternalHosPath(target);
   return isExternalAdminPathAllowed(target, method);
 }
 export function externalAliasTarget(pathname: string): { surface: ExternalSurface; target: string } | null {
   const aliases: Array<{ prefix: string; surface: ExternalSurface }> = [
-    { prefix: "/tdkpos", surface: "pos" }, { prefix: "/tdkadm", surface: "admin" }, { prefix: "/tdkkds", surface: "kds" },
+    { prefix: "/tdkpos", surface: "pos" }, { prefix: "/tdkadm", surface: "admin" }, { prefix: "/tdkkds", surface: "kds" }, { prefix: "/tdkhos", surface: "hos" },
   ];
   const alias = aliases.find(({ prefix }) => isPathOrChild(pathname, prefix));
   if (!alias) return null;
@@ -85,6 +91,7 @@ export function externalAliasTarget(pathname: string): { surface: ExternalSurfac
     if (suffix === "/manifest.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
     return { surface: alias.surface, target: `/admin${suffix}` };
   }
+  if (alias.surface === "hos") return { surface: alias.surface, target: suffix ? `/hos${suffix}` : "/hos" };
   if (!suffix || suffix === "/kitchen") return { surface: alias.surface, target: "/kitchen" };
   if (suffix === "/kds.webmanifest") return { surface: alias.surface, target: "/manifest.webmanifest" };
   return { surface: alias.surface, target: isPathOrChild(suffix, "/kitchen") ? suffix : `/kitchen${suffix}` };
@@ -92,10 +99,11 @@ export function externalAliasTarget(pathname: string): { surface: ExternalSurfac
 /** Identify an internal path produced by an alias rewrite. This is only a routing hint;
  * authorization and ingress checks must still run for the rewritten request. */
 export function isAliasRewriteTarget(surfaceHeader: string | null, pathname: string): surfaceHeader is ExternalSurface {
-  if (surfaceHeader !== "pos" && surfaceHeader !== "admin" && surfaceHeader !== "kds") return false;
+  if (surfaceHeader !== "pos" && surfaceHeader !== "admin" && surfaceHeader !== "kds" && surfaceHeader !== "hos") return false;
   if (externalAliasTarget(pathname)) return false;
   if (surfaceHeader === "pos") return isExternalPosPath(pathname);
   if (surfaceHeader === "kds") return isExternalKdsPath(pathname);
+  if (surfaceHeader === "hos") return isExternalHosPath(pathname);
   return isAdminPageOrApi(pathname);
 }
 export function internalCanonicalPath(pathname: string): string | null {
@@ -105,6 +113,8 @@ export function internalCanonicalPath(pathname: string): string | null {
   if (pathname === "/login") return "/tdkpos/login";
   if (isPathOrChild(pathname, "/pos")) return `/tdkpos${pathname.slice("/pos".length)}`;
   if (isPathOrChild(pathname, "/kitchen")) return `/tdkkds${pathname.slice("/kitchen".length)}`;
+  if (pathname === "/hos") return "/tdkhos";
+  if (isPathOrChild(pathname, "/hos")) return `/tdkhos${pathname.slice("/hos".length)}`;
   return null;
 }
 export function externalCanonicalPath(pathname: string): string | null {

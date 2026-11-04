@@ -29,7 +29,7 @@ test("each installable surface has an isolated identity, start path, scope, and 
     const iconSources = manifest.icons.map(({ src }) => src);
     assert.deepEqual(iconSources.slice(0, 2), [`/icons/${icon}-192.png`, `/icons/${icon}-512.png`]);
     if (surface === "pos") {
-      assert.equal(manifest.short_name, "TDKPOS");
+      assert.equal(manifest.short_name, name);
       assert.deepEqual(manifest.icons[2], {
         src: "/icons/tdk-pos-maskable-512.png",
         sizes: "512x512",
@@ -46,7 +46,7 @@ test("each installable surface has an isolated identity, start path, scope, and 
 test("the root internal POS manifest uses the POS scope and maskable icon", () => {
   const manifest = buildAppManifest(null, false);
   assert.equal(manifest.name, "TDKON POS");
-  assert.equal(manifest.short_name, "TDKPOS");
+  assert.equal(manifest.short_name, "TDKON POS");
   assert.equal(manifest.start_url, "/tdkpos");
   assert.equal(manifest.scope, "/tdkpos");
   assert.ok(manifest.icons.some(icon => icon.purpose === "maskable"));
@@ -60,11 +60,28 @@ test("the external root manifest remains ADM and does not include the POS icon",
   assert.ok(manifest.icons.every(icon => !icon.src.includes("tdk-pos")));
 });
 
-test("the KDS manifest requests fullscreen landscape without changing its identity", () => {
+test("HOS has its own fullscreen portrait install identity and path scope", () => {
+  const manifest = buildAppManifest("hos", false);
+  assert.equal(manifest.id, "/tdkhos");
+  assert.equal(manifest.name, "TDKON HOS");
+  assert.equal(manifest.short_name, "TDKON HOS");
+  assert.equal(manifest.start_url, "/tdkhos");
+  assert.equal(manifest.scope, "/tdkhos");
+  assert.equal(manifest.display, "fullscreen");
+  assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
+  assert.equal(manifest.orientation, "portrait");
+  assert.deepEqual(manifest.icons.map(icon => icon.src), [
+    "/icons/tdk-hos-192.png",
+    "/icons/tdk-hos-512.png",
+    "/icons/tdk-hos-maskable-512.png",
+  ]);
+});
+
+test("the KDS manifest preserves fullscreen while allowing any screen orientation", () => {
   const manifest = applyKdsDisplayOptions(buildAppManifest("kds", false));
   assert.equal(manifest.display, "fullscreen");
   assert.deepEqual(manifest.display_override, ["fullscreen", "standalone"]);
-  assert.equal(manifest.orientation, "landscape");
+  assert.equal(manifest.orientation, "any");
   assert.equal(manifest.id, "/tdkkds");
   assert.equal(manifest.start_url, "/tdkkds");
   assert.equal(manifest.scope, "/tdkkds");

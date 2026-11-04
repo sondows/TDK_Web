@@ -37,14 +37,17 @@ export async function POST(request: Request) {
       const [candidate] = await tx.select({ staffId: staff.staffId, passwordHash: staff.securityPasswordHash,
         resetRequired: staff.securityPasswordChangeRequired, role: staff.role, active: staff.isActive,
         adminEnabled: staff.adminEnabled, terminatedAt: staff.terminatedAt,
-        staffCode: staff.staffCode, posEnabled: staff.posEnabled }).from(staff)
+        staffCode: staff.staffCode, posEnabled: staff.posEnabled, hosEnabled: staff.hosEnabled,
+        kdsEnabled: staff.kdsEnabled }).from(staff)
         .where(sql`LOWER(${staff.adminLoginId}) = ${loginId}`)
         .limit(1).for("update");
       if (!candidate) return null;
 
       if (candidate.passwordHash === null && candidate.resetRequired === 1 && candidate.active === 1 &&
         !candidate.terminatedAt && candidate.staffCode !== "000" &&
-        (requestedProgram !== "POS" || candidate.posEnabled === 1)) {
+        (requestedProgram !== "POS" || candidate.posEnabled === 1) &&
+        (requestedProgram !== "KDS" || candidate.kdsEnabled === 1) &&
+        (requestedProgram !== "HOS" || candidate.hosEnabled === 1)) {
         const updated = await tx.update(staff).set({ securityPasswordHash: passwordHash,
           securityPasswordChangeRequired: 0, updatedAt: new Date() }).where(and(
           eq(staff.staffId, candidate.staffId), eq(staff.securityPasswordChangeRequired, 1),
@@ -64,6 +67,8 @@ export async function POST(request: Request) {
         staffCode: candidate.staffCode, isOwner: Boolean(owner) });
       if (accountState !== "MASTER_PASSWORD_REQUIRED") return null;
       if (requestedProgram === "POS" && candidate.posEnabled !== 1) return null;
+      if (requestedProgram === "KDS" && candidate.kdsEnabled !== 1) return null;
+      if (requestedProgram === "HOS" && candidate.hosEnabled !== 1) return null;
       const updated = await tx.update(staff).set({ securityPasswordHash: passwordHash, updatedAt: new Date() })
         .where(and(eq(staff.staffId, candidate.staffId), isNull(staff.securityPasswordHash)));
       if (Number(updated[0].affectedRows) !== 1) return null;
