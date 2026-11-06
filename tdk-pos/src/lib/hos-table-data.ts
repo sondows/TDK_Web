@@ -7,11 +7,12 @@ import { diningTables, orderItemCancellations, orderItems, orders, paymentSessio
   payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { calculateTableFinancials } from "@/lib/table-session-financials";
 import { parseHosTableLayout, resolveHosTableLayouts } from "@/lib/hos-table-layout";
+import { HOS_DIVIDER_SETTING_KEY, parseHosDividerPositions } from "@/lib/hos-section-layout";
 
 type QrSessionRow = RowDataPacket & { sessionId: number };
 
 export async function loadHosTables(includeHidden = false) {
-  const [tableRows, sessions, merges] = await Promise.all([
+  const [tableRows, sessions, merges, dividerSettings] = await Promise.all([
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, tableName: diningTables.tableName,
       capacity: diningTables.capacity }).from(diningTables).where(eq(diningTables.isActive, 1)),
     db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, personCount: tableSessions.personCount,
@@ -20,6 +21,8 @@ export async function loadHosTables(includeHidden = false) {
     db.select({ sourceSessionId: tableSessionMerges.sourceSessionId, destinationSessionId: tableSessionMerges.destinationSessionId,
       sourceTableId: tableSessionMerges.sourceTableId, destinationTableId: tableSessionMerges.destinationTableId })
       .from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE")),
+    db.select({ settingValue: systemSettings.settingValue }).from(systemSettings)
+      .where(eq(systemSettings.settingKey, HOS_DIVIDER_SETTING_KEY)).limit(1),
   ]);
   const settingKeys = tableRows.map(table => `hos.table-layout.${table.tableId}`);
   const settingRows = settingKeys.length
@@ -117,5 +120,9 @@ export async function loadHosTables(includeHidden = false) {
       amountDue: summary?.remaining ?? 0,
     };
   });
-  return { tables: includeHidden ? visible : visible.filter(table => table.isVisible), qrOrdersAvailable: false };
+  return {
+    tables: includeHidden ? visible : visible.filter(table => table.isVisible),
+    qrOrdersAvailable: false,
+    dividerPositions: parseHosDividerPositions(dividerSettings[0]?.settingValue),
+  };
 }

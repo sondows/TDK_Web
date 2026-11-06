@@ -45,6 +45,7 @@ async function readJson<T>(response: Response): Promise<T> {
 export default function HosHome({ staffLoginId }: { staffLoginId: string | null }) {
   const router = useRouter();
   const [tables, setTables] = useState<TableRow[]>([]);
+  const [dividerPositions, setDividerPositions] = useState<number[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [detail, setDetail] = useState<TableDetail | null>(null);
   const [screen, setScreen] = useState<"tables" | "detail" | "menu">("tables");
@@ -82,8 +83,9 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     setRefreshing(true);
     const request = (async () => {
       try {
-        const result = await readJson<{ tables: TableRow[] }>(await fetch("/api/hos/tables", { cache: "no-store" }));
+        const result = await readJson<{ tables: TableRow[]; dividerPositions?: number[] }>(await fetch("/api/hos/tables", { cache: "no-store" }));
         setTables(result.tables);
+        setDividerPositions(Array.isArray(result.dividerPositions) ? result.dividerPositions : []);
         setError("");
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "테이블 정보를 불러오지 못했습니다.");
@@ -496,7 +498,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           : pullDistance > 0 && <span>{pullDistance >= 64 ? "놓으면 갱신" : "아래로 당겨 갱신"}</span>}
       </div>
       {tables.length > 0
-        ? <HosTableCanvas tables={tables} disabled={busy} onSelect={table => {
+        ? <HosTableCanvas tables={tables} dividerPositions={dividerPositions} disabled={busy} onSelect={table => {
           const destination = table.isMergedSource
             ? tables.find(candidate => candidate.tableNo === table.mergedIntoTableNo) : null;
           void openTable(destination ?? table);

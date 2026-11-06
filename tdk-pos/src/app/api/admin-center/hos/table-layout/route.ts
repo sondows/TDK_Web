@@ -4,6 +4,7 @@ import { systemSettings } from "@/db/schema";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { isValidHosTableLayout, type HosTableLayoutRecord } from "@/lib/hos-table-layout";
 import { loadHosTables } from "@/lib/hos-table-data";
+import { HOS_DIVIDER_LIMIT, HOS_DIVIDER_SETTING_KEY } from "@/lib/hos-section-layout";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export async function PUT(request: Request) {
   const access = await requireLayoutOwner();
   if ("response" in access) return access.response;
   try {
-    const body = await request.json() as { layouts?: unknown; gridSettings?: unknown };
+    const body = await request.json() as { layouts?: unknown; gridSettings?: unknown; dividerPositions?: unknown };
     if (!Array.isArray(body.layouts) || body.layouts.length > 300) {
       return Response.json({ success: false, message: "Invalid HOS layout." }, { status: 400 });
     }
@@ -69,6 +70,14 @@ export async function PUT(request: Request) {
         return Response.json({ success: false, message: "Invalid HOS layout grid settings." }, { status: 400 });
       }
       gridSettings = { spacing: Number(candidate.spacing), snapToGrid: candidate.snapToGrid };
+    }
+    let dividerPositions: number[] | undefined;
+    if (body.dividerPositions !== undefined) {
+      if (!Array.isArray(body.dividerPositions) || body.dividerPositions.length > HOS_DIVIDER_LIMIT ||
+        body.dividerPositions.some(position => typeof position !== "number" || !Number.isFinite(position) || position <= 0 || position >= 100)) {
+        return Response.json({ success: false, message: "Invalid HOS divider position." }, { status: 400 });
+      }
+      dividerPositions = body.dividerPositions as number[];
     }
     if (layouts.some(item => !validTableId(item.tableId) || !item.tableNo || typeof item.isVisible !== "boolean" || !isValidHosTableLayout(item))) {
       return Response.json({ success: false, message: "Invalid HOS table position or size." }, { status: 400 });
@@ -105,8 +114,12 @@ export async function PUT(request: Request) {
         await tx.insert(systemSettings).values({ settingKey: GRID_SETTING_KEY, settingValue: JSON.stringify(gridSettings), updatedByStaffId: access.member.staffId })
           .onDuplicateKeyUpdate({ set: { settingValue: JSON.stringify(gridSettings), updatedAt: new Date(), updatedByStaffId: access.member.staffId } });
       }
+      if (dividerPositions) {
+        await tx.insert(systemSettings).values({ settingKey: HOS_DIVIDER_SETTING_KEY, settingValue: JSON.stringify(dividerPositions), updatedByStaffId: access.member.staffId })
+          .onDuplicateKeyUpdate({ set: { settingValue: JSON.stringify(dividerPositions), updatedAt: new Date(), updatedByStaffId: access.member.staffId } });
+      }
     });
-    return Response.json({ success: true, savedCount: layouts.length, gridSettings }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ success: true, savedCount: layouts.length, gridSettings, dividerPositions }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("ADM HOS layout save failed", { code: (error as { code?: string }).code });
     return Response.json({ success: false, message: "HOS layout could not be saved." },

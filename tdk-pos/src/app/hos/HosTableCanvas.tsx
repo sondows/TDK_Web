@@ -34,8 +34,10 @@ type Props = {
   showGrid?: boolean;
   gridSpacingPx?: number;
   snapToGrid?: boolean;
+  dividerPositions?: number[];
   onSelect?: (table: HosTableCanvasRow) => void;
   onMove?: (tableId: number, positionX: number, positionY: number) => void;
+  onMoveDivider?: (dividerIndex: number, position: number) => void;
 };
 
 type DragState = {
@@ -49,6 +51,7 @@ type DragState = {
 };
 
 type StackCycleState = { tableIds: number[]; x: number; y: number; index: number };
+type DividerDragState = { pointerId: number; dividerIndex: number; startY: number; originY: number };
 
 const money = (amount: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(amount);
 
@@ -60,17 +63,16 @@ function formatHosStayDuration(openedAt: string, now: number) {
 }
 
 export default function HosTableCanvas({ tables, disabled = false, editing = false, selectedTableId = null,
-  showGrid = false, gridSpacingPx = 10, snapToGrid = false, onSelect, onMove }: Props) {
+  showGrid = false, gridSpacingPx = 10, snapToGrid = false, dividerPositions = [], onSelect, onMove, onMoveDivider }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const suppressClickRef = useRef<number | null>(null);
   const stackCycleRef = useRef<StackCycleState | null>(null);
+  const dividerDragRef = useRef<DividerDragState | null>(null);
   const [draggingTableId, setDraggingTableId] = useState<number | null>(null);
+  const [draggingDividerIndex, setDraggingDividerIndex] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const sectionLayout: HosSectionLayout = !editing ? calculateHosSectionLayout(tables, HOS_LAYOUT_VERTICAL_SCALE) : {
-    dividerPositions: [], verticalOffsets: new Map<number, number>(), canvasHeightPercent: 100, extraHeightPercent: 0,
-    fallbackReason: null, originalGaps: null, currentGaps: null, renderedGaps: null,
-  };
+  const sectionLayout: HosSectionLayout = calculateHosSectionLayout(tables, HOS_LAYOUT_VERTICAL_SCALE, dividerPositions);
 
   useEffect(() => {
     if (editing) return;
@@ -115,6 +117,32 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
     setDraggingTableId(null);
   }
 
+  function beginDividerDrag(event: PointerEvent<HTMLDivElement>, dividerIndex: number) {
+    if (!editing || disabled || !onMoveDivider || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingDividerIndex(dividerIndex);
+    dividerDragRef.current = { pointerId: event.pointerId, dividerIndex, startY: event.clientY,
+      originY: sectionLayout.dividerPositions[dividerIndex] };
+  }
+
+  function moveDividerDrag(event: PointerEvent<HTMLDivElement>) {
+    const drag = dividerDragRef.current;
+    const canvas = canvasRef.current;
+    if (!editing || !drag || drag.pointerId !== event.pointerId || !canvas || !onMoveDivider) return;
+    const bounds = canvas.getBoundingClientRect();
+    if (!bounds.height) return;
+    const position = Math.min(99, Math.max(1, drag.originY + (event.clientY - drag.startY) / bounds.height * 100));
+    onMoveDivider(drag.dividerIndex, position);
+  }
+
+  function endDividerDrag(event: PointerEvent<HTMLDivElement>) {
+    const drag = dividerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dividerDragRef.current = null;
+    setDraggingDividerIndex(null);
+  }
+
   function selectTable(event: MouseEvent<HTMLButtonElement>, clickedTable: HosTableCanvasRow) {
     if (suppressClickRef.current === clickedTable.tableId) { suppressClickRef.current = null; return; }
     if (!editing || !canvasRef.current || !onSelect) { onSelect?.(clickedTable); return; }
@@ -154,7 +182,18 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
     {!editing && <div aria-hidden="true" className="w-full" style={{ height: `calc(${sectionLayout.canvasHeightPercent * 16 / 9}cqw + 4px)` }} />}
     <div ref={canvasRef} className={`${editing ? "relative" : "absolute inset-x-0 top-0"} w-full overflow-visible bg-white ${editing ? "touch-none rounded-xl border border-slate-300 shadow-inner" : ""}`}
       style={{ aspectRatio: "9 / 16", containerType: "inline-size", ...(showGrid ? { backgroundImage: "radial-gradient(circle at 0 0, rgba(148,163,184,.55) 1px, transparent 1.2px)", backgroundSize: `${gridSpacingPx}px ${gridSpacingPx}px`, backgroundPosition: "0 0" } : {}) }}>
-    {sectionLayout.dividerPositions.map((position, index) => <div aria-hidden="true" className="pointer-events-none absolute left-[calc(50%-50vw)] z-0 h-[4px] w-screen -translate-y-1/2 bg-[#D9DEE5]" data-hos-section-divider={index + 1} key={`section-divider-${index}`} style={{ top: `${position}%` }} />)}
+    {sectionLayout.dividerPositions.map((position, index) => <div aria-hidden={!editing} aria-label={editing ? `구분선 ${index + 1}` : undefined}
+      className={`absolute -translate-y-1/2 ${editing ? "inset-x-0 h-4 cursor-row-resize touch-none" : "left-[calc(50%-50vw)] h-[4px] w-screen"} ${draggingDividerIndex === index ? "z-[1001]" : editing ? "z-[1000]" : "z-0"}`}
+      data-hos-section-divider={index + 1} key={`section-divider-${index}`} onPointerDown={editing ? event => beginDividerDrag(event, index) : undefined}
+      onPointerMove={editing ? moveDividerDrag : undefined} onPointerUp={editing ? endDividerDrag : undefined}
+      onPointerCancel={editing ? endDividerDrag : undefined} onKeyDown={editing && onMoveDivider ? event => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        onMoveDivider(index, Math.min(99, Math.max(1, position + (event.key === "ArrowUp" ? -1 : 1))));
+      } : undefined}
+      role={editing ? "slider" : undefined} tabIndex={editing ? 0 : undefined}
+      aria-valuemin={editing ? 1 : undefined} aria-valuemax={editing ? 99 : undefined} aria-valuenow={editing ? Math.round(position) : undefined}
+      style={{ top: `${position}%` }}><span className={`absolute inset-x-0 top-1/2 block h-[4px] -translate-y-1/2 bg-[#D9DEE5] ${editing ? "ring-2 ring-blue-300/70" : ""}`} /></div>)}
     {tables.filter(table => table.isVisible).map(table => {
       const occupied = table.sessionId !== null;
       const guestCount = (table.personCount ?? 0) + (table.babyCount ?? 0);

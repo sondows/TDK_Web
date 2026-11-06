@@ -33,6 +33,13 @@ const navigation: NavigationItem[] = [
       { label: "기타결제 설정", href: "/tdkadm/settings/other-payments" },
       { label: "포장 설정", href: "/tdkadm/settings/takeout" },
       { label: "영업마감", href: "/tdkadm/settings/pos/business-closing" },
+    ],
+  },
+  {
+    id: "kds-settings",
+    label: "KDS",
+    href: "/tdkadm/settings/pos/kds",
+    children: [
       { label: "KDS 설정", href: "/tdkadm/settings/pos/kds" },
     ],
   },
