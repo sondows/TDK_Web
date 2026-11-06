@@ -18,6 +18,17 @@ export type CustomerSummary = {
   tradeBalance: number;
 };
 
+/** Newest registered customer first, with a deterministic ID tie-breaker. */
+export function compareCustomersByRegistrationNewestFirst<T extends { customerId: number; createdAt: string | Date }>(
+  left: T,
+  right: T,
+) {
+  const leftTime = left.createdAt instanceof Date ? left.createdAt.getTime() : Date.parse(left.createdAt);
+  const rightTime = right.createdAt instanceof Date ? right.createdAt.getTime() : Date.parse(right.createdAt);
+  const timeOrder = Number.isFinite(leftTime) && Number.isFinite(rightTime) ? rightTime - leftTime : 0;
+  return timeOrder || right.customerId - left.customerId;
+}
+
 export type CustomerCreateDraft = {
   name: string;
   contactName: string;

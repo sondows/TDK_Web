@@ -6,6 +6,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import * as model from "./kds-model.ts";
+import * as grouping from "./kds-party-grouping.ts";
 
 const nativeRequire = createRequire(import.meta.url);
 
@@ -14,12 +15,12 @@ function loadProductionModule(path, mocks) {
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
   } }).outputText;
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   runInNewContext(compiled, {
-    module, exports: module.exports, Date, console, setTimeout, Response, Request,
+    module: loadedModule, exports: loadedModule.exports, Date, console, setTimeout, Response, Request,
     require: name => name in mocks ? mocks[name] : nativeRequire(name),
   }, { filename: path });
-  return module.exports;
+  return loadedModule.exports;
 }
 
 function cancellationFixture({ queryDelayMs = 0, requestAgeMs = 1000 } = {}) {
@@ -69,6 +70,7 @@ function cancellationFixture({ queryDelayMs = 0, requestAgeMs = 1000 } = {}) {
   const server = loadProductionModule("kds-server.ts", {
     "server-only": {}, "@/db": { pool: { getConnection: async () => connection } },
     "@/lib/kds-model": model,
+    "@/lib/kds-party-grouping": grouping,
   });
   const route = loadProductionModule("../app/api/kitchen/tables/[sessionId]/complete/route.ts", {
     "@/lib/kds-auth": { getCurrentKdsStaff: async () => ({ id: 1 }) },

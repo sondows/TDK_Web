@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
+import { clampHosRemainingQuantity, getHosCancellationQuantity } from "@/lib/hos-order-quantity";
+import { getHosMenuCategoryAtTop } from "@/lib/hos-menu-scroll";
+import { menuCategoryDisplayName } from "@/lib/menu-category-display";
 import HosTableCanvas from "./HosTableCanvas";
 
 type TableRow = {
   tableId: number; tableNo: string; tableName: string | null; positionX: number; positionY: number;
   layoutWidth: number; layoutHeight: number; isVisible: boolean; sessionId: number | null;
-  amountDue: number; personCount?: number | null; babyCount?: number | null; hasQrOrder?: boolean; mergedSourceTableNos: string[];
+  amountDue: number; personCount?: number | null; babyCount?: number | null; openedAt?: string | null; hasQrOrder?: boolean; hasTableToken?: boolean; mergedSourceTableNos: string[];
   isMergedSource: boolean; mergedIntoTableNo: string | null;
 };
 type OrderItem = {
   orderItemId: number; menuId: number | null; parentOrderItemId: number | null; itemType: string;
-  itemName: string; qty: number; effectiveQty: number; cancelledQty: number; status: string;
-  options: Array<{ optionName: string; qty: number }>;
+  itemName: string; qty: number; unitPrice: string; totalAmount: string; effectiveQty: number; cancelledQty: number; status: string;
+  options: Array<{ optionName: string; qty: number; unitPrice: string }>;
 };
 type TableDetail = {
   table: { tableId: number; tableNo: string; tableName: string | null };
   session: { sessionId: number; relatedSessionIds: number[] } | null;
-  orders: Array<{ orderId: number; status: string; orderedAt: string; items: OrderItem[] }>;
+  orders: Array<{ orderId: number; status: string; orderedAt: string; totalAmount: string; items: OrderItem[] }>;
 };
 type Menu = { menuId: number; categoryId: number | null; name: string; price: string; categoryName: string | null };
 type Modifier = { menuId: number; modifierGroupId: number; groupName: string; choiceDefaultOptionId: number | null;
@@ -27,7 +30,7 @@ type Modifier = { menuId: number; modifierGroupId: number; groupName: string; ch
 type Component = { menuComponentId: number; menuId: number; componentMenuId: number; itemName: string; quantity: number };
 type Catalog = { menus: Menu[]; categories: Array<{ categoryId: number; name: string }>; modifiers: Modifier[]; components: Component[] };
 type DraftItem = { menuId: number; name: string; qty: number; options: Array<{ modifierOptionId: number; qty: number }>; components: Array<{ menuComponentId: number; qty: number }> };
-type PendingCancel = { orderItemId: number; name: string; remaining: number; qty: number };
+type PendingCancel = { orderItemId: number; keepQty: number };
 
 const money = (amount: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(amount);
 async function readJson<T>(response: Response): Promise<T> {
@@ -47,8 +50,9 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [screen, setScreen] = useState<"tables" | "detail" | "menu">("tables");
   const [draft, setDraft] = useState<DraftItem[]>([]);
   const [cancellations, setCancellations] = useState<PendingCancel[]>([]);
+  const [pendingTableId, setPendingTableId] = useState<number | null>(null);
   const [cancelMode, setCancelMode] = useState(false);
-  const [category, setCategory] = useState<number | null>(null);
+  const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [choices, setChoices] = useState<Record<number, number>>({});
@@ -65,6 +69,12 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const tableRequestRef = useRef<Promise<void> | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
   const tableScreenRef = useRef<HTMLElement | null>(null);
+  const menuTabsRef = useRef<HTMLDivElement | null>(null);
+  const menuListRef = useRef<HTMLDivElement | null>(null);
+  const menuSectionRefs = useRef(new Map<number, HTMLElement>());
+  const menuTabRefs = useRef(new Map<number | null, HTMLButtonElement>());
+  const programmaticMenuScrollRef = useRef(false);
+  const menuScrollReleaseTimerRef = useRef<number | null>(null);
 
   const loadTables = useCallback((manual = false) => {
     if (manual) setManualRefreshing(true);
@@ -198,8 +208,16 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, [activeTableId, refreshDetail, screen]);
 
   async function openTable(table: TableRow) {
-    setBusy(true); setError(""); setDraft([]); setCancellations([]);
-    setCancelMode(false); setCancelReauthRequired(false); setCancelPin("");
+    const hasPendingChanges = draft.length > 0 || cancellations.length > 0;
+    if (hasPendingChanges && pendingTableId !== table.tableId) {
+      setError("미전송 주문 변경사항이 있습니다. 같은 테이블로 돌아가 주문완료하거나 취소해 주세요.");
+      return;
+    }
+    setBusy(true); setError("");
+    if (pendingTableId !== table.tableId) {
+      setDraft([]); setCancellations([]); setCancelMode(false); setPendingTableId(null);
+    }
+    setCancelReauthRequired(false); setCancelPin("");
     try {
       const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${table.tableId}`, { cache: "no-store" }));
       setDetail(response); setScreen("detail");
@@ -208,10 +226,14 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }
 
   async function openMenuPicker() {
-    if (cancellations.length) { setError("취소 예정 주문을 먼저 전송하거나 취소해 주세요."); return; }
+    if (cancelMode) {
+      setCancelMode(false);
+      setCancellations([]);
+      if (!draft.length) setPendingTableId(null);
+    }
     try {
       if (!catalog) await loadCatalog();
-      setError(""); setCategory(null); setScreen("menu");
+      setError(""); setActiveCategoryId(null); setScreen("menu");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "메뉴를 불러오지 못했습니다."); }
   }
 
@@ -234,37 +256,58 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       .map(item => ({ menuComponentId: item.menuComponentId, qty: item.quantity * quantity }));
     setDraft(current => [...current, { menuId: selectedMenu.menuId, name: selectedMenu.name, qty: quantity,
       options: selectedOptions, components }]);
+    setPendingTableId(detail?.table.tableId ?? null);
     setSelectedMenu(null); setScreen("detail"); setError("");
   }
 
-  function toggleCancel(item: OrderItem) {
-    if (draft.length) { setError("추가 예정 주문을 먼저 전송하거나 제거해 주세요."); return; }
-    if (!cancelMode || item.itemType === "COMPONENT" || item.effectiveQty <= 0) return;
-    setCancellations(current => {
-      const found = current.find(row => row.orderItemId === item.orderItemId);
-      if (found) return current.filter(row => row.orderItemId !== item.orderItemId);
-      return [...current, { orderItemId: item.orderItemId, name: item.itemName, remaining: item.effectiveQty, qty: 1 }];
+  function changeKeepQuantity(item: OrderItem & { orderStatus: string }, delta: number) {
+    if (!detail || !cancelMode || item.itemType === "COMPONENT" || item.effectiveQty <= 0 ||
+      !["OPEN", "ACCEPTED"].includes(item.orderStatus)) return;
+    const current = cancellations.find(row => row.orderItemId === item.orderItemId)?.keepQty ?? item.effectiveQty;
+    const keepQty = clampHosRemainingQuantity(item.effectiveQty, current + delta);
+    setCancellations(rows => {
+      const withoutItem = rows.filter(row => row.orderItemId !== item.orderItemId);
+      return keepQty === item.effectiveQty ? withoutItem : [...withoutItem, { orderItemId: item.orderItemId, keepQty }];
     });
+    if (keepQty < item.effectiveQty || draft.length || cancellations.some(row =>
+      row.orderItemId !== item.orderItemId && row.keepQty < (orderItems.find(orderItem => orderItem.orderItemId === row.orderItemId)?.effectiveQty ?? 0))) {
+      setPendingTableId(detail.table.tableId);
+    } else {
+      setPendingTableId(null);
+    }
     setError("");
   }
 
-  function changeCancelQty(orderItemId: number, delta: number) {
-    setCancellations(current => current.map(item => item.orderItemId === orderItemId
-      ? { ...item, qty: Math.min(item.remaining, Math.max(1, item.qty + delta)) } : item));
+  function changeDraftQuantity(index: number, delta: number) {
+    const nextQuantity = (draft[index]?.qty ?? 0) + delta;
+    setDraft(rows => nextQuantity <= 0
+      ? rows.filter((_, rowIndex) => rowIndex !== index)
+      : rows.map((row, rowIndex) => rowIndex === index ? { ...row, qty: Math.min(1000, nextQuantity),
+        components: row.components.map(component => {
+          const menuComponent = catalog?.components.find(candidate => candidate.menuComponentId === component.menuComponentId);
+          const unitQuantity = menuComponent?.quantity ?? component.qty / Math.max(1, row.qty);
+          return { ...component, qty: unitQuantity * Math.min(1000, nextQuantity) };
+        }) } : row));
+    if (nextQuantity <= 0 && draft.length === 1 && !cancellations.length) setPendingTableId(null);
   }
 
   async function sendChanges(cancellationPin?: string) {
-    if (!detail || busy || sendLock.current || (!draft.length && !cancellations.length)) return;
-    if (draft.length && cancellations.length) { setError("추가 주문과 취소는 나누어 전송해 주세요."); return; }
+    const cancellationRequests = cancellations.map(item => {
+      const orderItem = orderItems.find(candidate => candidate.orderItemId === item.orderItemId);
+      return orderItem ? { orderItemId: item.orderItemId,
+        qty: getHosCancellationQuantity(orderItem.effectiveQty, item.keepQty) } : null;
+    }).filter((item): item is { orderItemId: number; qty: number } => item !== null && item.qty > 0);
+    const submittingCancellations = cancelMode && cancellationRequests.length > 0;
+    if (!detail || busy || sendLock.current || (cancelMode && !submittingCancellations) || (!cancelMode && !draft.length)) return;
     sendLock.current = true; setBusy(true); setError("");
     try {
-      if (cancellations.length) {
+      if (submittingCancellations) {
         const response = await fetch("/api/order-items/cancellations/batch", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ currentSessionId: detail.session?.sessionId,
             ...(cancellationPin && staffLoginId ? { loginId: staffLoginId, pin: cancellationPin } : {}),
             reason: cancellationReason, detail: cancellationDetail.trim(),
-            cancellations: cancellations.map(item => ({ orderItemId: item.orderItemId, qty: item.qty })) }),
+            cancellations: cancellationRequests }),
         });
         const result = await response.json().catch(() => null) as { success?: boolean; reauth?: boolean; message?: string } | null;
         if (response.status === 401 && result?.reauth && !cancellationPin) {
@@ -289,11 +332,41 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             options: item.options, components: item.components })) }),
         }));
       }
-      setDraft([]); setCancellations([]); setDetail(null); setScreen("tables");
+      if (!submittingCancellations) setDraft([]);
+      setCancellations([]); setPendingTableId(submittingCancellations && draft.length ? detail.table.tableId : null);
+      setDetail(null); setScreen("tables");
       setCancelMode(false); setCancelPin(""); setCancelReauthRequired(false);
       await loadTables();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "변경 내용을 전송하지 못했습니다."); }
     finally { setBusy(false); sendLock.current = false; }
+  }
+
+  async function completeOrder() {
+    if (!detail || busy || sendLock.current) return;
+    const cancellationRequests = cancellations.map(item => {
+      const orderItem = orderItems.find(candidate => candidate.orderItemId === item.orderItemId);
+      return orderItem ? getHosCancellationQuantity(orderItem.effectiveQty, item.keepQty) : 0;
+    });
+    if (cancelMode && cancellationRequests.some(quantity => quantity > 0)) {
+      await sendChanges();
+      return;
+    }
+    if (!cancelMode && draft.length) {
+      await sendChanges();
+      return;
+    }
+    if (cancelMode) {
+      setCancellations([]);
+      setCancelMode(false);
+      if (draft.length) return;
+    }
+    setCancelMode(false); setPendingTableId(null); setDetail(null); setScreen("tables"); setError("");
+    await loadTables();
+  }
+
+  function returnToTables() {
+    setDetail(null); setScreen("tables"); setError("");
+    void loadTables();
   }
 
   async function logout() {
@@ -307,20 +380,114 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     } finally { setBusy(false); }
   }
 
-  const orderItems = useMemo(() => (detail?.orders ?? []).flatMap(order => order.items
+  const orderItems = (detail?.orders ?? []).flatMap(order => order.items
     .filter(item => item.itemType !== "COMPONENT" && item.effectiveQty > 0)
-    .map(item => ({ ...item, orderStatus: order.status }))), [detail?.orders]);
-  const amountDue = tables.find(item => item.tableId === detail?.table.tableId)?.amountDue ?? 0;
-  const visibleMenus = (catalog?.menus ?? []).filter(menu => category === null || menu.categoryId === category);
+    .map(item => ({ ...item, orderStatus: order.status })));
+  const confirmedOrderAmount = detail?.orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0) ?? 0;
+  const draftOrderAmount = draft.reduce((sum, item) => {
+    const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
+    const optionAmount = item.options.reduce((optionSum, option) => optionSum +
+      Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
+    return sum + (Number(menu?.price ?? 0) + optionAmount) * item.qty;
+  }, 0);
+  const orderAmount = confirmedOrderAmount;
+  const cancellableItems = orderItems.filter(item => ["OPEN", "ACCEPTED"].includes(item.orderStatus) && item.status !== "CANCELLED");
+  const cancellationRequests = cancellations.map(item => {
+    const orderItem = orderItems.find(candidate => candidate.orderItemId === item.orderItemId);
+    return orderItem ? { orderItemId: item.orderItemId,
+      qty: getHosCancellationQuantity(orderItem.effectiveQty, item.keepQty) } : null;
+  }).filter((item): item is { orderItemId: number; qty: number } => item !== null && item.qty > 0);
+  const menuSections = (catalog?.categories ?? []).map(category => ({ ...category,
+    displayName: menuCategoryDisplayName(category.name),
+    menus: (catalog?.menus ?? []).filter(menu => menu.categoryId === category.categoryId),
+  }));
+  const nonEmptyMenuSections = menuSections.filter(section => section.menus.length > 0);
+  const categorizedMenuIds = new Set(nonEmptyMenuSections.flatMap(section => section.menus.map(menu => menu.menuId)));
+  const uncategorizedMenus = (catalog?.menus ?? []).filter(menu => !categorizedMenuIds.has(menu.menuId));
+  const menuSectionsForDisplay = [...nonEmptyMenuSections,
+    ...(uncategorizedMenus.length ? [{ categoryId: -1, name: "", displayName: "", menus: uncategorizedMenus }] : [])];
 
-  return <main className="min-h-dvh bg-slate-100 pb-[env(safe-area-inset-bottom)] text-slate-900" ref={mainRef}>
-    <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-1 text-slate-900">
-      <strong className="shrink-0 text-lg font-extrabold">TDK HOS</strong>
-      <div className="flex min-w-0 max-w-[65%] flex-col items-end text-right">
-        <span className="w-full break-all text-xs leading-tight text-slate-500">{staffLoginId ?? ""}</span>
-        <button className="min-h-11 px-2 text-sm font-semibold text-slate-900" disabled={busy} onClick={() => void logout()} type="button">로그아웃</button>
+  function releaseProgrammaticMenuScroll(delay = 140) {
+    if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
+    menuScrollReleaseTimerRef.current = window.setTimeout(() => {
+      programmaticMenuScrollRef.current = false;
+      menuScrollReleaseTimerRef.current = null;
+    }, delay);
+  }
+
+  function scrollToMenuCategory(categoryId: number | null) {
+    setActiveCategoryId(categoryId);
+    const list = menuListRef.current;
+    if (!list) return;
+    programmaticMenuScrollRef.current = true;
+    if (categoryId === null) {
+      list.scrollTo({ top: 0, behavior: "smooth" });
+      releaseProgrammaticMenuScroll(700);
+      return;
+    }
+    const target = menuSectionRefs.current.get(categoryId);
+    if (!target) {
+      releaseProgrammaticMenuScroll(250);
+      return;
+    }
+    const top = list.scrollTop + target.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    list.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    releaseProgrammaticMenuScroll(900);
+  }
+
+  function syncMenuCategoryFromScroll() {
+    const list = menuListRef.current;
+    if (!list || programmaticMenuScrollRef.current) {
+      if (programmaticMenuScrollRef.current) releaseProgrammaticMenuScroll(140);
+      return;
+    }
+    if (list.scrollTop <= 1) {
+      setActiveCategoryId(null);
+      return;
+    }
+    const listTop = list.getBoundingClientRect().top;
+    const positions = menuSectionsForDisplay.map(section => ({
+      categoryId: section.categoryId,
+      top: (menuSectionRefs.current.get(section.categoryId)?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY) - listTop,
+    })).filter(section => Number.isFinite(section.top));
+    const nextCategoryId = getHosMenuCategoryAtTop(positions, 8);
+    setActiveCategoryId(nextCategoryId === -1 ? null : nextCategoryId);
+  }
+
+  useEffect(() => {
+    if (screen !== "menu") return;
+    const tabs = menuTabsRef.current;
+    const activeTab = menuTabRefs.current.get(activeCategoryId);
+    if (!tabs || !activeTab) return;
+    const tabsRect = tabs.getBoundingClientRect();
+    const tabRect = activeTab.getBoundingClientRect();
+    if (tabRect.left < tabsRect.left) tabs.scrollBy({ left: tabRect.left - tabsRect.left - 8, behavior: "smooth" });
+    else if (tabRect.right > tabsRect.right) tabs.scrollBy({ left: tabRect.right - tabsRect.right + 8, behavior: "smooth" });
+  }, [activeCategoryId, screen]);
+
+  useEffect(() => () => {
+    if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
+  }, []);
+
+  return <main className="flex min-h-dvh flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900" ref={mainRef}>
+    {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-1 text-slate-900">
+      <div className="flex min-w-0 flex-col items-start leading-tight">
+        <strong className="shrink-0 text-lg font-extrabold text-[#2563EB]">TDK HOS</strong>
+        <span className="mt-0.5 max-w-full break-all text-xs leading-tight text-slate-400">{staffLoginId ?? ""}</span>
       </div>
-    </header>
+      <button className="min-h-11 min-w-11 shrink-0 bg-transparent px-3 text-[11px] font-medium text-slate-600" disabled={busy} onClick={() => void logout()} type="button">로그아웃</button>
+    </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 text-slate-900">
+      <div className="flex min-h-12 items-center border-b border-slate-200">
+        <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={returnToTables} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
+      </div>
+      <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 py-1">
+        <span className="text-sm font-normal text-slate-500">TNo.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
+        <strong className="text-right text-sm font-extrabold text-slate-900">{money(orderAmount)}</strong>
+      </div>
+    </header> : <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3">
+      <button className="min-h-11 rounded-lg px-2 text-sm font-bold text-slate-700 active:bg-slate-100" onClick={() => setScreen("detail")} type="button">← 주문내역</button>
+      <strong className="text-base">메뉴 선택</strong>
+    </header>}
     {error && <div className="mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">{error}</div>}
 
     {screen === "tables" && <section className="relative overscroll-y-contain p-3" ref={tableScreenRef}>
@@ -338,43 +505,108 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       <p className="mt-2 text-center text-xs text-slate-500">QR 주문 승인 기능은 아직 연결되어 있지 않습니다.</p>
     </section>}
 
-    {screen === "detail" && detail && <section className="mx-auto flex min-h-[calc(100dvh-56px)] max-w-3xl flex-col p-3">
-      <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
-        <div><h1 className="text-xl font-extrabold">테이블 {detail.table.tableNo}</h1><p className="text-sm text-slate-500">받을 금액 <strong className="text-slate-800">{money(amountDue)}</strong></p></div>
-        <button className="min-h-11 rounded-lg bg-slate-100 px-3 text-sm font-bold" onClick={() => { setDetail(null); setScreen("tables"); setError(""); void loadTables(); }} type="button">배치로</button>
+    {screen === "detail" && detail && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3">
+        <section aria-labelledby="confirmed-orders-title">
+          <h2 className="mb-2 text-sm font-bold text-slate-500" id="confirmed-orders-title">기존 주문내역</h2>
+          {orderItems.length ? <div className="divide-y divide-slate-100">
+            {orderItems.map(item => {
+              const pending = cancellations.find(row => row.orderItemId === item.orderItemId);
+              const keepQty = pending?.keepQty ?? item.effectiveQty;
+              const canCancel = cancelMode && ["OPEN", "ACCEPTED"].includes(item.orderStatus) && item.status !== "CANCELLED";
+              const displayQty = cancelMode && canCancel ? keepQty : item.effectiveQty;
+              const itemAmount = Number(item.unitPrice || 0) * displayQty;
+              const optionNames = item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`);
+              return <article className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 py-3 ${pending && keepQty < item.effectiveQty ? "bg-red-50" : ""}`} key={item.orderItemId}>
+                <div className="min-w-0">
+                  <strong className="block break-words text-[15px] font-bold text-slate-900">{item.itemName}</strong>
+                  {optionNames.length > 0 && <p className="mt-0.5 break-words text-xs text-slate-500">{optionNames.join(" · ")}</p>}
+                  {pending && keepQty < item.effectiveQty && <p className="mt-0.5 text-xs font-medium text-red-600">{item.effectiveQty - keepQty}개 취소 예정</p>}
+                  {cancelMode && !canCancel && <p className="mt-0.5 text-xs text-slate-400">취소 불가</p>}
+                </div>
+                <div className="min-w-12 text-right">
+                  {canCancel ? <div aria-label={`${item.itemName} 남길 수량`} className="flex items-center gap-1">
+                    <button aria-label={`${item.itemName} 남길 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold disabled:opacity-40" disabled={keepQty <= 0} onClick={() => changeKeepQuantity(item, -1)} type="button">−</button>
+                    <strong className="min-w-5 text-center text-sm">{money(keepQty)}</strong>
+                    <button aria-label={`${item.itemName} 남길 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold disabled:opacity-40" disabled={keepQty >= item.effectiveQty} onClick={() => changeKeepQuantity(item, 1)} type="button">+</button>
+                  </div> : <span className="text-right text-sm font-semibold text-slate-700">{money(item.effectiveQty)}</span>}
+                </div>
+                <strong className="min-w-[4.5rem] text-right text-sm font-semibold text-slate-800">{money(itemAmount)}</strong>
+              </article>;
+            })}
+          </div> : <p className="py-3 text-sm text-slate-400">확정된 주문이 없습니다.</p>}
+          {cancelMode && cancellationRequests.length > 0 && <div className="mt-2 rounded-lg bg-slate-50 p-3">
+            <label className="block text-sm font-bold text-slate-700">취소 사유
+              <select className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3" onChange={event => setCancellationReason(event.target.value)} value={cancellationReason}>
+                {["고객 요청", "주문 실수", "조리 불량", "이물질", "에러", "기타"].map(reason => <option key={reason} value={reason}>{reason}</option>)}
+              </select>
+            </label>
+            {cancellationReason === "기타" && <input className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3" onChange={event => setCancellationDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요" value={cancellationDetail} />}
+          </div>}
+        </section>
+
+        <div aria-hidden="true" className="my-4 h-[2px] w-full bg-[#D9DEE5]" />
+
+        <section aria-labelledby="cart-title">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-slate-700" id="cart-title">장바구니</h2>
+            {draft.length > 0 && <span className="text-xs text-slate-500">합계 {money(draftOrderAmount)}</span>}
+          </div>
+          {draft.length ? <div className="divide-y divide-slate-100">
+            {draft.map((item, index) => {
+              const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
+              const optionAmount = item.options.reduce((sum, option) => sum + Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
+              const itemAmount = (Number(menu?.price ?? 0) + optionAmount) * item.qty;
+              const optionNames = item.options.map(option => catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.optionName).filter(Boolean);
+              return <article className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 py-3" key={`${item.menuId}-${index}`}>
+                <div className="min-w-0"><span className="mb-0.5 inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">신규</span><strong className="block break-words text-[15px] font-bold">{item.name}</strong>
+                  {optionNames.length > 0 && <p className="mt-0.5 break-words text-xs text-slate-500">{optionNames.join(" · ")}</p>}</div>
+                <div className="flex items-center gap-1">
+                  <button aria-label={`${item.name} 장바구니 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold" onClick={() => changeDraftQuantity(index, -1)} type="button">−</button>
+                  <strong className="min-w-5 text-center text-sm">{money(item.qty)}</strong>
+                  <button aria-label={`${item.name} 장바구니 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold" disabled={item.qty >= 1000} onClick={() => changeDraftQuantity(index, 1)} type="button">+</button>
+                </div>
+                <strong className="min-w-[4.5rem] text-right text-sm font-semibold">{money(itemAmount)}</strong>
+              </article>;
+            })}
+          </div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-400">추가한 메뉴가 없습니다.</p>}
+        </section>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-3">
-        {orderItems.map(item => {
-          const pending = cancellations.find(row => row.orderItemId === item.orderItemId);
-          return <article className={`rounded-xl border bg-white p-3 shadow-sm ${pending ? "border-red-400 bg-red-50" : "border-slate-200"}`} key={item.orderItemId}>
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="break-words">{item.itemName}</strong><p className="mt-1 text-sm text-slate-500">수량 {item.effectiveQty}{item.options.length ? ` · ${item.options.map(option => option.optionName).join(", ")}` : ""}</p></div>
-              {cancelMode && <button className={`min-h-10 shrink-0 rounded-lg px-3 text-sm font-bold ${pending ? "bg-red-600 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => toggleCancel(item)} type="button">{pending ? "취소 해제" : "취소 선택"}</button>}</div>
-            {pending && <div className="mt-3 flex items-center justify-end gap-3 text-sm"><span>취소 수량</span><button aria-label="취소 수량 감소" className="size-10 rounded-lg bg-white text-xl" onClick={() => changeCancelQty(item.orderItemId, -1)} type="button">−</button><strong>{pending.qty}</strong><button aria-label="취소 수량 증가" className="size-10 rounded-lg bg-white text-xl" onClick={() => changeCancelQty(item.orderItemId, 1)} type="button">+</button></div>}
-          </article>;
-        })}
-        {draft.map((item, index) => <article className="rounded-xl border border-blue-200 bg-blue-50 p-3" key={`${item.menuId}-${index}`}><div className="flex justify-between gap-2"><div><strong>{item.name}</strong><p className="text-sm text-slate-600">추가 예정 · {item.qty}개</p></div><button className="min-h-10 rounded-lg bg-white px-3 text-sm font-bold" onClick={() => setDraft(current => current.filter((_, row) => row !== index))} type="button">제거</button></div></article>)}
-        {!orderItems.length && !draft.length && <div className="rounded-xl bg-white p-8 text-center text-slate-500">주문 내역이 없습니다.</div>}
-      </div>
-      {cancelMode && cancellations.length > 0 && <div className="mb-2 rounded-xl bg-white p-3 shadow-sm">
-        <label className="block text-sm font-bold">취소 사유
-          <select className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3" onChange={event => setCancellationReason(event.target.value)} value={cancellationReason}>
-            {["고객 요청", "주문 실수", "조리 불량", "서비스", "에러", "기타"].map(reason => <option key={reason} value={reason}>{reason}</option>)}
-          </select>
-        </label>
-        {cancellationReason === "기타" && <input className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3" onChange={event => setCancellationDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요" value={cancellationDetail} />}
-      </div>}
-      <div className="sticky bottom-0 grid grid-cols-3 gap-2 border-t border-slate-200 bg-slate-100/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <button className="min-h-14 rounded-xl bg-blue-600 text-base font-extrabold text-white disabled:opacity-40" disabled={busy || !!cancellations.length} onClick={() => void openMenuPicker()} type="button">추가</button>
-        <button className={`min-h-14 rounded-xl text-base font-extrabold text-white disabled:opacity-40 ${cancelMode ? "bg-red-700" : "bg-red-600"}`} disabled={busy || !!draft.length || !orderItems.length} onClick={() => { setCancelMode(value => !value); setError(""); }} type="button">{cancelMode ? "취소 선택 중" : "취소"}</button>
-        <button className="min-h-14 rounded-xl bg-slate-900 text-base font-extrabold text-white disabled:opacity-40" disabled={busy || (!draft.length && !cancellations.length)} onClick={() => void sendChanges()} type="button">{busy ? "전송 중..." : "전송"}</button>
+      <div className="sticky bottom-0 grid grid-cols-3 gap-2 border-t border-slate-200 bg-white/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <button className="min-h-14 rounded-xl bg-violet-600 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">주문</button>
+        <button className={`min-h-14 rounded-xl text-sm font-extrabold text-white disabled:opacity-50 ${cancelMode ? "bg-red-700" : "bg-red-600"}`} disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
+          if (cancelMode) {
+            setCancelMode(false); setCancellations([]);
+            if (!draft.length) setPendingTableId(null);
+          } else {
+            setCancellations([]); setCancelMode(true);
+            if (detail) setPendingTableId(detail.table.tableId);
+          }
+          setError("");
+        }} type="button">취소</button>
+        <button className="min-h-14 rounded-xl bg-blue-600 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
       </div>
     </section>}
 
-    {screen === "menu" && catalog && <section className="mx-auto flex min-h-[calc(100dvh-56px)] max-w-3xl flex-col p-3">
-      <div className="mb-3 flex items-center justify-between"><h1 className="text-xl font-extrabold">메뉴 선택</h1><button className="min-h-11 rounded-lg bg-white px-4 font-bold" onClick={() => setScreen("detail")} type="button">닫기</button></div>
-      <div className="mb-3 flex gap-2 overflow-x-auto pb-1"><button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${category === null ? "bg-blue-600 text-white" : "bg-white"}`} onClick={() => setCategory(null)} type="button">전체</button>{catalog.categories.map(item => <button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${category === item.categoryId ? "bg-blue-600 text-white" : "bg-white"}`} key={item.categoryId} onClick={() => setCategory(item.categoryId)} type="button">{item.name}</button>)}</div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pb-4">{visibleMenus.map(menu => <button className="flex min-h-14 w-full items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-left shadow-sm active:bg-blue-50" key={menu.menuId} onClick={() => chooseMenu(menu)} type="button"><span className="font-bold">{menu.name}</span><span className="shrink-0 text-sm font-semibold text-slate-600">{money(Number(menu.price))}</span></button>)}</div>
-      <div className="sticky bottom-0 grid grid-cols-2 gap-2 bg-slate-100 py-2"><button className="min-h-14 rounded-xl bg-slate-800 font-extrabold text-white" onClick={() => setScreen("detail")} type="button">주문 확인</button><button className="min-h-14 rounded-xl bg-blue-600 font-extrabold text-white" disabled={!draft.length} onClick={() => void sendChanges()} type="button">전송 ({draft.length})</button></div>
+    {screen === "menu" && catalog && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-3 pb-3">
+      <div aria-label="메뉴 분류" className="-mx-3 flex shrink-0 gap-2 overflow-x-auto border-b border-slate-100 bg-white px-3 py-2" ref={menuTabsRef}>
+        <button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${activeCategoryId === null ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => scrollToMenuCategory(null)} ref={element => {
+          if (element) menuTabRefs.current.set(null, element); else menuTabRefs.current.delete(null);
+        }} type="button">전체</button>
+        {menuSections.map(item => <button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${activeCategoryId === item.categoryId ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
+          if (element) menuTabRefs.current.set(item.categoryId, element); else menuTabRefs.current.delete(item.categoryId);
+        }} type="button">{item.displayName}</button>)}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth pb-2" onScroll={syncMenuCategoryFromScroll} ref={menuListRef}>
+        {menuSectionsForDisplay.map(section => <div data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
+          if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
+        }}>
+          {section.menus.map(menu => <button className="flex min-h-14 w-full items-center justify-between gap-3 border-b border-slate-100 bg-white px-1 py-3 text-left active:bg-blue-50" key={menu.menuId} onClick={() => chooseMenu(menu)} type="button"><span className="font-bold">{menu.name}</span><span className="shrink-0 text-sm font-semibold text-slate-600">{money(Number(menu.price))}</span></button>)}
+          <div aria-hidden="true" className="my-4 h-[4px] w-full bg-[#D9DEE5]" />
+        </div>)}
+        <div aria-hidden="true" className="h-[50vh]" />
+      </div>
+      <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-slate-800 font-extrabold text-white" onClick={() => setScreen("detail")} type="button">주문내역으로 돌아가기</button></div>
     </section>}
 
     {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => setSelectedMenu(null)}>

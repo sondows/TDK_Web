@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { activeKdsTableTasks, completeKdsTableOrder, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, moveKdsPartyTable, moveKdsTableGroup, moveKdsTableToBoundary, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, reorderKdsPartyTableToTarget, reorderKdsTableGroupToTarget, reorderKdsTableIds, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups, sortKdsTableIdsByReceivedOrder } from "./kds-party-grouping.ts";
-import { formatKdsTaskDisplay } from "./kds-model.ts";
+import { activeKdsTableTasks, attachKdsOrderBundleAddons, buildKdsOrderBundleKeys, buildKdsTableOrderBundleKeys, completeKdsTableOrder, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, moveKdsPartyTable, moveKdsTableGroup, moveKdsTableToBoundary, oldestKdsTableOrderedAtMs, partyHasActiveTask, preparingKdsPartyCards, reorderKdsPartyTableToTarget, reorderKdsTableGroupToTarget, reorderKdsTableIds, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups, sortKdsTableIdsByReceivedOrder } from "./kds-party-grouping.ts";
+import { DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, formatKdsTaskDisplay, isKdsOrderBundleSettings, transitionKdsLinkedAddonState } from "./kds-model.ts";
 
 const task = (taskId, sessionId, groupId, status = "WAITING", sessionKind = "DINE_IN") =>
   ({ taskId, orderId: sessionId, orderedAtMs: 1_000, completedAtMs: status === "DONE" ? 2_000 : null,
@@ -335,4 +335,240 @@ test("party cards keep tables together and equal timestamps have stable ID order
   assert.deepEqual(sorted.map(card => card.key), ["party:7", "session:30"]);
   assert.deepEqual(sorted[0].tables.map(table => table.sessionId), [10, 20]);
   assert.deepEqual(cards[0].tables.map(table => table.sessionId), [20, 10]);
+});
+
+test("enabled order bundling groups one table across sessions while keeping task rows and IDs separate", () => {
+  const first = { ...task(1, 101, null), orderId: 501, tableId: 8, orderedAtMs: 1_000, confirmedAtMs: 1_000 };
+  const additionalSameSession = { ...task(2, 101, null), orderId: 502, tableId: 8, orderedAtMs: 91_000, confirmedAtMs: 91_000 };
+  const additionalNewSession = { ...task(3, 102, null), orderId: 503, tableId: 8, orderedAtMs: 172_000, confirmedAtMs: 172_000 };
+  const [bundle] = groupKdsTasksByParty([first, additionalSameSession, additionalNewSession], 180_000);
+  assert.equal(bundle.key, "table:8:bundle:501");
+  assert.deepEqual(bundle.tables.map(table => table.sessionId), [101, 102]);
+  assert.deepEqual(bundle.tables.map(table => table.tasks.map(item => item.taskId)), [[1, 2], [3]]);
+});
+
+test("bundle anchor stays fixed and an order after its window starts a new outer card", () => {
+  const make = (taskId, orderId, confirmedAtMs) => ({
+    ...task(taskId, 101, null), orderId, tableId: 8, orderedAtMs: confirmedAtMs, confirmedAtMs,
+  });
+  const cards = groupKdsTasksByParty([
+    make(1, 501, 0), make(2, 502, 170_000), make(3, 503, 181_000), make(4, 504, 200_000),
+  ], 180_000);
+  assert.deepEqual(cards.map(card => card.key), ["table:8:bundle:501", "table:8:bundle:503"]);
+  assert.deepEqual(cards.map(card => card.tables[0].tasks.map(item => item.taskId)), [[1, 2], [3, 4]]);
+});
+
+test("orders on different physical tables remain separate, while existing party membership still groups them", () => {
+  const make = (taskId, sessionId, tableId, groupId, confirmedAtMs) => ({
+    ...task(taskId, sessionId, groupId), tableId, orderId: taskId + 100, orderedAtMs: confirmedAtMs, confirmedAtMs,
+  });
+  const standalone = groupKdsTasksByParty([make(1, 101, 8, null, 1_000), make(2, 102, 9, null, 2_000)], 180_000);
+  assert.equal(standalone.length, 2);
+  const party = groupKdsTasksByParty([make(1, 101, 8, 77, 1_000), make(2, 102, 9, 77, 2_000)], 180_000);
+  assert.equal(party.length, 1);
+  assert.equal(party[0].key, "party:77");
+  assert.deepEqual(party[0].tables.map(table => table.sessionId), [101, 102]);
+  const sameTablePartyAndNewSession = groupKdsTasksByParty([
+    make(3, 103, 8, 77, 1_000), make(4, 104, 8, null, 60_000),
+  ], 180_000);
+  assert.equal(sameTablePartyAndNewSession.length, 1);
+  assert.deepEqual(sameTablePartyAndNewSession[0].tables.map(table => table.sessionId), [103, 104]);
+});
+
+test("a bundle keeps its completed rows on preparing until every task in that bundle is done", () => {
+  const done = { ...task(1, 101, null, "DONE"), tableId: 8, orderId: 501, confirmedAtMs: 1_000 };
+  const waiting = { ...task(2, 102, null), tableId: 8, orderId: 502, confirmedAtMs: 60_000 };
+  const [bundle] = groupKdsTasksByParty([done, waiting], 180_000);
+  assert.equal(preparingKdsPartyCards([bundle]).length, 1);
+  assert.deepEqual(preparingKdsPartyCards([bundle])[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1], [2]]);
+  waiting.status = "DONE";
+  assert.equal(preparingKdsPartyCards([bundle]).length, 0);
+});
+
+test("order bundle uses server confirmation time and retains ordered time as a legacy fallback", () => {
+  const first = { ...task(1, 101, null), tableId: 8, orderId: 501, orderedAtMs: 1_000, confirmedAtMs: 1_000 };
+  const acceptedLater = { ...task(2, 102, null), tableId: 8, orderId: 502, orderedAtMs: 300_000, confirmedAtMs: 60_000 };
+  const legacy = { ...task(3, 103, null), tableId: 8, orderId: 503, orderedAtMs: 120_000 };
+  const cards = groupKdsTasksByParty([first, acceptedLater, legacy], 180_000);
+  assert.equal(cards.length, 1);
+  assert.deepEqual(cards[0].tables.map(table => table.tasks.map(item => item.taskId)), [[1], [2], [3]]);
+});
+
+test("hidden cancelled KDS orders still anchor bundle windows for visible tasks after refresh", () => {
+  const rawOrders = [
+    { ...task(1, 101, null), tableId: 8, orderId: 501, confirmedAtMs: 0 },
+    { ...task(2, 101, null), tableId: 8, orderId: 502, confirmedAtMs: 170_000 },
+    { ...task(3, 102, null), tableId: 8, orderId: 503, confirmedAtMs: 181_000 },
+  ];
+  const keys = buildKdsOrderBundleKeys(rawOrders, 180_000);
+  const visible = [rawOrders[1], rawOrders[2]].map(order => ({
+    ...order, orderBundleKey: keys.get(`${order.tableId}:${order.orderId}`),
+  }));
+  assert.deepEqual(groupKdsTasksByParty(visible, 180_000).map(card => card.key), [
+    "table:8:bundle:501", "table:8:bundle:503",
+  ]);
+});
+
+test("a separately confirmed addon in the same table bundle is display-only under its unique active pot", () => {
+  const pot = { ...task(1, 101, 77), taskId: 1, orderId: 501, tableId: 8, orderBundleKey: "party:77",
+    confirmedAtMs: 1_000, completedAtMs: null, kind: "POT", compatibilityKey: "STEW", startedAtMs: null,
+    completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ itemId: 1, name: "김치찌개", qty: 1, kind: "POT", kdsKind: "POT", kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }] };
+  const addon = { ...task(2, 102, 88), taskId: 2, orderId: 502, tableId: 8, orderBundleKey: "party:88",
+    confirmedAtMs: 60_000, completedAtMs: null, kind: "SOLO", compatibilityKey: "MENU:old", startedAtMs: null,
+    completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ itemId: 2, name: "꽁치추가", qty: 1, kind: "SOLO", kdsKind: "ADDON", kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }] };
+  const linked = attachKdsOrderBundleAddons([pot, addon], 180_000);
+  assert.deepEqual(linked[0].displayAddonItems.map(item => item.name), ["꽁치추가"]);
+  assert.equal(linked[1].displayOnlyAsAddon, true);
+  assert.deepEqual(groupKdsPotDisplayRows(linked).map(row => row.map(item => item.taskId)), [[1]]);
+  assert.deepEqual(activeKdsTableTasks(linked).map(item => item.taskId), [1]);
+  const cards = groupKdsTasksByParty(linked, 180_000);
+  assert.equal(preparingKdsPartyCards(cards).length, 1);
+  linked[0].status = "DONE";
+  assert.equal(preparingKdsPartyCards(groupKdsTasksByParty(linked)).length, 0);
+});
+
+test("cross-session bundle renders one pot control and keeps both task states in lockstep", () => {
+  const make = ({ taskId, orderId, sessionId, at, kind, status = "WAITING", changedAtMs = null }) => ({
+    ...task(taskId, sessionId, null, status), taskId, orderId, tableId: 2, orderedAtMs: at, confirmedAtMs: at,
+    completedAtMs: status === "DONE" ? changedAtMs : null, kind,
+    compatibilityKey: kind === "POT" ? "STEW" : "MENU:tofu",
+    startedAtMs: status === "COOKING" ? changedAtMs : null, changedAtMs,
+    completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ itemId: taskId, name: kind === "POT" ? "흑돼지김치찌개" : "두부추가", qty: 1,
+      kind: kind === "POT" ? "POT" : "SOLO", kdsKind: kind === "POT" ? "POT" : "ADDON",
+      kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }],
+  });
+  const pot = make({ taskId: 21, orderId: 201, sessionId: 20, at: 1_000, kind: "POT" });
+  const addon = make({ taskId: 22, orderId: 202, sessionId: 21, at: 60_000, kind: "SOLO" });
+  const linked = attachKdsOrderBundleAddons([pot, addon], 180_000);
+  const cards = preparingKdsPartyCards(groupKdsTasksByParty(linked, 180_000));
+  const renderedTables = cards.flatMap(card => card.tables.filter(table => table.tasks.some(item => !item.displayOnlyAsAddon)));
+  const controls = renderedTables.flatMap(table => groupKdsPotDisplayRows(table.tasks));
+
+  assert.equal(renderedTables.length, 1);
+  assert.equal(controls.length, 1);
+  assert.equal(controls[0][0].taskId, pot.taskId);
+  assert.deepEqual(controls[0][0].displayAddonItems.map(item => item.name), ["두부추가"]);
+  assert.deepEqual(controls[0][0].displayAddonTaskIds, [addon.taskId]);
+
+  const startedPot = transitionKdsLinkedAddonState({ status: "WAITING", cookingGroupId: null,
+    cookingStartedAtMs: null, cookingCompletedAtMs: null, previousState: null, changedAtMs: null }, "START", 70_000);
+  const startedAddon = transitionKdsLinkedAddonState({ status: "WAITING", cookingGroupId: null,
+    cookingStartedAtMs: null, cookingCompletedAtMs: null, previousState: null, changedAtMs: null }, "START", 70_000);
+  assert.equal(startedPot.status, startedAddon.status);
+  assert.equal(startedPot.cookingStartedAtMs, startedAddon.cookingStartedAtMs);
+  const completedPot = transitionKdsLinkedAddonState(startedPot, "COMPLETE", 80_000);
+  const completedAddon = transitionKdsLinkedAddonState(startedAddon, "COMPLETE", 80_000);
+  assert.equal(completedPot.status, "DONE");
+  assert.equal(completedAddon.status, completedPot.status);
+  assert.equal(completedAddon.cookingCompletedAtMs, completedPot.cookingCompletedAtMs);
+});
+
+test("bundle addon stays separate when pot completed before arrival or target is ambiguous", () => {
+  const make = (taskId, orderId, confirmedAtMs, kind, status = "WAITING") => ({
+    ...task(taskId, 101, null, status), taskId, orderId, tableId: 8, orderBundleKey: "table:8:bundle:501",
+    confirmedAtMs, completedAtMs: status === "DONE" ? confirmedAtMs : null,
+    kind, compatibilityKey: kind === "POT" ? "STEW" : "MENU:old", startedAtMs: null,
+    completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ itemId: taskId, name: kind === "POT" ? `pot-${taskId}` : "꽁치추가", qty: 1,
+      kind: kind === "POT" ? "POT" : "SOLO", kdsKind: kind === "POT" ? "POT" : "ADDON",
+      kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }],
+  });
+  const addon = make(2, 502, 60_000, "SOLO");
+  const completedBeforeArrival = make(1, 501, 1_000, "POT", "DONE");
+  assert.equal(attachKdsOrderBundleAddons([completedBeforeArrival, addon], 180_000)[1].displayOnlyAsAddon, false);
+  const activePot = { ...completedBeforeArrival, status: "COOKING", completedAtMs: null };
+  const secondPot = { ...activePot, taskId: 3, orderId: 503, confirmedAtMs: 30_000 };
+  assert.equal(attachKdsOrderBundleAddons([activePot, secondPot, addon], 180_000)[2].displayOnlyAsAddon, false);
+});
+
+test("stew addon matching uses the fixed table-time bundle, not party-promoted card keys", () => {
+  const make = ({ taskId, orderId, sessionId, groupId, at, kind, status = "WAITING", compatibilityKey = "STEW", completedAtMs = null }) => ({
+    ...task(taskId, sessionId, groupId, status), taskId, orderId, tableId: 10,
+    orderedAtMs: at, confirmedAtMs: at, completedAtMs,
+    orderBundleKey: groupId === null ? `table:10:bundle:${orderId}` : `party:${groupId}`,
+    kind, compatibilityKey, startedAtMs: status === "COOKING" ? 10_000 : null,
+    completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ itemId: taskId, name: kind === "POT" ? "흑돼지김치찌개" : "목살추가", qty: 1,
+      kind: kind === "POT" ? "POT" : "SOLO", kdsKind: kind === "POT" ? "POT" : "ADDON",
+      kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }],
+  });
+  const pot = make({ taskId: 1, orderId: 501, sessionId: 100, groupId: 71, at: 1_000, kind: "POT", status: "COOKING" });
+  const addon = make({ taskId: 2, orderId: 502, sessionId: 101, groupId: 72, at: 60_000, kind: "SOLO" });
+  const timeKeys = buildKdsTableOrderBundleKeys([pot, addon], 180_000);
+  assert.equal(timeKeys.get("10:501"), timeKeys.get("10:502"));
+  const linked = attachKdsOrderBundleAddons([pot, addon], 180_000);
+  assert.deepEqual(linked[0].displayAddonItems.map(item => item.itemId), [2]);
+  assert.equal(linked[1].displayOnlyAsAddon, true);
+  assert.deepEqual(groupKdsPotDisplayRows(linked).map(row => row.map(item => item.taskId)), [[1]]);
+  assert.equal(linked[0].status, "COOKING");
+  assert.equal(linked[1].status, "WAITING"); // Display grouping is pure; persistence transitions happen in the KDS action transaction.
+
+  const lateAddon = make({ taskId: 3, orderId: 503, sessionId: 102, groupId: 71, at: 181_001, kind: "SOLO" });
+  assert.equal(attachKdsOrderBundleAddons([pot, lateAddon], 180_000)[1].displayOnlyAsAddon, false);
+});
+
+test("order bundle settings default to OFF with a three-minute value and validate bounded minutes", () => {
+  assert.deepEqual(DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, { enabled: false, minutes: 3 });
+  assert.equal(isKdsOrderBundleSettings({ enabled: true, minutes: 3 }), true);
+  assert.equal(isKdsOrderBundleSettings({ enabled: false, minutes: 60 }), true);
+  assert.equal(isKdsOrderBundleSettings({ enabled: true, minutes: 0 }), false);
+  assert.equal(isKdsOrderBundleSettings({ enabled: true, minutes: 3.5 }), false);
+  assert.equal(isKdsOrderBundleSettings({ enabled: "ON", minutes: 3 }), false);
+});
+
+test("linked cross-session addon follows start, undo, and completion without replacing its own history", () => {
+  const waiting = { status: "WAITING", cookingGroupId: null, cookingStartedAtMs: null,
+    cookingCompletedAtMs: null, previousState: null, changedAtMs: 100 };
+  const started = transitionKdsLinkedAddonState(waiting, "START", 200);
+  assert.equal(started.status, "COOKING");
+  assert.equal(started.cookingStartedAtMs, 200);
+  assert.equal(started.previousState.status, "WAITING");
+  assert.equal(started.changedAtMs, 200);
+
+  const undone = transitionKdsLinkedAddonState(started, "UNDO_START", 300);
+  assert.equal(undone.status, "WAITING");
+  assert.equal(undone.previousState.status, "COOKING");
+  assert.equal(undone.changedAtMs, 300);
+
+  const restarted = transitionKdsLinkedAddonState(undone, "START", 400);
+  const completed = transitionKdsLinkedAddonState(restarted, "COMPLETE", 500);
+  assert.equal(completed.status, "DONE");
+  assert.equal(completed.cookingCompletedAtMs, 500);
+  assert.equal(completed.previousState.status, "COOKING");
+  const restored = transitionKdsLinkedAddonState(completed, "UNDO_COMPLETE", 550);
+  assert.equal(restored.status, "COOKING");
+  assert.equal(restored.cookingCompletedAtMs, null);
+  assert.equal(transitionKdsLinkedAddonState(completed, "START", 600), null);
+});
+
+test("a separately completed add-on remains hidden under its completed pot only when completion follows arrival", () => {
+  const make = (taskId, orderId, confirmedAtMs, kind, status, completedAtMs) => ({
+    ...task(taskId, orderId, null, status), taskId, orderId, tableId: 10,
+    orderedAtMs: confirmedAtMs, confirmedAtMs, completedAtMs,
+    kind, compatibilityKey: kind === "POT" ? "STEW" : "MENU:old", startedAtMs: confirmedAtMs,
+    orderBundleKey: "table:10:bundle:100",
+    items: [{ itemId: taskId, name: kind === "POT" ? "pot" : "addon", qty: 1,
+      kind: kind === "POT" ? "POT" : "SOLO", kdsKind: kind === "POT" ? "POT" : "ADDON",
+      kdsGroupKey: "STEW", completionTimer: false, note: null, options: [] }],
+  });
+  const pot = make(1, 100, 1_000, "POT", "DONE", 70_000);
+  const addon = make(2, 101, 60_000, "SOLO", "DONE", 70_000);
+  const linked = attachKdsOrderBundleAddons([pot, addon], 180_000);
+  assert.equal(linked[1].displayOnlyAsAddon, true);
+  assert.deepEqual(linked[0].displayAddonTaskIds, [2]);
+  assert.equal(preparingKdsPartyCards(groupKdsTasksByParty(linked, 180_000)).length, 0);
+
+  const potCompletedTooEarly = make(3, 100, 1_000, "POT", "DONE", 50_000);
+  assert.equal(attachKdsOrderBundleAddons([potCompletedTooEarly, addon], 180_000)[1].displayOnlyAsAddon, false);
+
+  const unfinishedAddon = make(4, 101, 60_000, "SOLO", "WAITING", null);
+  const stale = attachKdsOrderBundleAddons([pot, unfinishedAddon], 180_000);
+  assert.equal(stale[1].displayOnlyAsAddon, false);
+  assert.equal(preparingKdsPartyCards(groupKdsTasksByParty(stale, 180_000)).length, 1);
+
+  const pendingPot = { ...pot, status: "COOKING", completedAtMs: null, completionRequestedAtMs: 69_000 };
+  assert.equal(attachKdsOrderBundleAddons([pendingPot, unfinishedAddon], 180_000)[1].displayOnlyAsAddon, false);
 });

@@ -37,8 +37,38 @@ export default async function PosPage() {
   const mergedSourceSessionIdsByDestinationId = new Map<number, number[]>();
   activeOpenMerges.forEach(merge => mergedSourceNosByDestinationId.set(merge.destinationTableId, [...(mergedSourceNosByDestinationId.get(merge.destinationTableId) ?? []), tableNoById.get(merge.sourceTableId) ?? String(merge.sourceTableId)]));
   activeOpenMerges.forEach(merge => mergedSourceSessionIdsByDestinationId.set(merge.destinationTableId, [...(mergedSourceSessionIdsByDestinationId.get(merge.destinationTableId) ?? []), merge.sourceSessionId]));
-  const tables = tableLayouts.map(table => ({ ...table, ...(visibleSessionByTableId.get(table.tableId) ?? { sessionId: null, groupId: null, personCount: null, babyCount: null, openedAtEpoch: null }), mergedSourceTableNos: (mergedSourceNosByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })), mergedSourceSessionIds: [...new Set(mergedSourceSessionIdsByDestinationId.get(table.tableId) ?? [])] }));
   const sessionIds = openSessions.map(session => session.sessionId);
+  const customerSessionRows = sessionIds.length
+    ? (await pool.query<Array<RowDataPacket & { sessionId: number; customerName: string | null; paidAt: Date; paymentId: number }>>(`
+        SELECT linked.sessionId,linked.customerName,linked.paidAt,linked.paymentId FROM (
+          SELECT psa.session_id AS sessionId,c.name AS customerName,p.paid_at AS paidAt,p.payment_id AS paymentId
+          FROM payments p LEFT JOIN customers c ON c.customer_id=p.customer_id
+          INNER JOIN payment_session_allocations psa ON psa.payment_id=p.payment_id
+          WHERE p.status='APPROVED' AND psa.session_id IN (?)
+          UNION ALL
+          SELECT DISTINCT o.session_id AS sessionId,c.name AS customerName,p.paid_at AS paidAt,p.payment_id AS paymentId
+          FROM payments p LEFT JOIN customers c ON c.customer_id=p.customer_id
+          INNER JOIN checkout_items ci ON ci.checkout_id=p.checkout_id
+          INNER JOIN order_items oi ON oi.order_item_id=ci.order_item_id
+          INNER JOIN orders o ON o.order_id=oi.order_id
+          WHERE p.status='APPROVED' AND o.session_id IN (?)
+            AND NOT EXISTS (SELECT 1 FROM payment_session_allocations psa WHERE psa.payment_id=p.payment_id)
+        ) linked ORDER BY linked.paidAt DESC,linked.paymentId DESC`, [sessionIds, sessionIds]))[0]
+    : [];
+  const customerNameBySessionId = new Map<number, string | null>();
+  for (const row of customerSessionRows) {
+    if (!customerNameBySessionId.has(Number(row.sessionId))) customerNameBySessionId.set(Number(row.sessionId), row.customerName);
+  }
+  const tables = tableLayouts.map(table => {
+    const session = visibleSessionByTableId.get(table.tableId);
+    return {
+      ...table,
+      ...(session ?? { sessionId: null, groupId: null, personCount: null, babyCount: null, openedAtEpoch: null }),
+      customerName: session ? session.pickupCustomerName ?? customerNameBySessionId.get(session.sessionId) ?? null : null,
+      mergedSourceTableNos: (mergedSourceNosByDestinationId.get(table.tableId) ?? []).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })),
+      mergedSourceSessionIds: [...new Set(mergedSourceSessionIdsByDestinationId.get(table.tableId) ?? [])],
+    };
+  });
   const qrOrderLocaleRows: QrOrderLocaleRow[] = sessionIds.length
     ? (await pool.query<QrOrderLocaleRow[]>(`SELECT qs.session_id AS sessionId, qs.language_code AS languageCode
         FROM qr_orders qo

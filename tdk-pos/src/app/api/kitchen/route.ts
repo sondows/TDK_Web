@@ -5,6 +5,7 @@ import { DEFAULT_KDS_ARRIVAL_SOUND_SETTINGS } from "@/lib/kds-arrival-sound";
 import { getKdsCookingSettings } from "@/lib/kds-cooking-settings";
 import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 import { getKdsCompletedTimeShrinkStartMinutes } from "@/lib/kds-completed-time-shrink-setting";
+import { getKdsOrderBundleSettings } from "@/lib/kds-order-bundle-setting";
 import { activeKdsSessionIds, getKdsPartyTableOrder, getKdsTableOrder } from "@/lib/kds-table-order";
 import { pool } from "@/db";
 import type { RowDataPacket } from "mysql2/promise";
@@ -15,7 +16,8 @@ export async function GET() {
   }
   try {
     await syncKdsOrders();
-    const tasks = await listKdsTasks();
+    const orderBundleSettings = await getKdsOrderBundleSettings();
+    const tasks = await listKdsTasks(orderBundleSettings.enabled ? orderBundleSettings.minutes * 60_000 : 0);
     const activeSessionIds = activeKdsSessionIds(tasks);
     const tableOrder = await getKdsTableOrder(activeSessionIds);
     const partyOrder = await getKdsPartyTableOrder(activeSessionIds);
@@ -30,7 +32,7 @@ export async function GET() {
        WHERE action_type='KDS_SPICY_CHANGE' AND entity_type='TABLE_SESSION'
          AND created_at>=NOW()-INTERVAL 10 SECOND ORDER BY audit_log_id DESC LIMIT 50`,
     );
-    return Response.json({ success: true, tasks, tableOrder, partyOrder, spicyAlerts, arrivalSound, cookingSettings, completionCountdownSeconds, completedTimeShrinkStartMinutes, serverNowMs: Date.now() }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ success: true, tasks, tableOrder, partyOrder, spicyAlerts, arrivalSound, cookingSettings, completionCountdownSeconds, completedTimeShrinkStartMinutes, orderBundleSettings, serverNowMs: Date.now() }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("KDS 목록 조회 오류:", error);
     return Response.json({ success: false, message: "주방 주문을 불러오지 못했습니다. KDS migration과 DB 연결을 확인해 주세요." }, { status: 500 });

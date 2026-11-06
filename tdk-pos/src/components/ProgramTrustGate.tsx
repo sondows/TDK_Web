@@ -6,7 +6,7 @@ import { checkMasterRecoveryId, masterRecoveryActionLabel } from "@/lib/master-r
 import PosTouchKeyboard, { type PosKeyboardMode } from "@/components/PosTouchKeyboard";
 
 type Program = "POS" | "ADM" | "KDS" | "HOS";
-type PosKeyboardTarget = "loginId" | "password" | "confirmPassword" | "recoveryPassword" | "recoveryConfirm";
+type PosKeyboardTarget = "loginId" | "password" | "confirmPassword" | "pin" | "pinConfirm" | "recoveryPassword" | "recoveryConfirm";
 type TrustStatus = { trusted?: boolean; invalidated?: boolean; pinSetupRequired?: boolean;
   passwordRegistrationRequired?: boolean; masterPasswordConfigured?: boolean; loginId?: string };
 type RecoveryStatus = { available?: boolean; loginId?: string; passwordConfigured?: boolean };
@@ -52,10 +52,14 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   const [activeKeyboard, setActiveKeyboard] = useState<PosKeyboardMode | null>(null);
   const [keyboardTarget, setKeyboardTarget] = useState<PosKeyboardTarget>("loginId");
   const recoveryDialog = useRef<HTMLDialogElement>(null);
+  const loginForm = useRef<HTMLFormElement>(null);
+  const recoveryForm = useRef<HTMLFormElement>(null);
   const idInput = useRef<HTMLInputElement>(null);
   const passwordInput = useRef<HTMLInputElement>(null);
   const pinInput = useRef<HTMLInputElement>(null);
   const recoveryTokenRef = useRef("");
+  const submitLock = useRef(false);
+  const recoverySubmitLock = useRef(false);
   const checkSerial = useRef(0);
   const admIdRequestSerial = useRef(0);
   const admIdSubmitLock = useRef(false);
@@ -69,6 +73,8 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     if (keyboardTarget === "loginId") setLoginId(current => update(current).slice(0, 32));
     else if (keyboardTarget === "password") setPassword(current => update(current).slice(0, 128));
     else if (keyboardTarget === "confirmPassword") setConfirmPassword(current => update(current).slice(0, 128));
+    else if (keyboardTarget === "pin") setPin(current => update(current).replace(/\D/g, "").slice(0, 6));
+    else if (keyboardTarget === "pinConfirm") setPinConfirm(current => update(current).replace(/\D/g, "").slice(0, 6));
     else if (keyboardTarget === "recoveryPassword") setRecoveryPassword(current => update(current).slice(0, 128));
     else setRecoveryConfirm(current => update(current).slice(0, 128));
   };
@@ -465,10 +471,17 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     if ((program === "KDS" || program === "HOS") && phase === "LOGIN_ID") idInput.current?.focus();
   }, [program, phase]);
   useEffect(() => {
-    if ((program === "KDS" || program === "HOS") && phase === "SETUP_PIN") pinInput.current?.focus();
+    if ((program === "POS" || program === "KDS" || program === "HOS") && phase === "SETUP_PIN") pinInput.current?.focus();
   }, [program, phase]);
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
+    void submitCurrent(event).finally(() => { submitLock.current = false; });
+  };
+
+  const submitCurrent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
     if (phase === "LOGIN_ID") {
@@ -548,7 +561,14 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     finally { setBusy(false); }
   };
 
-  const submitRecovery = async (event: FormEvent<HTMLFormElement>) => {
+  const submitRecovery = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (recoverySubmitLock.current) return;
+    recoverySubmitLock.current = true;
+    void submitRecoveryCurrent(event).finally(() => { recoverySubmitLock.current = false; });
+  };
+
+  const submitRecoveryCurrent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || (!initialPasswordRegistration && phase !== "SETUP_PASSWORD")) return;
     if (recoveryPassword !== recoveryConfirm) { setRecoveryError("비밀번호가 일치하지 않습니다."); return; }
@@ -649,7 +669,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
           <button className="mt-5 min-h-12 rounded-xl bg-blue-600 px-6 font-bold text-white"
             onClick={() => void checkInitialState()} type="button">다시 확인</button>
         </div> :
-          <form className="space-y-4" onSubmit={event => void submit(event)}>
+          <form className="space-y-4" onSubmit={event => submit(event)} ref={loginForm}>
             {notice && <p className="text-center text-sm font-semibold text-blue-700" role="status">{notice}</p>}
             {phase === "BOOTSTRAP_SETUP" &&
               <button className="block text-sm font-semibold text-blue-700 underline" disabled={busy}
@@ -695,12 +715,20 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
                   required type="password" value={confirmPassword} /></label>}
             {phase === "SETUP_PIN" && <>
               <label className="block text-sm font-bold text-slate-700">새 6자리 PIN
-                <input autoComplete="new-password" className={inputStyle} inputMode="numeric" maxLength={6}
+                <input autoComplete="new-password" className={inputStyle} maxLength={6}
                   onChange={event => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onFocus={() => { if (program === "POS") openPosKeyboard("pin", "pin"); }}
+                  onPointerDown={() => { if (program === "POS") openPosKeyboard("pin", "pin"); }}
+                  data-pos-touch-input={program === "POS" ? "true" : undefined}
+                  inputMode={program === "POS" ? "none" : "numeric"}
                   ref={pinInput} required type="password" value={pin} /></label>
               <label className="block text-sm font-bold text-slate-700">PIN 확인
-                <input autoComplete="new-password" className={inputStyle} inputMode="numeric" maxLength={6}
+                <input autoComplete="new-password" className={inputStyle} maxLength={6}
                   onChange={event => setPinConfirm(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onFocus={() => { if (program === "POS") openPosKeyboard("pinConfirm", "pin"); }}
+                  onPointerDown={() => { if (program === "POS") openPosKeyboard("pinConfirm", "pin"); }}
+                  data-pos-touch-input={program === "POS" ? "true" : undefined}
+                  inputMode={program === "POS" ? "none" : "numeric"}
                   required type="password" value={pinConfirm} /></label>
             </>}
             <p aria-live="polite" className="min-h-6 text-center text-sm font-semibold text-red-600"
@@ -727,13 +755,13 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         onText={text => { keyboardText(text); setMessage(""); setRecoveryError(""); }}
         onBackspace={() => { keyboardBackspace(); setMessage(""); setRecoveryError(""); }}
         onClear={() => { keyboardClear(); setMessage(""); setRecoveryError(""); }}
-        onConfirm={() => setActiveKeyboard(null)}
+        onConfirm={() => loginForm.current?.requestSubmit()}
         onClose={() => setActiveKeyboard(null)} />}
     <dialog aria-labelledby="master-recovery-title"
       className="m-auto w-[min(420px,calc(100vw-2rem))] rounded-2xl bg-white p-6 text-slate-800 shadow-xl backdrop:bg-slate-900/60"
       onCancel={event => { if (busy) event.preventDefault(); else setRecoveryOpen(false); }}
       ref={recoveryDialog}>
-      <form className="space-y-4" onSubmit={event => void submitRecovery(event)}>
+      <form className="space-y-4" onSubmit={event => submitRecovery(event)} ref={recoveryForm}>
         <h2 className="text-center text-xl font-bold" id="master-recovery-title">{initialPasswordRegistration ?
           "마스터 비밀번호 등록" : masterRecoveryActionLabel(recoveryPasswordConfigured)}</h2>
         <label className="block text-sm font-bold">마스터 비밀번호
@@ -770,7 +798,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             onText={text => { keyboardText(text); setRecoveryError(""); }}
             onBackspace={() => { keyboardBackspace(); setRecoveryError(""); }}
             onClear={() => { keyboardClear(); setRecoveryError(""); }}
-            onConfirm={() => setActiveKeyboard(null)}
+            onConfirm={() => recoveryForm.current?.requestSubmit()}
             onClose={() => setActiveKeyboard(null)} />
         </div>}
     </dialog>

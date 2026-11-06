@@ -1,14 +1,78 @@
 /** Keep table sessions independent while placing members of a party in one card. */
 export type KdsPartyTask = {
   sessionId: number;
+  tableId?: number | null;
+  orderId?: number;
+  orderBundleKey?: string | null;
+  orderedAtMs?: number;
+  confirmedAtMs?: number;
   groupId: number | null;
   sessionKind: "DINE_IN" | "TAKEOUT_WALK_IN" | "TAKEOUT_PHONE";
   status: "WAITING" | "COOKING" | "DONE";
   cancelled: boolean;
+  displayOnlyAsAddon?: boolean;
+  displayAddonItems?: Array<{
+    itemId: number; name: string; qty: number; kind: "ADDON"; kdsKind: "ADDON";
+    kdsGroupKey: string | null; completionTimer: boolean; note: string | null;
+    options: Array<{ name: string; qty: number }>;
+  }>;
+  displayAddonTaskIds?: number[];
 };
 
 export type KdsTableGroup<T> = { sessionId: number; tasks: T[] };
 export type KdsPartyCard<T> = { key: string; tables: KdsTableGroup<T>[] };
+
+/** Attach a separately submitted add-on to one unambiguous, still-relevant pot in the same time bundle. */
+export function attachKdsOrderBundleAddons<T extends KdsPartyTask & {
+  taskId: number; confirmedAtMs: number; completedAtMs: number | null; compatibilityKey: string;
+  completionRequestedAtMs?: number | null;
+  kind: "POT" | "SOLO";
+  items: Array<{ itemId: number; name: string; qty: number; kind: string; kdsKind: string;
+    kdsGroupKey: string | null; completionTimer: boolean; note: string | null; options: Array<{ name: string; qty: number }> }>;
+}>(source: T[], bundleWindowMs = 0): T[] {
+  const tasks = source.map(task => ({ ...task, displayOnlyAsAddon: false, displayAddonItems: [] as NonNullable<KdsPartyTask["displayAddonItems"]>, displayAddonTaskIds: [] as number[] }));
+  // orderBundleKey is a presentation key that can be promoted to a party key.
+  // Add-on-to-pot matching must use only the physical table and fixed order-time
+  // window, otherwise party grouping can either join unrelated time windows or
+  // separate valid orders when party membership differs between sessions.
+  const tableOrderBundles = bundleWindowMs > 0 ? buildKdsTableOrderBundleKeys(tasks, bundleWindowMs) : new Map<string, string>();
+  for (const addon of tasks) {
+    if (addon.kind !== "SOLO" || addon.cancelled ||
+      (addon.status !== "WAITING" && addon.status !== "COOKING" && addon.status !== "DONE") ||
+      addon.tableId == null || addon.orderId === undefined || !addon.items.length ||
+      addon.items.some(item => item.kind === "COMPONENT" || item.kdsKind !== "ADDON")) continue;
+    const addonBundleKey = tableOrderBundles.get(`${addon.tableId}:${addon.orderId}`);
+    if (!addonBundleKey) continue;
+    const groupKeys = [...new Set(addon.items.map(item => item.kdsGroupKey?.trim() || null))];
+    if (groupKeys.length !== 1) continue;
+    const groupKey = groupKeys[0];
+    let candidates = tasks.filter(pot => pot.kind === "POT" && !pot.cancelled && pot.tableId === addon.tableId &&
+      pot.orderId !== undefined && tableOrderBundles.get(`${pot.tableId}:${pot.orderId}`) === addonBundleKey &&
+      pot.completionRequestedAtMs == null &&
+      pot.confirmedAtMs <= addon.confirmedAtMs &&
+      (addon.status === "DONE"
+        ? pot.status === "DONE" && pot.completedAtMs !== null && pot.completedAtMs >= addon.confirmedAtMs &&
+          addon.completedAtMs !== null && pot.completedAtMs >= addon.completedAtMs
+        : pot.status !== "DONE"));
+    if (addon.status === "COOKING") candidates = candidates.filter(pot => pot.status === "COOKING");
+    if (addon.status === "DONE") candidates = candidates.filter(pot => pot.status === "DONE" && addon.completedAtMs !== null &&
+      pot.completedAtMs !== null && pot.completedAtMs >= addon.completedAtMs);
+    if (groupKey !== null) {
+      candidates = candidates.filter(pot => pot.compatibilityKey === groupKey);
+    } else {
+      const defaultGroup = candidates.some(pot => pot.compatibilityKey === "POT")
+        ? candidates.filter(pot => pot.compatibilityKey === "POT")
+        : new Set(candidates.map(pot => pot.compatibilityKey)).size === 1 ? candidates : [];
+      candidates = defaultGroup;
+    }
+    if (candidates.length !== 1) continue;
+    const target = candidates[0];
+    target.displayAddonItems.push(...addon.items.map(item => ({ ...item, kind: "ADDON" as const, kdsKind: "ADDON" as const })));
+    target.displayAddonTaskIds.push(addon.taskId);
+    addon.displayOnlyAsAddon = true;
+  }
+  return tasks;
+}
 
 /** Apply persisted per-table ranks without treating party/group membership as an ordering unit. */
 export function sortKdsTableGroups<T extends { sessionId: number }>(
@@ -206,6 +270,7 @@ export function groupKdsPotDisplayRows<T extends {
   compatibilityKey: string; status: "WAITING" | "COOKING" | "DONE";
   startedAtMs: number | null; completedAtMs: number | null; changedAtMs?: number | null; completionRequestId: string | null;
   completionRequestScope: "TASK" | "TABLE" | null; completionRequestedAtMs: number | null; cancelled: boolean;
+  displayOnlyAsAddon?: boolean;
   items: Array<{ name: string; kind: string; kdsKind?: string; kdsGroupKey?: string | null }>;
 }>(tasks: T[]): T[][] {
   const rows: T[][] = [];
@@ -218,7 +283,7 @@ export function groupKdsPotDisplayRows<T extends {
     if (!row) { row = []; keys.set(key, row); rows.push(row); }
     row.push(task);
   }
-  const addons = tasks.filter(task => task.kind === "SOLO" && task.sessionKind === "DINE_IN" && !task.cancelled &&
+  const addons = tasks.filter(task => !task.displayOnlyAsAddon && task.kind === "SOLO" && task.sessionKind === "DINE_IN" && !task.cancelled &&
     task.items.some(item => item.kind !== "COMPONENT" && item.kdsKind === "ADDON"));
   for (const addon of addons) {
     const addonGroupKeys = [...new Set(addon.items
@@ -245,7 +310,7 @@ export function groupKdsPotDisplayRows<T extends {
     if (candidates.length === 1) candidates[0].push(addon);
   }
   const grouped = new Set(rows.flat());
-  for (const task of tasks) if (!grouped.has(task)) rows.push([task]);
+  for (const task of tasks) if (!task.displayOnlyAsAddon && !grouped.has(task)) rows.push([task]);
   for (const row of rows) if (row.length > 1) row.sort((a, b) =>
     Number(b.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")) -
     Number(a.items.some(item => item.kind === "POT" && item.name === "흑돼지김치찌개")));
@@ -253,7 +318,7 @@ export function groupKdsPotDisplayRows<T extends {
 }
 
 export function activeKdsTableTasks<T extends KdsPartyTask>(tasks: T[]) {
-  return tasks.filter(task => !task.cancelled && task.status !== "DONE");
+  return tasks.filter(task => !task.displayOnlyAsAddon && !task.cancelled && task.status !== "DONE");
 }
 
 export function oldestKdsTableOrderedAtMs<T extends KdsPartyTask & { orderedAtMs: number }>(tasks: T[], preparing: boolean) {
@@ -261,11 +326,90 @@ export function oldestKdsTableOrderedAtMs<T extends KdsPartyTask & { orderedAtMs
   return Math.min(...(active.length ? active : tasks).map(task => task.orderedAtMs));
 }
 
-export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[]): KdsPartyCard<T>[] {
+type KdsOrderBundleSource = Pick<KdsPartyTask,
+  "sessionId" | "tableId" | "orderId" | "confirmedAtMs" | "orderedAtMs" | "groupId" | "sessionKind">;
+
+/** A fixed-anchor order-time bundle for one physical table, independent of party-card grouping. */
+export function buildKdsTableOrderBundleKeys<T extends KdsOrderBundleSource>(tasks: T[], bundleWindowMs: number) {
+  const ordersByTable = new Map<number, Map<number, number>>();
+  for (const task of tasks) {
+    if (task.sessionKind !== "DINE_IN" || task.tableId == null || task.orderId === undefined) continue;
+    const at = Number.isFinite(task.confirmedAtMs) ? task.confirmedAtMs! : task.orderedAtMs;
+    if (!Number.isFinite(at)) continue;
+    const orders = ordersByTable.get(task.tableId) ?? new Map<number, number>();
+    const previousAt = orders.get(task.orderId);
+    if (previousAt === undefined || at! < previousAt) orders.set(task.orderId, at!);
+    ordersByTable.set(task.tableId, orders);
+  }
+
+  const result = new Map<string, string>();
+  for (const [tableId, orderTimes] of ordersByTable) {
+    const orders = [...orderTimes].map(([orderId, at]) => ({ orderId, at }))
+      .sort((a, b) => a.at - b.at || a.orderId - b.orderId);
+    let anchorAt: number | null = null;
+    let anchorOrderId: number | null = null;
+    for (const order of orders) {
+      if (anchorAt === null || order.at - anchorAt > bundleWindowMs) {
+        anchorAt = order.at;
+        anchorOrderId = order.orderId;
+      }
+      result.set(`${tableId}:${order.orderId}`, `table:${tableId}:bundle:${anchorOrderId}`);
+    }
+  }
+  return result;
+}
+
+export function buildKdsOrderBundleKeys<T extends KdsOrderBundleSource>(tasks: T[], bundleWindowMs: number) {
+  const result = buildKdsTableOrderBundleKeys(tasks, bundleWindowMs);
+  const parent = new Map<string, string>();
+  const find = (key: string): string => {
+    const current = parent.get(key);
+    if (!current) { parent.set(key, key); return key; }
+    if (current === key) return key;
+    const root = find(current);
+    parent.set(key, root);
+    return root;
+  };
+  const union = (left: string, right: string) => {
+    const leftRoot = find(left); const rightRoot = find(right);
+    if (leftRoot !== rightRoot) {
+      const root = leftRoot < rightRoot ? leftRoot : rightRoot;
+      parent.set(leftRoot, root); parent.set(rightRoot, root);
+    }
+  };
+  const orderKeysByTask = new Map<T, string>();
+  for (const task of tasks) {
+    if (task.tableId == null || task.orderId === undefined) continue;
+    const bundleKey = result.get(`${task.tableId}:${task.orderId}`);
+    if (!bundleKey) continue;
+    orderKeysByTask.set(task, bundleKey);
+    find(bundleKey);
+    if (task.sessionKind === "DINE_IN" && task.groupId !== null) union(bundleKey, `party:${task.groupId}`);
+  }
+  const partyKeyByRoot = new Map<string, string>();
+  for (const task of tasks) {
+    if (task.sessionKind !== "DINE_IN" || task.groupId === null) continue;
+    const bundleKey = orderKeysByTask.get(task);
+    if (!bundleKey) continue;
+    const root = find(bundleKey);
+    const partyKey = `party:${task.groupId}`;
+    const existing = partyKeyByRoot.get(root);
+    if (!existing || partyKey < existing) partyKeyByRoot.set(root, partyKey);
+  }
+  for (const [lookup, bundleKey] of result) {
+    const root = find(bundleKey);
+    result.set(lookup, partyKeyByRoot.get(root) ?? root);
+  }
+  return result;
+}
+
+export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[], bundleWindowMs = 0): KdsPartyCard<T>[] {
+  const orderBundles = bundleWindowMs > 0 ? buildKdsOrderBundleKeys(tasks, bundleWindowMs) : new Map<string, string>();
   const cards = new Map<string, { card: KdsPartyCard<T>; tables: Map<number, KdsTableGroup<T>> }>();
   for (const task of tasks) {
-    const key = task.sessionKind === "DINE_IN" && task.groupId !== null
-      ? `party:${task.groupId}` : `session:${task.sessionId}`;
+    const key = task.orderBundleKey ?? (task.sessionKind === "DINE_IN" && task.groupId !== null
+      ? `party:${task.groupId}`
+      : orderBundles.get(`${task.tableId}:${task.orderId}`) ?? `session:${task.sessionId}`);
     let entry = cards.get(key);
     if (!entry) {
       entry = { card: { key, tables: [] }, tables: new Map() };
@@ -299,10 +443,15 @@ export function sortKdsPartyCardsByLatestOrder<T extends KdsPartyTask & { ordere
 }
 
 export const partyHasActiveTask = <T extends KdsPartyTask>(card: KdsPartyCard<T>) =>
-  card.tables.some(table => table.tasks.some(task => task.status !== "DONE" || task.cancelled));
+  card.tables.some(table => table.tasks.some(task => !task.displayOnlyAsAddon && (task.status !== "DONE" || task.cancelled)));
 
 export function countKdsTablesByStatus<T extends KdsPartyTask>(cards: KdsPartyCard<T>[], status: "preparing" | "completed") {
-  return cards.reduce((count, card) => count + card.tables.filter(table => table.tasks.some(task =>
-    !task.cancelled && (status === "preparing" ? task.status !== "DONE" : task.status === "DONE"),
-  )).length, 0);
+  const countable = (task: T) => !task.displayOnlyAsAddon && !task.cancelled && (status === "preparing" ? task.status !== "DONE" : task.status === "DONE");
+  const identities = new Set<number | string>();
+  for (const card of cards) for (const table of card.tables) {
+    if (!table.tasks.some(countable)) continue;
+    const representative = table.tasks.find(countable)!;
+    identities.add(representative.tableId ?? representative.sessionId);
+  }
+  return identities.size;
 }

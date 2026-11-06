@@ -36,6 +36,7 @@ export async function GET(request: Request) {
       fixedCouponCashChangeEnabled: customers.fixedCouponCashChangeEnabled,
       fixedCouponCashChangeMinPercent: customers.fixedCouponCashChangeMinPercent,
       sortOrder: customers.sortOrder,
+      createdAt: customers.createdAt,
     }).from(customers).where(condition).orderBy(asc(customers.sortOrder), asc(customers.name), asc(customers.customerId));
 
     const customerIds = rows.map(row => row.customerId);

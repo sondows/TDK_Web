@@ -1,11 +1,14 @@
 import "server-only";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db } from "@/db";
+import type { RowDataPacket } from "mysql2";
+import { db, pool } from "@/db";
 import { diningTables, orderItemCancellations, orderItems, orders, paymentSessionAllocations,
   payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { calculateTableFinancials } from "@/lib/table-session-financials";
 import { parseHosTableLayout, resolveHosTableLayouts } from "@/lib/hos-table-layout";
+
+type QrSessionRow = RowDataPacket & { sessionId: number };
 
 export async function loadHosTables(includeHidden = false) {
   const [tableRows, sessions, merges] = await Promise.all([
@@ -32,6 +35,13 @@ export async function loadHosTables(includeHidden = false) {
   const layouts = resolveHosTableLayouts(tableRows.map(table => ({ ...table, tableId: Number(table.tableId) })), storedLayouts);
 
   const sessionIds = sessions.map(row => row.sessionId);
+  const qrRows: QrSessionRow[] = sessionIds.length
+    ? (await pool.query<QrSessionRow[]>(`SELECT DISTINCT qs.session_id AS sessionId
+        FROM qr_orders qo
+        INNER JOIN qr_sessions qs ON qs.qr_session_id = qo.qr_session_id
+        WHERE qs.session_id IN (?)`, [sessionIds]))[0]
+    : [];
+  const sessionsWithQrOrders = new Set(qrRows.map(row => Number(row.sessionId)));
   const orderRows = sessionIds.length ? await db.select({ orderId: orders.orderId, sessionId: orders.sessionId,
     status: orders.status }).from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
   const orderIds = orderRows.map(row => row.orderId);
@@ -95,6 +105,7 @@ export async function loadHosTables(includeHidden = false) {
     return {
       ...table,
       sessionId: isMergedSource ? null : session?.sessionId ?? null,
+      hasQrOrder: !isMergedSource && session ? sessionsWithQrOrders.has(session.sessionId) : false,
       isMergedSource,
       mergedIntoTableNo: sourceMerge ? tableNoById.get(sourceMerge.destinationTableId) ?? null : null,
       personCount: isMergedSource ? null : session?.personCount ?? null,

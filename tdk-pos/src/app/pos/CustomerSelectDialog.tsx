@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
 import { formatTradeBalance } from "@/lib/customer-trade";
+import { compareCustomersByRegistrationNewestFirst } from "@/lib/customer";
 import CustomerBalanceDialog from "./CustomerBalanceDialog";
 import PosSubHeader from "./PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
@@ -18,7 +19,7 @@ export type SelectedCustomer = {
   fixedCouponCashChangeEnabled: number;
   fixedCouponCashChangeMinPercent: number | null;
 };
-type Customer = SelectedCustomer & { contactName: string | null; phone: string | null; lastTransactionAt: string | null };
+type Customer = SelectedCustomer & { contactName: string | null; phone: string | null; createdAt: string; lastTransactionAt: string | null };
 type SortMode = "recent" | "name" | "phone" | "balance";
 type SortDirection = "asc" | "desc";
 
@@ -87,6 +88,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
     else { setSortMode(mode); setSortDirection(mode === "recent" || mode === "balance" ? "desc" : "asc"); }
   };
   const visibleRows = rows.filter(customer => (!tradeManagedOnly || customer.isPaymentManaged) && (!input || customer.phone?.replace(/\D/g, "").includes(input)));
+  if (sortMode === null) visibleRows.sort(compareCustomersByRegistrationNewestFirst);
   if (sortMode === "recent") visibleRows.sort((left, right) => {
     if (!left.lastTransactionAt || !right.lastTransactionAt) return Number(Boolean(right.lastTransactionAt)) - Number(Boolean(left.lastTransactionAt));
     const dateOrder = left.lastTransactionAt.localeCompare(right.lastTransactionAt);

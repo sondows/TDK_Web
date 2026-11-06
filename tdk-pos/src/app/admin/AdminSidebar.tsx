@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./admin.module.css";
@@ -81,27 +81,23 @@ function groupContainsPath(group: NavigationGroup, pathname: string) {
 
 export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, canManageHosLayout = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const [expansion, setExpansion] = useState(() => ({
-    pathname,
-    groups: navigationGroups.filter(group => groupContainsPath(group, pathname)).map(group => group.id),
-  }));
-  let expandedGroups = expansion.groups;
-  if (expansion.pathname !== pathname) {
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  // /tdkadm is rewritten to /admin, so the server and browser pathname can differ during hydration.
+  const [pathnameReady, setPathnameReady] = useState(false);
+
+  useEffect(() => {
     const routeGroups = navigationGroups.filter(group => groupContainsPath(group, pathname)).map(group => group.id);
-    expandedGroups = [...new Set([...expansion.groups, ...routeGroups])];
-    setExpansion({ pathname, groups: expandedGroups });
-  }
+    const timer = window.setTimeout(() => {
+      setPathnameReady(true);
+      setExpandedGroups(current => [...new Set([...current, ...routeGroups])]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pathname]);
 
   const toggleGroup = (groupId: string) => {
-    setExpansion(current => {
-      const groups = current.pathname === pathname
-        ? current.groups
-        : navigationGroups.filter(group => groupContainsPath(group, pathname)).map(group => group.id);
-      return {
-        pathname,
-        groups: groups.includes(groupId) ? groups.filter(id => id !== groupId) : [...groups, groupId],
-      };
-    });
+    setExpandedGroups(current => current.includes(groupId)
+      ? current.filter(id => id !== groupId)
+      : [...current, groupId]);
   };
 
   const items: NavigationItem[] = menuOnly
@@ -129,7 +125,7 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
             <div id={childrenId} className={`${styles.navChildren}${expanded ? ` ${styles.navChildrenOpen}` : ""}`} aria-hidden={!expanded} inert={!expanded}>
               <div className={styles.navChildrenInner}>
                 {item.children.map(child => {
-                  const active = linkIsActive(pathname, child.href);
+                  const active = pathnameReady && linkIsActive(pathname, child.href);
                   return <Link
                     aria-current={active ? "page" : undefined}
                     className={`${styles.navLink} ${styles.navLinkChild}${active ? ` ${styles.navLinkActive}` : ""}`}
@@ -143,7 +139,7 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
           </div>;
         }
 
-        const active = linkIsActive(pathname, item.href);
+        const active = pathnameReady && linkIsActive(pathname, item.href);
         return <Link
           aria-current={active ? "page" : undefined}
           className={`${styles.navLink}${active ? ` ${styles.navLinkActive}` : ""}`}

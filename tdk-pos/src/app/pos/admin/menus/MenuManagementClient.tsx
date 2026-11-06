@@ -4,6 +4,7 @@
 import Cropper, { type Area } from "react-easy-crop";
 import { useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format-money";
+import { menuCategoryDisplayName } from "@/lib/menu-category-display";
 import PosSubHeader from "../../PosSubHeader";
 import type { MenuChoiceConfig } from "@/lib/menu-choice-options";
 import type { KdsMenuConfig } from "@/lib/kds-menu-config";
@@ -16,7 +17,6 @@ type MenuComponentInput = { componentMenuId: number; qtyPerUnit: number; printOn
 type MenuPayload = { name: string; price: string; categoryId: number; menuNumber: number | null; isActive: boolean; components: MenuComponentInput[]; optionConfig: MenuChoiceConfig } & KdsMenuConfig;
 type DuplicateMenuNumberCheck = (categoryId: number, menuNumber: number | null, exceptMenuId?: number) => string | null;
 
-const categoryDisplayName = (name: string) => ({ "김치찌개": "찌개", "사이드": "단품", "주류·음료": "음료" }[name] ?? name);
 const kdsKindLabel = (kind: KdsMenuConfig["kdsKind"]) => ({ NONE: "KDS 제외", POT: "찌개/냄비 조리", ADDON: "찌개 첨가", SOLO: "독립 조리" })[kind];
 const parsePrice = (value: string) => Number(value.replaceAll(",", "").trim());
 const formatPriceInput = (value: string | number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(Number(value));
@@ -36,7 +36,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     const duplicate = menuRows.some(menu => menu.categoryId === categoryId && menu.menuNumber === menuNumber && menu.menuId !== exceptMenuId);
     if (!duplicate) return null;
     const categoryName = categories.find(category => category.categoryId === categoryId)?.name ?? "선택한 카테고리";
-    return `${categoryDisplayName(categoryName)} 분류에서 이미 사용 중인 메뉴번호입니다.`;
+    return `${menuCategoryDisplayName(categoryName)} 분류에서 이미 사용 중인 메뉴번호입니다.`;
   };
 
   const moveMenu = async (menu: Menu, direction: "up" | "down") => {
@@ -64,7 +64,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
 
   return <section className="mx-auto mt-6 max-w-6xl">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap gap-2"><button className={activeCategoryId === null ? activeClass : idleClass} onClick={() => setActiveCategoryId(null)} type="button">전체</button>{categories.map(category => <button className={activeCategoryId === category.categoryId ? activeClass : idleClass} key={category.categoryId} onClick={() => setActiveCategoryId(category.categoryId)} type="button">{categoryDisplayName(category.name)}</button>)}</div>
+      <div className="flex flex-wrap gap-2"><button className={activeCategoryId === null ? activeClass : idleClass} onClick={() => setActiveCategoryId(null)} type="button">전체</button>{categories.map(category => <button className={activeCategoryId === category.categoryId ? activeClass : idleClass} key={category.categoryId} onClick={() => setActiveCategoryId(category.categoryId)} type="button">{menuCategoryDisplayName(category.name)}</button>)}</div>
       <div className="flex gap-2"><button className={activeClass + " disabled:bg-slate-300"} disabled={!categories.length} onClick={() => setIsCreateOpen(true)} type="button">+ 새 메뉴 추가</button></div>
     </div>
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
@@ -78,10 +78,10 @@ const activeClass = "min-h-11 rounded-xl bg-blue-600 px-4 font-bold text-white";
 const idleClass = "min-h-11 rounded-xl border border-slate-300 bg-white px-4 font-bold text-slate-700";
 
 function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu }: { category: Category; menus: Menu[]; movingMenuId: number | null; moveMenu: (menu: Menu, direction: "up" | "down") => Promise<void>; editMenu: (menu: Menu) => void }) {
-  return <section className="overflow-x-auto rounded-2xl bg-white shadow-sm"><h2 className="border-b border-slate-200 px-5 py-4 text-lg font-extrabold">{categoryDisplayName(category.name)}</h2><div className="min-w-[720px]">
+  return <section className="overflow-x-auto rounded-2xl bg-white shadow-sm"><h2 className="border-b border-slate-200 px-5 py-4 text-lg font-extrabold">{menuCategoryDisplayName(category.name)}</h2><div className="min-w-[720px]">
     <div className="grid grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-bold text-slate-500"><span>순서</span><span>메뉴명</span><span className="text-right">가격</span><span>카테고리</span><span>사용 상태</span><span className="text-center">순서 변경</span></div>
     {menus.length ? menus.map((menu, index) => <div className="grid min-h-14 cursor-pointer grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] items-center gap-3 border-b border-slate-100 px-5 py-2 last:border-b-0 hover:bg-slate-50" key={menu.menuId} onClick={() => editMenu(menu)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); editMenu(menu); } }} role="button" tabIndex={0}>
-      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{categoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span><span className="flex justify-center gap-2"><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></span>
+      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{menuCategoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span><span className="flex justify-center gap-2"><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></span>
     </div>) : <p className="px-5 py-8 text-sm text-slate-400">등록된 메뉴가 없습니다.</p>}
   </div></section>;
 }
@@ -192,7 +192,7 @@ function OptionCopyDialog({ categories, menus, close, onApply }: { categories: C
     <p className="text-sm text-slate-700">옵션을 가져올 메뉴를 선택하세요.</p>
     <select aria-label="원본 메뉴 카테고리" className={`${inputClass} mt-3 text-sm`} onChange={event => { setCategoryId(event.target.value ? Number(event.target.value) : null); setSelectedMenuId(null); }} value={categoryId ?? ""}>
       <option value="">전체 카테고리</option>
-      {categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}
+      {categories.map(category => <option key={category.categoryId} value={category.categoryId}>{menuCategoryDisplayName(category.name)}</option>)}
     </select>
     <div className="mt-3 max-h-64 space-y-1 overflow-y-auto" role="radiogroup" aria-label="복사할 원본 메뉴">
       {visibleMenus.length ? visibleMenus.map(menu => <button aria-checked={selectedMenuId === menu.menuId} className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 text-left text-sm ${selectedMenuId === menu.menuId ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"} ${menu.optionConfig.enabled ? "text-slate-800" : "cursor-not-allowed text-slate-400"}`} disabled={!menu.optionConfig.enabled} key={menu.menuId} onClick={() => setSelectedMenuId(menu.menuId)} role="radio" type="button"><span className="min-w-0 truncate font-semibold">{menu.name}</span><span className="shrink-0 text-xs">{menu.optionConfig.enabled ? menu.optionConfig.title : "옵션 없음"}</span></button>) : <p className="py-6 text-center text-sm text-slate-500">선택할 메뉴가 없습니다.</p>}
@@ -252,7 +252,7 @@ function Dialog({ close, saving, title, children, compact = false, layer = "base
   </div>;
 }
 function CategorySelect({ categories, categoryId, setCategoryId }: { categories: Category[]; categoryId: number; setCategoryId: (value: number) => void }) {
-  return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold"><span>카테고리 *</span><select className={inputClass} onChange={event => setCategoryId(Number(event.target.value))} value={categoryId}>{categories.map(category => <option key={category.categoryId} value={category.categoryId}>{categoryDisplayName(category.name)}</option>)}</select></label>;
+  return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold"><span>카테고리 *</span><select className={inputClass} onChange={event => setCategoryId(Number(event.target.value))} value={categoryId}>{categories.map(category => <option key={category.categoryId} value={category.categoryId}>{menuCategoryDisplayName(category.name)}</option>)}</select></label>;
 }
 function PosUseToggle({ isActive, setIsActive }: { isActive: boolean; setIsActive: (value: boolean) => void }) {
   return <MenuSwitch checked={isActive} label="POS 사용" onChange={setIsActive} />;

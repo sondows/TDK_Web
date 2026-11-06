@@ -1814,3 +1814,29 @@
 - 재발 방지를 위해 `배포/TDKPOS_Start.bat`을 PowerShell 런처와 같은 지속 전용 프로필 `%LOCALAPPDATA%\TDK-POS\EdgeProfile`로 통일했다. `--inprivate`, 프로필 삭제, 쿠키 삭제는 적용하지 않았다. 기존 기본 프로필에만 신뢰가 등록되어 있었다면 새 전용 프로필에서 한 번 마스터 인증/등록 후부터 해당 프로필에 유지된다.
 - 실제 POS PC의 예약 작업은 이 호스트에 없어 조회되지 않았다. 현장 적용 후 POS 작업이 `deploy/register-pos-task.ps1`가 등록한 `start-pos-kiosk.ps1`를 호출하는지 확인해야 한다. 두 런처를 섞어 실행하지 않고 동일 프로필을 유지한다.
 - 검증: 프로그램 신뢰·등록·인증 흐름 테스트 17/17 PASS, TypeScript PASS, 관련 ESLint PASS, Production Build PASS. 기존 `src/lib/menu-image-storage.ts` 동적 파일 경로 추적 경고 2건이 있었다. 운영 DB, NAS, 직원 토큰/데이터는 조회·변경하지 않았다. 현장 Edge 재부팅 후 쿠키 존속은 이 개발 호스트에서 실제 확인할 수 없어 미검증이다.
+
+## TDKKDS 주문 세션 간 찌개첨가 표시 연결 보정 (2026-11-06)
+
+- `kds-server.ts`의 `materializeOrder`는 `buildKdsTaskDrafts(orderId, ...)`를 주문 단위로 호출한다. 같은 주문 안의 찌개첨가는 부모 POT 작업의 member로 저장되지만, 다른 order/session의 첨가 메뉴는 별도 SOLO 작업으로 생성된다. 이는 주문/세션 ID를 보존하는 현재 모델의 동작이다.
+- KDS 조회 시 묶음 기준 시각은 `COALESCE(orders.accepted_at, orders.ordered_at)`를 epoch ms로 전달하고, 주문 시간 묶음 설정은 `system_settings.kds_order_bundle_enabled` 및 `kds_order_bundle_minutes`에서 읽는다. `/api/kitchen`은 설정 ON일 때 분을 밀리초로 바꾸어 작업 조회와 화면 묶음에 전달한다.
+- 표시상 연결 함수가 조리분류 ADDON 및 `kds_group_key`로 유일한 부모 POT를 찾는 구조는 있었지만, 카드 묶음과 시간묶음을 겸하는 `orderBundleKey`를 부모 연결에도 사용했다. 이 키는 기존 일행 그룹 키로 승격될 수 있어, 부모 연결의 목적(같은 테이블 + 고정 시간 구간)과 의미가 섞여 있었다.
+- `buildKdsTableOrderBundleKeys`를 추가하여 같은 물리 테이블의 최초 확정시각 고정 구간만 계산한다. 첨가 메뉴 표시 연결은 이 키를 사용하며 세션/일행 카드 키와 독립한다. 시간창 OFF, 테이블 불일치, 시간 초과, 조리분류 불일치, 대상 POT가 없거나 복수인 경우에는 임의 연결하지 않는다.
+- 연결된 첨가 메뉴는 표시용 하위 항목으로 렌더링되고 독립 행/상태 버튼 및 대기 집계에서 제외된다. 원본 `order_item_id`, 주문 ID, 세션 ID 및 각 저장된 KDS 작업 상태는 병합/갱신하지 않는다. 하나의 화면 상태 버튼은 대상 POT 작업에 연결된다. 조리중/완료 시각의 원본 이력은 보존된다.
+- `node --experimental-strip-types --test src/lib/kds-party-grouping.test.mjs`: PASS 37/37. 새 회귀 케이스는 같은 테이블·다른 세션·다른 party key·1분 내 추가 주문, 조리중 부모, 시간 초과, 단일 표시 행/버튼을 검증한다.
+- `npx.cmd tsc --noEmit`: PASS. 대상 ESLint: 오류 0, 기존 `KitchenClient.tsx` hook dependency 경고 1건. Production Build: PASS. 기존 `menu-image-storage.ts` 동적 파일 경로 경고 2건.
+- 개발 DB `TDK_POS_TEST` 읽기 전용 접속은 DB 연결 단계에서 `EACCES`로 실패했다. DB 이름·실제 저장된 ON/OFF/분 값·특정 10번 테이블 주문/세션/확정시각은 조회하지 못했다. 운영 DB에는 접속하거나 변경하지 않았다. 실제 KDS 브라우저 화면도 검증하지 못했다.
+## TDKKDS 세션 간 POT-SOLO 조리 상태 동기화 (2026-11-06)
+
+- 원인: 주문별 `materializeOrder`는 서로 다른 세션의 ADDON을 별도 SOLO 작업으로 저장한다. 기존 로직은 화면에서만 SOLO를 POT 아래 숨기고, 상태 요청은 task ID 한 건만 변경해 POT 완료 뒤 SOLO가 WAITING으로 남을 수 있었다.
+- 수정: 설정 ON, 같은 물리 테이블, 서버 확정 시각 기준 동일 묶음, 유일한 조리분류/호환 POT일 때만 연관 SOLO를 찾는다. 조리중 POT에 추가 주문이 들어오면 KDS 동기화 트랜잭션에서 SOLO도 COOKING으로 맞춘다. 시작/3초 취소, 완료 카운트다운 요청/취소/최종 확정은 연관 작업을 같은 트랜잭션에서 변경하며 각 task/order/item/session ID와 개별 previous_state는 유지한다. 동시 완료에는 같은 완료 시각을 기록한다.
+- 안전: 완료된 POT 아래의 미완료 SOLO, 완료 카운트다운 중인 POT, 시간 초과, 설정 OFF, 연결 후보가 모호한 항목은 숨기거나 자동 병합하지 않는다. 이미 DONE인 작업은 신규 상태로 초기화하지 않는다. 완료된 연결 항목은 완료 이력이 시간상 일치할 때만 화면에서 함께 숨겨 준비 목록 잔여·완료 탭 중복을 방지한다.
+- 검증: KDS model, grouping, table completion cancellation fixture 88/88 PASS. `npx.cmd tsc --noEmit` PASS. 관련 ESLint 오류 0; 기존 `kds-model.ts`의 `needsNewCookingGroup` 미사용 인자 경고 1. Production Build PASS; 기존 `menu-image-storage.ts` 동적 경로 추적 경고 2.
+- 실제 DB/화면: `TDK_POS_TEST` 읽기 전용 연결이 `EACCES`로 실패해 DB 데이터 검증은 미수행. 실제 KDS 브라우저 테스트도 미수행. 운영 DB/NAS는 조회·변경하지 않음.
+
+
+## TDKKDS cross-session stew add-on follow-up (2026-11-06)
+
+- Added an end-to-end fixture that follows the current KDS preparing pipeline: cross-session orders on one physical table, enabled bundle window, one unambiguous POT, ADDON classification, hidden SOLO row, one rendered POT control, and synchronized start/completion state transitions. Grouping test suite passes 40/40; full KDS model/grouping/completion suite passes 89/89.
+- Source trace: /api/kitchen runs order sync, reads bundle settings, then lists tasks; KitchenClient attaches eligible add-on items before party grouping, filters the linked SOLO table row, and renders the POT row. Server task updates and completion request/cancel/finalize paths resolve linked SOLO tasks and update them transactionally while retaining task/order/item/session IDs.
+- Cannot verify orders/settings/classification for tables 2, 10, or 11: read-only SELECT DATABASE() against the configured development DB failed with EACCES; no DB writes or operations DB/NAS access were attempted. Actual KDS browser rendering also remains unverified. No actual-case root cause is asserted.
+- TypeScript passes. Related ESLint: 0 errors, 2 warnings (existing hook dependency and unused parameter warnings). Production build passes; it reports two existing dynamic filesystem tracing warnings in menu-image-storage.ts.

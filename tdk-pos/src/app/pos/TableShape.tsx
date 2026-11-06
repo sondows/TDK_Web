@@ -41,14 +41,15 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
     <span className={`absolute inset-x-[7%] inset-y-[15%] z-10 flex flex-col items-center ${mainOccupied ? "" : "justify-center"} rounded-[20px] border [box-sizing:border-box] ${useSageSurface ? "" : "bg-[linear-gradient(135deg,#ffffff_0%,#f1f5f9_47%,#ffffff_100%)]"} ${posMainTable ? (occupied ? "pos-table-surface-open" : "shadow-none") : "shadow-[0_5px_11px_rgba(15,23,42,0.14)]"} ${mergeSplitSelected ? "border-[5px] border-violet-600 ring-2 ring-violet-200 shadow-violet-900/20" : mergeSplitCandidate ? "border-[3px] border-violet-500 ring-1 ring-violet-200" : selected ? (partyGroupColor ? "border-[5px]" : dataTableManagementItem || partyHighlight || thickSelection ? "border-[3px] border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-900/15" : "border-emerald-500 ring-2 ring-emerald-200 shadow-emerald-900/15") : blocked ? "border-[3px] border-red-500 ring-1 ring-red-200" : grouped ? (partyGroupColor ? "border-[3px]" : "border-[3px] border-sky-400 ring-1 ring-sky-200") : "border-slate-200"}`} style={surfaceStyle}>
       {partyGroupBadge !== null && <span aria-label={`일행 그룹 ${partyGroupBadge}`} className="absolute -right-3 -top-3 z-20 flex size-9 items-center justify-center rounded-full text-lg font-extrabold text-white shadow-md" style={{ backgroundColor: partyGroupColor ?? "#0284C7" }}>{partyGroupBadge}</span>}
       {mainOccupied ? (
-        <span className="pos-table-occupied-content">
+        <span className={`pos-table-occupied-content${prepaidAmount > 0 ? " pos-table-occupied-content-prepaid" : ""}`}>
           <strong className={`pos-table-main-number text-2xl leading-none text-slate-800 ${tableNumber.length > 1 ? "pos-table-occupied-number-multi" : ""} whitespace-nowrap font-bold`}>{tableNumber}</strong>
           {hasQrOrder && <span aria-label={`QR 주문${qrLanguageCode ? ` ${qrLanguageCode}` : ""}`} className="pos-table-qr-marker pos-table-qr-order-marker">QR</span>}
           {hasQrOrder && qrLanguageCode && <span className="pos-table-qr-marker pos-table-qr-language-marker">{qrLanguageCode}</span>}
           <span className="pos-table-info-slot pos-table-slot-received pos-table-occupied-amount">{formatMoney(amountDue)}</span>
           {prepaidAmount > 0 && <span className="pos-table-info-slot pos-table-slot-prepaid pos-table-occupied-amount text-blue-600">선불 {formatMoney(prepaidAmount)}</span>}
           <span className={`pos-table-info-slot pos-table-slot-usage pos-table-occupied-usage${prepaidAmount > 0 ? "" : " pos-table-slot-usage-second"}`}>{formatSessionElapsed(startedAt ?? new Date().toISOString(), now)} · {guestCount}명</span>
-          {customerName?.trim() && <span className="pos-table-info-slot pos-table-slot-customer pos-table-occupied-customer truncate">{customerName.trim()}</span>}
+          {customerName?.trim() && <span className={`pos-table-info-slot pos-table-slot-customer pos-table-occupied-customer truncate${prepaidAmount > 0 ? "" : " pos-table-slot-customer-after-usage"}`}>{customerName.trim()}</span>}
+          {posMainTable && <span aria-hidden="true" className={`pos-table-slot-reserved${prepaidAmount > 0 ? " pos-table-slot-reserved-after-customer" : ""}`} />}
           {relationLabels && <span className="pos-table-relation-label">{relationLabels}</span>}
         </span>
       ) : (

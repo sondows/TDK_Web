@@ -3,8 +3,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { pool } from "@/db";
+import { buildKdsOrderBundleKeys, buildKdsTableOrderBundleKeys } from "@/lib/kds-party-grouping";
 import {
-  buildKdsTaskDrafts, findKdsRecentMenuGroup, isKdsMenuEligible, needsNewCookingGroup, remainingKdsQuantity, transitionKdsState,
+  buildKdsTaskDrafts, findKdsRecentMenuGroup, isKdsMenuEligible, needsNewCookingGroup, remainingKdsQuantity, transitionKdsState, transitionKdsLinkedAddonState,
   isKdsPostCookTimerMinutes, matchesKdsTableStartBatch, type KdsPostCookTimerMinutes, type KdsMember, type KdsMenuKind, type KdsState, type KdsStateSnapshot, type KdsTaskStatus,
   canAcceptKdsQueuedUndo, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, isKdsCompletionCountdownSeconds, kdsCompletionCountdownMs, KDS_WINDOW_MS,
   canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canRecoverKdsTableCompletionCancellation,
@@ -25,7 +26,7 @@ type TaskRow = RowDataPacket & {
   previousState: string | null; changedAtMs: number | null; cancelAcknowledgedAtMs: number | null;
   sessionId: number; groupId: number | null; tableId: number | null; tableNo: string | null;
   sessionKind: "DINE_IN" | "TAKEOUT_WALK_IN" | "TAKEOUT_PHONE";
-  displayName: string | null; orderStatus: string; sessionStatus: string; orderedAtMs: number; orderNote: string | null;
+  displayName: string | null; orderStatus: string; sessionStatus: string; orderedAtMs: number; confirmedAtMs: number; orderNote: string | null;
 };
 type ItemRow = RowDataPacket & {
   itemId: number; parentItemId: number | null; itemName: string; qty: number; note: string | null;
@@ -38,6 +39,97 @@ type GroupRow = RowDataPacket & { groupId: number; startedAtMs: number };
 type MenuGroupCandidateRow = GroupRow & { lastStartAtMs: number; previousState: string | null };
 
 const number = (value: number | string | null) => value === null ? null : Number(value);
+
+type BundleTaskRow = RowDataPacket & {
+  taskId: number; orderId: number; memberItems: string; kind: "POT" | "SOLO"; compatibilityKey: string;
+  status: KdsTaskStatus; cookingGroupId: number | null; cookingStartedAtMs: number | null; cookingCompletedAtMs: number | null;
+  previousState: string | null; changedAtMs: number | null; sessionId: number; groupId: number | null; tableId: number;
+  sessionKind: "DINE_IN" | "TAKEOUT_WALK_IN" | "TAKEOUT_PHONE"; sessionStatus: string; orderStatus: string;
+  orderedAtMs: number; confirmedAtMs: number;
+};
+
+/** Resolve active cross-session add-on tasks from persisted table/time/menu facts. Caller holds a transaction. */
+async function linkedOrderBundleAddonTaskIds(connection: PoolConnection, potTaskId: number) {
+  const [enabledRows] = await connection.query<Array<RowDataPacket & { settingKey: string; settingValue: string }>>(
+    "SELECT setting_key AS settingKey,setting_value AS settingValue FROM system_settings WHERE setting_key IN ('kds_order_bundle_enabled','kds_order_bundle_minutes')",
+  );
+  const settings = new Map(enabledRows.map(row => [row.settingKey, row.settingValue]));
+  const minutes = Number(settings.get("kds_order_bundle_minutes") ?? 3);
+  if (settings.get("kds_order_bundle_enabled") !== "1" || !Number.isInteger(minutes) || minutes < 1 || minutes > 60) return [];
+
+  const [rows] = await connection.query<BundleTaskRow[]>(`
+    SELECT k.task_id AS taskId,k.order_id AS orderId,k.member_items AS memberItems,k.kind,k.compatibility_key AS compatibilityKey,
+      k.status,k.cooking_group_id AS cookingGroupId,k.cooking_started_at_ms AS cookingStartedAtMs,
+      k.cooking_completed_at_ms AS cookingCompletedAtMs,k.previous_state AS previousState,k.changed_at_ms AS changedAtMs,
+      s.session_id AS sessionId,s.group_id AS groupId,s.table_id AS tableId,s.session_kind AS sessionKind,s.status AS sessionStatus,
+      o.status AS orderStatus,ROUND(UNIX_TIMESTAMP(o.ordered_at)*1000) AS orderedAtMs,
+      ROUND(UNIX_TIMESTAMP(COALESCE(o.accepted_at,o.ordered_at))*1000) AS confirmedAtMs
+    FROM kds_tasks k INNER JOIN orders o ON o.order_id=k.order_id
+    INNER JOIN table_sessions s ON s.session_id=o.session_id
+    WHERE s.table_id=(SELECT target_session.table_id FROM kds_tasks target INNER JOIN orders target_order ON target_order.order_id=target.order_id
+      INNER JOIN table_sessions target_session ON target_session.session_id=target_order.session_id WHERE target.task_id=?)
+      AND s.session_kind='DINE_IN' AND s.status='OPEN'
+    ORDER BY confirmedAtMs,k.task_id FOR UPDATE`, [potTaskId]);
+  const pot = rows.find(row => Number(row.taskId) === potTaskId);
+  if (!pot || pot.kind !== "POT" || pot.sessionKind !== "DINE_IN" || pot.sessionStatus !== "OPEN") return [];
+  const orderBundles = buildKdsTableOrderBundleKeys(rows.map(row => ({
+    sessionId: Number(row.sessionId), tableId: Number(row.tableId), orderId: Number(row.orderId),
+    groupId: row.groupId === null ? null : Number(row.groupId), sessionKind: row.sessionKind,
+    orderedAtMs: Number(row.orderedAtMs), confirmedAtMs: Number(row.confirmedAtMs),
+  })), minutes * 60_000);
+  const potBundle = orderBundles.get(`${pot.tableId}:${pot.orderId}`);
+  if (!potBundle) return [];
+
+  const memberIds = [...new Set(rows.flatMap(row => (JSON.parse(row.memberItems) as KdsMember[]).map(member => member.itemId)))];
+  if (!memberIds.length) return [];
+  const [itemRows] = await connection.query<Array<RowDataPacket & {
+    itemId: number; itemStatus: string; orderStatus: string; sessionStatus: string; kdsKind: KdsMenuKind;
+    kdsGroupKey: string | null; kdsVisible: number; remaining: number;
+  }>>(`
+    SELECT oi.order_item_id AS itemId,oi.status AS itemStatus,o.status AS orderStatus,s.status AS sessionStatus,
+      m.kds_kind AS kdsKind,m.kds_group_key AS kdsGroupKey,m.kds_visible AS kdsVisible,
+      COALESCE(oi.actual_component_qty,oi.qty)-COALESCE(c.cancelled_qty,0) AS remaining
+    FROM order_items oi INNER JOIN menus m ON m.menu_id=oi.menu_id INNER JOIN orders o ON o.order_id=oi.order_id
+    INNER JOIN table_sessions s ON s.session_id=o.session_id
+    LEFT JOIN (SELECT order_item_id,SUM(cancelled_qty) AS cancelled_qty FROM order_item_cancellations
+      WHERE order_item_id IN (?) GROUP BY order_item_id) c ON c.order_item_id=oi.order_item_id
+    WHERE oi.order_item_id IN (?)`, [memberIds, memberIds]);
+  const configById = new Map(itemRows.map(item => [Number(item.itemId), item]));
+  const liveMember = (itemId: number) => {
+    const item = configById.get(itemId);
+    return Boolean(item && item.itemStatus !== "CANCELLED" && item.orderStatus !== "CANCELLED" &&
+      item.sessionStatus === "OPEN" && item.kdsVisible && Number(item.remaining) > 0);
+  };
+  const addonTaskIds: number[] = [];
+  for (const addon of rows) {
+    if (addon.kind !== "SOLO" || Number(addon.taskId) === potTaskId || addon.orderStatus === "CANCELLED") continue;
+    const addonBundle = orderBundles.get(`${addon.tableId}:${addon.orderId}`);
+    if (!addonBundle || addonBundle !== potBundle || Number(pot.confirmedAtMs) > Number(addon.confirmedAtMs)) continue;
+    const members = (JSON.parse(addon.memberItems) as KdsMember[]).filter(member => member.kind !== "COMPONENT");
+    if (!members.length || !members.every(member => liveMember(member.itemId) && configById.get(member.itemId)?.kdsKind === "ADDON")) continue;
+    const groupKeys = [...new Set(members.map(member => configById.get(member.itemId)?.kdsGroupKey?.trim() || null))];
+    if (groupKeys.length !== 1) continue;
+    const groupKey = groupKeys[0];
+    let candidates = rows.filter(candidate => candidate.kind === "POT" && candidate.tableId === addon.tableId &&
+      candidate.sessionStatus === "OPEN" && candidate.orderStatus !== "CANCELLED" &&
+      orderBundles.get(`${candidate.tableId}:${candidate.orderId}`) === addonBundle &&
+      Number(candidate.confirmedAtMs) <= Number(addon.confirmedAtMs) &&
+      (addon.status === "DONE"
+        ? candidate.status === "DONE" && candidate.cookingCompletedAtMs !== null &&
+          Number(candidate.cookingCompletedAtMs) >= Number(addon.confirmedAtMs) &&
+          addon.cookingCompletedAtMs !== null && Number(candidate.cookingCompletedAtMs) >= Number(addon.cookingCompletedAtMs)
+        : candidate.status !== "DONE") &&
+      (JSON.parse(candidate.memberItems) as KdsMember[]).some(member => member.kind !== "COMPONENT" && liveMember(member.itemId)));
+    if (groupKey !== null) candidates = candidates.filter(candidate => candidate.compatibilityKey === groupKey);
+    else {
+      candidates = candidates.some(candidate => candidate.compatibilityKey === "POT")
+        ? candidates.filter(candidate => candidate.compatibilityKey === "POT")
+        : new Set(candidates.map(candidate => candidate.compatibilityKey)).size === 1 ? candidates : [];
+    }
+    if (candidates.length === 1 && Number(candidates[0].taskId) === potTaskId) addonTaskIds.push(Number(addon.taskId));
+  }
+  return addonTaskIds;
+}
 
 async function materializeOrder(connection: PoolConnection, orderId: number) {
   const [items] = await connection.query<SourceRow[]>(`
@@ -97,6 +189,31 @@ export async function syncKdsOrders() {
     for (const orderId of new Set([...openOldOrders, ...newOrders].map(row => Number(row.orderId)))) {
       await materializeOrder(connection, orderId);
     }
+    // A newly materialized cross-session add-on may arrive while its unique pot
+    // is already cooking. Start that SOLO task in the same persisted state so
+    // it never remains hidden as WAITING behind the pot's single status button.
+    const [cookingPots] = await connection.query<Array<RowDataPacket & { taskId: number }>>(
+      "SELECT task_id AS taskId FROM kds_tasks WHERE kind='POT' AND status='COOKING' ORDER BY task_id FOR UPDATE",
+    );
+    for (const { taskId: rawPotId } of cookingPots) {
+      const potTaskId = Number(rawPotId);
+      const pot = await lockCompletionTask(connection, potTaskId);
+      if (!pot || pendingCompletion(parseKdsPreviousState(pot.previousState))) continue;
+      for (const addonId of await linkedOrderBundleAddonTaskIds(connection, potTaskId)) {
+        const addon = await lockCompletionTask(connection, addonId);
+        if (!addon || addon.status !== "WAITING" || pendingCompletion(parseKdsPreviousState(addon.previousState))) continue;
+        const state = completionState(addon);
+        const startedAt = Math.max(Date.now(), (state.changedAtMs ?? 0) + 1);
+        const next = transitionKdsLinkedAddonState(state, "START", startedAt);
+        if (!next || next.status !== "COOKING" || !next.previousState) continue;
+        const previous = { ...next.previousState, startSource: "MENU" as const } as KdsPreviousState;
+        const [updated] = await connection.execute<ResultSetHeader>(`UPDATE kds_tasks SET status='COOKING',cooking_group_id=?,
+          cooking_started_at_ms=?,cooking_completed_at_ms=NULL,previous_state=?,changed_at_ms=?,
+          post_cook_timer_minutes=NULL,post_cook_timer_started_at_ms=NULL WHERE task_id=? AND status='WAITING' AND changed_at_ms <=> ?`,
+        [next.cookingGroupId, next.cookingStartedAtMs, JSON.stringify(previous), next.changedAtMs, addon.taskId, addon.changedAtMs]);
+        if (updated.affectedRows !== 1) throw new KdsActionError("Linked add-on changed during order synchronization.", 409);
+      }
+    }
     let nextCursor = Number(newOrders.at(-1)?.orderId ?? cursor.lastOrderId);
     if (newOrders.length < 250) {
       const [latestRows] = await connection.query<(RowDataPacket & { latestId: number })[]>(
@@ -118,7 +235,7 @@ export async function syncKdsOrders() {
 
 export type KdsViewTask = {
   taskId: number; orderId: number; sessionId: number; tableId: number | null; groupId: number | null;
-  label: string; sessionKind: TaskRow["sessionKind"]; orderedAtMs: number;
+  label: string; sessionKind: TaskRow["sessionKind"]; orderedAtMs: number; confirmedAtMs: number; orderBundleKey: string | null;
   kind: "POT" | "SOLO"; compatibilityKey: string; status: KdsTaskStatus; completionTimer: boolean;
   postCookTimerEligible: boolean; postCookTimerMinutes: KdsPostCookTimerMinutes | null; postCookTimerStartedAtMs: number | null;
   completionRequestedAtMs: number | null; completionRequestId: string | null; completionRequestScope: "TASK" | "TABLE" | null;
@@ -129,6 +246,10 @@ export type KdsViewTask = {
   startSource: "MENU" | "STATUS" | "TABLE" | null;
   cancelled: boolean; partiallyCancelled: boolean;
   orderNote: string | null;
+  displayOnlyAsAddon?: boolean;
+  displayAddonTaskIds?: number[];
+  displayAddonItems?: Array<{ itemId: number; name: string; qty: number; kind: "ADDON"; kdsKind: "ADDON";
+    kdsGroupKey: string | null; completionTimer: boolean; note: string | null; options: Array<{ name: string; qty: number }> }>;
   items: Array<{ itemId: number; name: string; qty: number; kind: KdsMember["kind"]; kdsKind: KdsMenuKind; kdsGroupKey: string | null; completionTimer: boolean; note: string | null; options: Array<{ name: string; qty: number }> }>;
 };
 
@@ -156,7 +277,7 @@ const stateSnapshotForKds = (state: KdsState): KdsStateSnapshot => ({
   cookingStartedAtMs: state.cookingStartedAtMs, cookingCompletedAtMs: state.cookingCompletedAtMs,
 });
 
-export async function listKdsTasks(): Promise<KdsViewTask[]> {
+export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
   await finalizeExpiredKdsTaskCompletions();
   await cleanupUnusedKdsCookingGroups();
   const [tasks] = await pool.query<TaskRow[]>(`
@@ -167,6 +288,7 @@ export async function listKdsTasks(): Promise<KdsViewTask[]> {
       k.cooking_completed_at_ms AS cookingCompletedAtMs,k.previous_state AS previousState,
       k.changed_at_ms AS changedAtMs,k.cancel_acknowledged_at_ms AS cancelAcknowledgedAtMs,
       o.status AS orderStatus,o.note AS orderNote,ROUND(UNIX_TIMESTAMP(o.ordered_at)*1000) AS orderedAtMs,
+      ROUND(UNIX_TIMESTAMP(COALESCE(o.accepted_at,o.ordered_at))*1000) AS confirmedAtMs,
       s.session_id AS sessionId,s.group_id AS groupId,s.table_id AS tableId,
       s.session_kind AS sessionKind,s.display_name AS displayName,s.status AS sessionStatus,
       dt.table_no AS tableNo
@@ -178,6 +300,11 @@ export async function listKdsTasks(): Promise<KdsViewTask[]> {
     WHERE s.status='OPEN'
     ORDER BY orderedAtMs,k.task_id`);
   if (!tasks.length) return [];
+  const orderBundleKeys = bundleWindowMs > 0 ? buildKdsOrderBundleKeys(tasks.map(task => ({
+    sessionId: Number(task.sessionId), tableId: number(task.tableId), orderId: Number(task.orderId),
+    groupId: number(task.groupId), sessionKind: task.sessionKind,
+    orderedAtMs: Number(task.orderedAtMs), confirmedAtMs: Number(task.confirmedAtMs),
+  })), bundleWindowMs) : new Map<string, string>();
   const membersByTask = new Map<number, KdsMember[]>();
   const itemIds = new Set<number>();
   for (const task of tasks) {
@@ -257,7 +384,8 @@ export async function listKdsTasks(): Promise<KdsViewTask[]> {
       taskId: Number(task.taskId), orderId: Number(task.orderId), sessionId: Number(task.sessionId),
       tableId: number(task.tableId), groupId: number(task.groupId),
       label: task.sessionKind === "DINE_IN" ? String(task.tableNo ?? task.tableId ?? "?") : task.displayName ?? (task.sessionKind === "TAKEOUT_PHONE" ? "전화포장" : "방문포장"),
-      sessionKind: task.sessionKind, orderedAtMs: Number(task.orderedAtMs), kind: task.kind,
+      sessionKind: task.sessionKind, orderedAtMs: Number(task.orderedAtMs), confirmedAtMs: Number(task.confirmedAtMs),
+      orderBundleKey: orderBundleKeys.get(`${task.tableId}:${task.orderId}`) ?? null, kind: task.kind,
       compatibilityKey: task.compatibilityKey,
       status: task.status, completionTimer: Boolean(task.completionTimer),
       postCookTimerEligible: active.some(item => Boolean(itemById.get(item.itemId)?.kdsPostCookTimer)),
@@ -291,7 +419,7 @@ export class KdsActionError extends Error {
 }
 
 type LockedTask = RowDataPacket & Pick<TaskRow,
-  "taskId" | "memberItems" | "compatibilityKey" | "status" | "cookingGroupId" |
+  "taskId" | "memberItems" | "compatibilityKey" | "kind" | "status" | "cookingGroupId" |
   "cookingStartedAtMs" | "cookingCompletedAtMs" | "postCookTimerMinutes" | "postCookTimerStartedAtMs" | "previousState" | "changedAtMs" | "cancelAcknowledgedAtMs">;
 
 export async function updateKdsTask(
@@ -305,7 +433,7 @@ export async function updateKdsTask(
     await connection.beginTransaction();
     if (action === "MENU") await connection.query("SELECT mutex_id FROM kds_group_mutex WHERE mutex_id=1 FOR UPDATE");
     const [rows] = await connection.query<LockedTask[]>(`
-      SELECT task_id AS taskId,member_items AS memberItems,compatibility_key AS compatibilityKey,
+      SELECT task_id AS taskId,member_items AS memberItems,compatibility_key AS compatibilityKey,kind,
         status,cooking_group_id AS cookingGroupId,cooking_started_at_ms AS cookingStartedAtMs,
         cooking_completed_at_ms AS cookingCompletedAtMs,post_cook_timer_minutes AS postCookTimerMinutes,
         post_cook_timer_started_at_ms AS postCookTimerStartedAtMs,previous_state AS previousState,
@@ -315,6 +443,17 @@ export async function updateKdsTask(
     if (!row) throw new KdsActionError("조리 작업을 찾을 수 없습니다.", 404);
     if (row.status !== expected.status || number(row.changedAtMs) !== expected.changedAtMs) {
       throw new KdsActionError("다른 주방 화면에서 먼저 변경했습니다. 최신 상태를 확인해 주세요.");
+    }
+    const linkedAddonIds = row.kind === "POT" ? await linkedOrderBundleAddonTaskIds(connection, taskId) : [];
+    const linkedAddonRows: LockedTask[] = [];
+    for (const addonId of linkedAddonIds) {
+      const [addonRows] = await connection.query<LockedTask[]>(`SELECT task_id AS taskId,member_items AS memberItems,
+        compatibility_key AS compatibilityKey,kind,status,cooking_group_id AS cookingGroupId,
+        cooking_started_at_ms AS cookingStartedAtMs,cooking_completed_at_ms AS cookingCompletedAtMs,
+        post_cook_timer_minutes AS postCookTimerMinutes,post_cook_timer_started_at_ms AS postCookTimerStartedAtMs,
+        previous_state AS previousState,changed_at_ms AS changedAtMs,cancel_acknowledged_at_ms AS cancelAcknowledgedAtMs
+        FROM kds_tasks WHERE task_id=? FOR UPDATE`, [addonId]);
+      if (addonRows[0]) linkedAddonRows.push(addonRows[0]);
     }
     const members = JSON.parse(row.memberItems) as KdsMember[];
     const primaryIds = members.filter(member => member.kind !== "COMPONENT").map(member => member.itemId);
@@ -422,6 +561,39 @@ export async function updateKdsTask(
         next.cookingCompletedAtMs, JSON.stringify(persistedPreviousState), next.changedAtMs,
         next.status === "DONE" && row.status === "COOKING" && timerEligible ? postCookTimerMinutes ?? null : null,
         next.status === "DONE" && row.status === "COOKING" && timerEligible ? next.cookingCompletedAtMs : null, taskId]);
+    // Cross-session add-ons retain their own task/order/item IDs, but follow an
+    // unambiguous pot's state transitions in the same transaction.
+    for (const addon of linkedAddonRows) {
+      const addonState = completionState(addon);
+      if (pendingCompletion(addonState.previousState)) throw new KdsActionError("A linked add-on has a pending completion request.", 409);
+      let addonNext: KdsState | null = null;
+      if (next.status === "COOKING" && state.status === "WAITING" && addon.status === "WAITING") {
+        addonNext = transitionKdsLinkedAddonState(addonState, "START", transitionAt);
+      } else if (next.status === "WAITING" && state.status === "COOKING" && addon.status === "COOKING" &&
+        addon.changedAtMs === state.changedAtMs && addonState.previousState?.status === "WAITING" && !pendingCompletion(addonState.previousState)) {
+        addonNext = transitionKdsLinkedAddonState(addonState, "UNDO_START", transitionAt);
+      } else if (next.status === "COOKING" && state.status === "DONE" && addon.status === "DONE" &&
+        addon.changedAtMs === state.changedAtMs && addonState.previousState?.status === "COOKING") {
+        addonNext = transitionKdsLinkedAddonState(addonState, "UNDO_COMPLETE", transitionAt);
+      } else if (next.status === "DONE" && state.status === "COOKING" && addon.status === "COOKING") {
+        addonNext = transitionKdsLinkedAddonState(addonState, "COMPLETE", transitionAt);
+      }
+      if (!addonNext || addonNext.status === addon.status) continue;
+      const addonPrevious = addonNext.status === "COOKING" && addon.status === "WAITING" && addonNext.previousState
+        ? { ...addonNext.previousState, startSource: "MENU" as const } : addonNext.previousState;
+      const addonEligibility = addonNext.status === "DONE" ? await taskCookingEligibility(connection, addon.memberItems) : null;
+      if (addonEligibility?.timerEligible && !isKdsPostCookTimerMinutes(postCookTimerMinutes)) {
+        throw new KdsActionError("A cooking timer is required for the linked add-on.", 409);
+      }
+      const [addonResult] = await connection.execute<ResultSetHeader>(`UPDATE kds_tasks SET status=?,cooking_group_id=?,cooking_started_at_ms=?,cooking_completed_at_ms=?,
+        previous_state=?,changed_at_ms=?,post_cook_timer_minutes=?,post_cook_timer_started_at_ms=? WHERE task_id=? AND status=? AND changed_at_ms <=> ?`,
+      [addonNext.status, addonNext.cookingGroupId, addonNext.cookingStartedAtMs, addonNext.cookingCompletedAtMs,
+        JSON.stringify(addonPrevious), addonNext.changedAtMs,
+        addonNext.status === "DONE" && addonEligibility?.timerEligible ? postCookTimerMinutes ?? null : null,
+        addonNext.status === "DONE" && addonEligibility?.timerEligible ? addonNext.cookingCompletedAtMs : null,
+        addon.taskId, addon.status, addon.changedAtMs]);
+      if (addonResult.affectedRows !== 1) throw new KdsActionError("Linked add-on changed before state synchronization completed.", 409);
+    }
     await connection.commit();
     return { status: next.status, changedAtMs: next.changedAtMs, startedAtMs: next.cookingStartedAtMs };
   } catch (error) {
@@ -475,7 +647,8 @@ async function lockCompletionTask(connection: PoolConnection, taskId: number) {
   return rows[0] ?? null;
 }
 
-function completionState(row: CompletionLockedTask): KdsState {
+function completionState(row: Pick<CompletionLockedTask,
+  "status" | "cookingGroupId" | "cookingStartedAtMs" | "cookingCompletedAtMs" | "previousState" | "changedAtMs">): KdsState {
   return {
     status: row.status, cookingGroupId: number(row.cookingGroupId),
     cookingStartedAtMs: number(row.cookingStartedAtMs), cookingCompletedAtMs: number(row.cookingCompletedAtMs),
@@ -510,6 +683,19 @@ export async function requestKdsTaskCompletion(
     if (pendingCompletion(previous)) throw new KdsActionError("완료 요청이 이미 진행 중입니다.");
     const eligibility = await taskCookingEligibility(connection, row.memberItems);
     if (!eligibility.hasActivePrimary) throw new KdsActionError("POS에서 취소되었거나 종료된 주문입니다.");
+    const linkedAddonIds = await linkedOrderBundleAddonTaskIds(connection, taskId);
+    const linkedRows: CompletionLockedTask[] = [];
+    for (const addonId of linkedAddonIds) {
+      const addon = await lockCompletionTask(connection, addonId);
+      if (!addon || (addon.status !== "WAITING" && addon.status !== "COOKING")) {
+        throw new KdsActionError("Linked add-on task changed; refresh KDS.", 409);
+      }
+      linkedRows.push(addon);
+    }
+    const linkedStates = linkedRows.map(addon => ({ row: addon, state: completionState(addon) }));
+    if (linkedStates.some(({ state }) => pendingCompletion(state.previousState))) {
+      throw new KdsActionError("A linked add-on already has a completion request.", 409);
+    }
     const timerEligible = eligibility.timerEligible;
     if (timerEligible && !isKdsPostCookTimerMinutes(postCookTimerMinutes)) {
       throw new KdsActionError("외부 끓임 시간을 선택해 주세요.", 400);
@@ -520,6 +706,32 @@ export async function requestKdsTaskCompletion(
       completionCountdownSeconds,
     };
     await connection.execute("UPDATE kds_tasks SET previous_state=? WHERE task_id=? AND status='COOKING'", [JSON.stringify(previous), taskId]);
+    for (const { row: addon, state } of linkedStates) {
+      let cooking = state;
+      if (state.status === "WAITING") {
+        const startedAt = Math.max(now, (state.changedAtMs ?? 0) + 1);
+        cooking = transitionKdsLinkedAddonState(state, "START", startedAt) ?? state;
+        if (cooking.status !== "COOKING" || !cooking.previousState) throw new KdsActionError("Could not synchronize linked add-on state.", 409);
+        cooking.previousState = { ...cooking.previousState, startSource: "MENU" } as KdsPreviousState;
+      }
+      const addonEligibility = await taskCookingEligibility(connection, addon.memberItems);
+      if (addonEligibility.timerEligible && !isKdsPostCookTimerMinutes(postCookTimerMinutes)) {
+        throw new KdsActionError("A cooking timer is required for the linked add-on.", 409);
+      }
+      const addonPrevious = (cooking.previousState ?? {
+        status: cooking.status, cookingGroupId: cooking.cookingGroupId,
+        cookingStartedAtMs: cooking.cookingStartedAtMs, cookingCompletedAtMs: cooking.cookingCompletedAtMs,
+      }) as KdsPreviousState;
+      addonPrevious.completionRequest = {
+        requestedAtMs: now, postCookTimerMinutes: addonEligibility.timerEligible ? postCookTimerMinutes! : null,
+        completionCountdownSeconds,
+      };
+      const [addonResult] = await connection.execute<ResultSetHeader>(`UPDATE kds_tasks SET status=?,cooking_group_id=?,cooking_started_at_ms=?,cooking_completed_at_ms=?,
+        previous_state=?,changed_at_ms=? WHERE task_id=? AND status=? AND changed_at_ms <=> ?`,
+      [cooking.status, cooking.cookingGroupId, cooking.cookingStartedAtMs, cooking.cookingCompletedAtMs,
+        JSON.stringify(addonPrevious), cooking.changedAtMs, addon.taskId, addon.status, addon.changedAtMs]);
+      if (addonResult.affectedRows !== 1) throw new KdsActionError("Linked add-on changed before completion request was saved.", 409);
+    }
     await connection.commit();
     return { requestedAtMs: now, completionCountdownSeconds };
   } catch (error) {
@@ -546,8 +758,24 @@ export async function cancelKdsTaskCompletion(taskId: number, expectedRequestAtM
       await connection.commit();
       return { cancelled: false, expired: true };
     }
+    const linkedAddonIds = await linkedOrderBundleAddonTaskIds(connection, taskId);
+    const linkedRows: CompletionLockedTask[] = [];
+    for (const addonId of linkedAddonIds) {
+      const addon = await lockCompletionTask(connection, addonId);
+      if (!addon || addon.status !== "COOKING") throw new KdsActionError("Linked add-on task changed before cancellation.", 409);
+      linkedRows.push(addon);
+    }
+    const linkedPrevious = linkedRows.map(addon => ({ row: addon, previous: parseKdsPreviousState(addon.previousState) }));
+    if (linkedPrevious.some(({ previous: addonPrevious }) => pendingCompletion(addonPrevious)?.requestedAtMs !== expectedRequestAtMs)) {
+      throw new KdsActionError("Linked add-on completion request is inconsistent.", 409);
+    }
     delete previous.completionRequest;
     await connection.execute("UPDATE kds_tasks SET previous_state=? WHERE task_id=? AND status='COOKING'", [JSON.stringify(previous), taskId]);
+    for (const { row: addon, previous: addonPrevious } of linkedPrevious) {
+      if (!addonPrevious) throw new KdsActionError("Linked add-on state history is missing.", 409);
+      delete addonPrevious.completionRequest;
+      await connection.execute("UPDATE kds_tasks SET previous_state=? WHERE task_id=? AND status='COOKING'", [JSON.stringify(addonPrevious), addon.taskId]);
+    }
     await connection.commit();
     return { cancelled: true, expired: false };
   } catch (error) {
@@ -585,7 +813,21 @@ export async function finalizeKdsTaskCompletion(taskId: number, expectedRequestA
       await connection.commit();
       return false;
     }
-    const completedAt = Date.now();
+    const linkedAddonIds = await linkedOrderBundleAddonTaskIds(connection, taskId);
+    const linkedRows: CompletionLockedTask[] = [];
+    for (const addonId of linkedAddonIds) {
+      const addon = await lockCompletionTask(connection, addonId);
+      if (!addon || addon.status !== "COOKING") { await connection.commit(); return false; }
+      linkedRows.push(addon);
+    }
+    const linkedRequests = linkedRows.map(addon => ({ row: addon, previous: parseKdsPreviousState(addon.previousState), state: completionState(addon) }));
+    if (linkedRequests.some(({ previous: addonPrevious }) => {
+      const addonRequest = pendingCompletion(addonPrevious);
+      return !addonRequest || addonRequest.requestedAtMs !== request.requestedAtMs ||
+        addonRequest.completionCountdownSeconds !== request.completionCountdownSeconds;
+    })) { await connection.commit(); return false; }
+    const completedAt = Math.max(Date.now(), (number(row.changedAtMs) ?? 0) + 1,
+      ...linkedRows.map(addon => (number(addon.changedAtMs) ?? 0) + 1));
     if (!immediate && completedAt < request.requestedAtMs + kdsCompletionCountdownMs(request.completionCountdownSeconds)) {
       await connection.commit();
       return false;
@@ -611,6 +853,22 @@ export async function finalizeKdsTaskCompletion(taskId: number, expectedRequestA
         post_cook_timer_minutes=?,post_cook_timer_started_at_ms=? WHERE task_id=? AND status='COOKING'`,
     [next.cookingGroupId, next.cookingCompletedAtMs, JSON.stringify(next.previousState), next.changedAtMs,
       timerMinutes, timerEligible ? next.cookingCompletedAtMs : null, taskId]);
+    for (const { row: addon, previous: addonPrevious, state: addonState } of linkedRequests) {
+      const addonRequest = pendingCompletion(addonPrevious);
+      const addonEligibility = await taskCookingEligibility(connection, addon.memberItems);
+      if (!addonRequest || !addonEligibility.hasActivePrimary) throw new KdsActionError("Linked add-on is no longer eligible for completion.", 409);
+      if (addonEligibility.timerEligible && !isKdsPostCookTimerMinutes(addonRequest.postCookTimerMinutes)) {
+        throw new KdsActionError("Linked add-on completion timer is invalid.", 409);
+      }
+      const addonNext = transitionKdsLinkedAddonState(addonState, "COMPLETE", Math.max(completedAt, (addonState.changedAtMs ?? 0) + 1));
+      if (!addonNext || addonNext.status !== "DONE") throw new KdsActionError("Linked add-on could not be completed atomically.", 409);
+      const addonTimer = addonEligibility.timerEligible ? addonRequest.postCookTimerMinutes : null;
+      const [addonResult] = await connection.execute<ResultSetHeader>(`UPDATE kds_tasks SET status='DONE',cooking_group_id=?,cooking_completed_at_ms=?,previous_state=?,changed_at_ms=?,
+        post_cook_timer_minutes=?,post_cook_timer_started_at_ms=? WHERE task_id=? AND status='COOKING' AND changed_at_ms <=> ?`,
+      [addonNext.cookingGroupId, completedAt, JSON.stringify(addonNext.previousState), completedAt,
+        addonTimer, addonTimer !== null ? completedAt : null, addon.taskId, addon.changedAtMs]);
+      if (addonResult.affectedRows !== 1) throw new KdsActionError("Linked add-on changed before final completion committed.", 409);
+    }
     await connection.commit();
     return true;
   } catch (error) {

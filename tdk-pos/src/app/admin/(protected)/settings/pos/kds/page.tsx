@@ -2,15 +2,17 @@ import KdsArrivalSoundForm from "./KdsArrivalSoundForm";
 import KdsCookingForm from "./KdsCookingForm";
 import KdsCompletionCountdownForm from "./KdsCompletionCountdownForm";
 import KdsCompletedTimeShrinkForm from "./KdsCompletedTimeShrinkForm";
+import KdsOrderBundleForm from "./KdsOrderBundleForm";
 import { getKdsArrivalSoundSettings } from "@/lib/kds-arrival-sound-setting";
 import { getKdsCookingSettings } from "@/lib/kds-cooking-settings";
 import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 import { getKdsCompletedTimeShrinkStartMinutes } from "@/lib/kds-completed-time-shrink-setting";
+import { getKdsOrderBundleSettings } from "@/lib/kds-order-bundle-setting";
 import styles from "../../../../admin.module.css";
 
 export default async function AdminKdsSettingsPage() {
-  const [settings, cookingSettings, completionCountdownSeconds, completedTimeShrinkStartMinutes] = await Promise.all([
-    getKdsArrivalSoundSettings(), getKdsCookingSettings(), getKdsCompletionCountdownSeconds(), getKdsCompletedTimeShrinkStartMinutes(),
+  const [settings, cookingSettings, completionCountdownSeconds, completedTimeShrinkStartMinutes, orderBundleSettings] = await Promise.all([
+    getKdsArrivalSoundSettings(), getKdsCookingSettings(), getKdsCompletionCountdownSeconds(), getKdsCompletedTimeShrinkStartMinutes(), getKdsOrderBundleSettings(),
   ]);
   return <div className={styles.content}>
     <div className="max-w-xl">
@@ -22,6 +24,7 @@ export default async function AdminKdsSettingsPage() {
       <KdsCookingForm initial={cookingSettings} />
       <KdsCompletionCountdownForm initialSeconds={completionCountdownSeconds} />
       <KdsCompletedTimeShrinkForm initialMinutes={completedTimeShrinkStartMinutes} />
+      <KdsOrderBundleForm initial={orderBundleSettings} />
     </div>
   </div>;
 }

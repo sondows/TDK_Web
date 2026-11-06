@@ -21,6 +21,16 @@ export function isKdsCookingSettings(value: unknown): value is KdsCookingSetting
     settings.boilTimeOptions.every(isKdsPostCookTimerMinutes) && new Set(settings.boilTimeOptions).size === 3 &&
     isKdsPostCookTimerMinutes(settings.defaultBoilTimeMinutes) && settings.boilTimeOptions.includes(settings.defaultBoilTimeMinutes);
 }
+export type KdsOrderBundleSettings = { enabled: boolean; minutes: number };
+export const DEFAULT_KDS_ORDER_BUNDLE_SETTINGS: KdsOrderBundleSettings = { enabled: false, minutes: 3 };
+export const KDS_ORDER_BUNDLE_MINUTES_RANGE = { min: 1, max: 60 } as const;
+export function isKdsOrderBundleSettings(value: unknown): value is KdsOrderBundleSettings {
+  if (!value || typeof value !== "object") return false;
+  const settings = value as Partial<KdsOrderBundleSettings>;
+  return typeof settings.enabled === "boolean" && typeof settings.minutes === "number" &&
+    Number.isInteger(settings.minutes) && settings.minutes >= KDS_ORDER_BUNDLE_MINUTES_RANGE.min &&
+    settings.minutes <= KDS_ORDER_BUNDLE_MINUTES_RANGE.max;
+}
 export type KdsMemberKind = "POT" | "ADDON" | "SOLO" | "COMPONENT";
 export type KdsMember = { itemId: number; kind: KdsMemberKind; completionTimer?: boolean };
 
@@ -354,4 +364,21 @@ export function transitionKdsState(
     next = previous;
   }
   return next ? { ...next, previousState: snapshot(state), changedAtMs: now } : null;
+}
+
+/** Synchronize a separately persisted, display-attached add-on task with its pot action. */
+export function transitionKdsLinkedAddonState(state: KdsState, action: "START" | "UNDO_START" | "COMPLETE" | "UNDO_COMPLETE", now: number) {
+  if (action === "START" && state.status === "WAITING") {
+    return transitionKdsState(state, "MENU", now, { groupId: null, startedAtMs: now });
+  }
+  if (action === "UNDO_START" && state.status === "COOKING" && state.previousState?.status === "WAITING") {
+    return transitionKdsState(state, "MENU", now);
+  }
+  if (action === "COMPLETE" && state.status === "COOKING") {
+    return transitionKdsState(state, "TIME", now);
+  }
+  if (action === "UNDO_COMPLETE" && state.status === "DONE" && state.previousState?.status === "COOKING") {
+    return transitionKdsState(state, "TIME", now);
+  }
+  return null;
 }

@@ -19,6 +19,7 @@ function PosPinLogin() {
   const [busy, setBusy] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const pinInput = useRef<HTMLInputElement>(null);
+  const loginForm = useRef<HTMLFormElement>(null);
   const submitLock = useRef(false);
 
   useEffect(() => { pinInput.current?.focus(); }, []);
@@ -36,7 +37,12 @@ function PosPinLogin() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!auth || submitLock.current || busy || pin.length !== 6) return;
+    if (!auth || submitLock.current || busy) return;
+    if (pin.length !== 6) {
+      setMessage("PIN 번호를 확인해 주세요.");
+      pinInput.current?.focus();
+      return;
+    }
     submitLock.current = true;
     setBusy(true);
     setMessage("");
@@ -79,7 +85,7 @@ function PosPinLogin() {
         <h1 className="text-4xl font-extrabold text-blue-600">TDKON</h1>
         <p className="mt-2 text-lg font-bold text-slate-600">POS 로그인</p>
       </header>
-      <form className="space-y-4" onSubmit={event => void submit(event)}>
+      <form className="space-y-4" noValidate onSubmit={event => void submit(event)} ref={loginForm}>
         <label className="block text-sm font-bold text-slate-700">ID
           <input autoComplete="username" className="mt-2 min-h-14 w-full rounded-xl border border-slate-300 bg-slate-100 px-4"
             readOnly value={auth.loginId} /></label>
@@ -100,7 +106,7 @@ function PosPinLogin() {
       onText={value => { setPin(current => (current + value).replace(/\D/g, "").slice(0, 6)); setMessage(""); }}
       onBackspace={() => setPin(current => current.slice(0, -1))}
       onClear={() => setPin("")}
-      onConfirm={() => setKeyboardOpen(false)}
+      onConfirm={() => loginForm.current?.requestSubmit()}
       onClose={() => setKeyboardOpen(false)} />}
   </main>;
 }

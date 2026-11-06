@@ -1625,9 +1625,18 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   grid-row: 4;
   overflow: hidden;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 400;
+  color: inherit;
   line-height: 1;
 }
+.pos-table-unit-fixed .pos-table-slot-customer-after-usage { grid-row: 3; }
+.pos-table-unit-fixed .pos-table-slot-reserved {
+  grid-column: 2;
+  grid-row: 4;
+  min-width: 0;
+  min-height: 0;
+}
+.pos-table-unit-fixed .pos-table-slot-reserved-after-customer { grid-row: 5; }
 .pos-table-unit-fixed .pos-table-relation-label {
   grid-column: 1;
   grid-row: 4;
@@ -1674,6 +1683,9 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   grid-template-rows: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
   row-gap: 1px;
   padding-block: 4px;
+}
+.pos-table-unit-fixed .pos-table-occupied-content-prepaid {
+  grid-template-rows: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.6fr) minmax(0, 0.4fr);
 }
 .pos-table-unit-fixed.pos-table-fixed-size .text-2xl {
   font-size: min(39px, 17cqw, 20cqh);
