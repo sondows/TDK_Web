@@ -46,6 +46,10 @@ export type KdsDisplayItem = {
   options: Array<{ name: string; qty: number }>;
 };
 
+export function kdsCookOptionSignature(options: Array<{ name: string }>) {
+  return [...new Set(options.map(option => option.name.trim()).filter(Boolean))].sort().join("|");
+}
+
 /** Format only members already assigned to one persisted KDS task. */
 export function formatKdsTaskDisplay(kind: "POT" | "SOLO", items: KdsDisplayItem[]) {
   const primary = items.find(item => item.kind === "POT" || item.kind === "SOLO") ??
@@ -82,6 +86,7 @@ export type KdsSourceItem = {
   kdsCompletionTimer: boolean;
   printOnKitchen: boolean;
   kdsVisible: boolean;
+  cookOptionSignature?: string;
 };
 
 export function isKdsMenuEligible(item: Pick<KdsSourceItem, "kdsKind" | "kdsVisible">) {
@@ -106,17 +111,32 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
   const drafts: KdsTaskDraft[] = [];
   const potGroups = new Map<string, KdsSourceItem[]>();
   for (const pot of pots) {
-    const key = pot.kdsGroupKey?.trim() || "POT";
+    const groupKey = pot.kdsGroupKey?.trim() || "POT";
+    const key = `${groupKey}\u0000${pot.cookOptionSignature ?? ""}`;
     potGroups.set(key, [...(potGroups.get(key) ?? []), pot]);
   }
-  const potGroupKeys = [...potGroups.keys()];
-  const defaultPotGroupKey = potGroups.has("POT") ? "POT" : potGroupKeys.length === 1 ? potGroupKeys[0] : null;
-  for (const [key, group] of potGroups) {
+  const potGroupKeys = [...potGroups.entries()];
+  const defaultPotGroupKey = potGroupKeys.some(([, group]) => (group[0].kdsGroupKey?.trim() || "POT") === "POT")
+    ? "POT" : new Set(potGroupKeys.map(([, group]) => group[0].kdsGroupKey?.trim() || "POT")).size === 1
+      ? potGroupKeys[0]?.[1][0].kdsGroupKey?.trim() || "POT" : null;
+  const addonsByPot = new Map<string, KdsSourceItem[]>();
+  for (const addon of addons) {
+    const addonKey = addon.kdsGroupKey?.trim() || defaultPotGroupKey;
+    if (!addonKey) continue;
+    const candidates = potGroupKeys.filter(([, group]) => {
+      const groupKey = group[0].kdsGroupKey?.trim() || "POT";
+      return groupKey === addonKey && (addon.cookOptionSignature
+        ? group[0].cookOptionSignature === addon.cookOptionSignature
+        : true);
+    });
+    if (candidates.length !== 1) continue;
+    const [potKey] = candidates[0];
+    addonsByPot.set(potKey, [...(addonsByPot.get(potKey) ?? []), addon]);
+  }
+  for (const [potKey, group] of potGroupKeys) {
+    const key = group[0].kdsGroupKey?.trim() || "POT";
     const first = group[0];
-    const groupAddons = addons.filter(addon =>
-      addon.kdsGroupKey?.trim()
-        ? addon.kdsGroupKey.trim() === key
-        : defaultPotGroupKey === key);
+    const groupAddons = addonsByPot.get(potKey) ?? [];
     drafts.push({
       orderId,
       taskKey: `pot:${orderId}:${first.itemId}`,
@@ -337,7 +357,7 @@ const snapshot = (state: KdsState): KdsStateSnapshot => ({
 const withinWindow = (state: KdsState, now: number) =>
   state.changedAtMs !== null && now >= state.changedAtMs && now - state.changedAtMs <= KDS_WINDOW_MS;
 
-export function needsNewCookingGroup(state: KdsState, now: number) {
+export function needsNewCookingGroup(state: KdsState) {
   return state.status === "WAITING";
 }
 

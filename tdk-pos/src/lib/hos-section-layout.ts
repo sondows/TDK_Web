@@ -8,15 +8,17 @@ export type HosSectionTable = {
   isVisible: boolean;
 };
 
+export type SectionGaps = { first: number; second: number };
+
 export type HosSectionLayout = {
   dividerPositions: number[];
   verticalOffsets: Map<number, number>;
   canvasHeightPercent: number;
   extraHeightPercent: number;
   fallbackReason: null;
-  originalGaps: null;
-  currentGaps: null;
-  renderedGaps: null;
+  originalGaps: SectionGaps | null;
+  currentGaps: SectionGaps | null;
+  renderedGaps: SectionGaps | null;
 };
 
 export const HOS_DIVIDER_SETTING_KEY = "hos.table-layout-dividers";

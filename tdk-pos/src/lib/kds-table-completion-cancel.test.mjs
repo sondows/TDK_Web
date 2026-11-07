@@ -87,6 +87,56 @@ function cancellationFixture({ queryDelayMs = 0, requestAgeMs = 1000 } = {}) {
     row, calls, previous, startAtMs };
 }
 
+function multiTaskFinalizeFixture({ changedTaskId = null } = {}) {
+  const sessionId = 12;
+  const requestId = "table-pot-request";
+  const requestedAtMs = Date.now() - 5000;
+  const startedAtMs = requestedAtMs - 120_000;
+  const rows = [31, 32].map((taskId, index) => ({
+    taskId, status: "COOKING", memberItems: JSON.stringify([{ itemId: 42 + index, kind: index ? "ADDON" : "POT" }]),
+    cookingGroupId: 9, cookingStartedAtMs: startedAtMs, cookingCompletedAtMs: null,
+    changedAtMs: changedTaskId === taskId ? startedAtMs - 1 : startedAtMs,
+    previousState: JSON.stringify({ status: "COOKING", cookingGroupId: 9, cookingStartedAtMs: startedAtMs,
+      cookingCompletedAtMs: null, completionRequest: { scope: "TABLE", requestId, sessionId, requestedAtMs,
+        completionCountdownSeconds: 3, expectedStatus: "COOKING", expectedChangedAtMs: startedAtMs,
+        postCookTimerMinutes: index ? null : 5 } }),
+  }));
+  const calls = { updates: [], commits: 0, rollbacks: 0, releases: 0 };
+  const connection = {
+    async beginTransaction() {},
+    async query(sql) {
+      if (sql.includes("FROM table_sessions")) return [[{ status: "OPEN" }]];
+      if (sql.includes("FROM order_items oi")) return [[42, 43].map((itemId, index) => ({
+        itemId, parentItemId: null, timerEligible: index ? 0 : 1, kdsKind: index ? "ADDON" : "POT",
+        kdsVisible: 1, itemStatus: "OPEN", remaining: 1, orderStatus: "OPEN", sessionStatus: "OPEN",
+      }))];
+      if (sql.includes("FROM kds_tasks k INNER JOIN orders o")) return [rows.filter(row => row.status !== "DONE")];
+      return [[]];
+    },
+    async execute(sql, params) {
+      calls.updates.push({ sql, params });
+      const taskId = Number(sql.includes("SET status='DONE'") ? params[5] : params[1]);
+      const row = rows.find(item => item.taskId === taskId);
+      if (sql.includes("SET previous_state")) row.previousState = params[0];
+      if (sql.includes("SET status='DONE'")) {
+        row.status = "DONE";
+        row.cookingCompletedAtMs = params[0];
+        row.previousState = params[1];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async commit() { calls.commits++; },
+    async rollback() { calls.rollbacks++; },
+    release() { calls.releases++; },
+  };
+  const server = loadProductionModule("kds-server.ts", {
+    "server-only": {}, "@/db": { pool: { getConnection: async () => connection } },
+    "@/lib/kds-model": model,
+    "@/lib/kds-party-grouping": grouping,
+  });
+  return { finalize: () => server.finalizeKdsTableCompletion(sessionId, requestId, requestedAtMs), rows, calls };
+}
+
 test("real table CANCEL API clears pending state without completing cooking", async () => {
   const { cancel, row, calls, startAtMs } = cancellationFixture();
   const response = await cancel();
@@ -137,4 +187,24 @@ test("an uncancelled countdown reaches the real FINALIZE path once", async () =>
   assert.equal((await response.json()).completed, 1);
   assert.equal(row.status, "DONE");
   assert.equal(calls.updates.filter(call => call.sql.includes("SET status='DONE'")).length, 1);
+});
+
+test("a pot and its attached add-on finalize together in one table transaction", async () => {
+  const { finalize, rows, calls } = multiTaskFinalizeFixture();
+  assert.equal(await finalize(), 2);
+  assert.deepEqual(rows.map(row => row.status), ["DONE", "DONE"]);
+  assert.equal(rows[0].cookingCompletedAtMs, rows[1].cookingCompletedAtMs);
+  assert.equal(calls.updates.filter(call => call.sql.includes("SET status='DONE'")).length, 2);
+  assert.equal(calls.commits, 1);
+  assert.equal(calls.rollbacks, 0);
+});
+
+test("a changed member cancels the whole pot completion request without partial completion", async () => {
+  const { finalize, rows, calls } = multiTaskFinalizeFixture({ changedTaskId: 32 });
+  assert.equal(await finalize(), 0);
+  assert.deepEqual(rows.map(row => row.status), ["COOKING", "COOKING"]);
+  assert.equal(rows.every(row => JSON.parse(row.previousState).completionRequest === undefined), true);
+  assert.equal(calls.updates.some(call => call.sql.includes("SET status='DONE'")), false);
+  assert.equal(calls.commits, 1);
+  assert.equal(calls.rollbacks, 0);
 });

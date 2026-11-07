@@ -54,6 +54,44 @@ test("same-menu pot servings have no empty details line", () => {
   ]), { name: "흑돼지김치찌개", qty: 2, details: [] });
 });
 
+test("initial duplicate one-serving pots with the same cook options become two servings", () => {
+  const drafts = buildKdsTaskDrafts(90, [
+    item(1, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+    item(2, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+  ]);
+  assert.equal(drafts.length, 1);
+  assert.deepEqual(drafts[0].members.map(member => member.itemId), [1, 2]);
+  assert.deepEqual(formatKdsTaskDisplay("POT", drafts[0].members.map(() =>
+    ({ name: "PorkKimchiStew", qty: 1, kind: "POT", options: [] }))),
+  { name: "PorkKimchiStew", qty: 2, details: [] });
+});
+
+test("one two-serving pot and different stews with the same options keep pot display semantics", () => {
+  assert.deepEqual(formatKdsTaskDisplay("POT", [
+    { name: "PorkKimchiStew", qty: 2, kind: "POT", options: [] },
+  ]), { name: "PorkKimchiStew", qty: 2, details: [] });
+  const [draft] = buildKdsTaskDrafts(91, [
+    item(1, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+    item(2, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+  ]);
+  assert.equal(draft.members.length, 2);
+  assert.deepEqual(formatKdsTaskDisplay("POT", [
+    { name: "PorkKimchiStew", qty: 1, kind: "POT", options: [] },
+    { name: "TunaKimchiStew", qty: 1, kind: "POT", options: [] },
+  ]), { name: "PorkKimchiStew", qty: 1, details: ["TunaKimchiStew"] });
+});
+
+test("different cooking options split same-recipe pots and keep linked add-ons unambiguous", () => {
+  const drafts = buildKdsTaskDrafts(92, [
+    item(1, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-1" }),
+    item(2, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+    item(3, "ADDON", { kdsGroupKey: "STEW", cookOptionSignature: "spicy-2" }),
+  ]);
+  assert.equal(drafts.length, 2);
+  assert.deepEqual(drafts.map(draft => draft.members.map(member => member.itemId)), [[1], [2, 3]]);
+  assert.deepEqual(drafts.map(draft => draft.compatibilityKey), ["STEW", "STEW"]);
+});
+
 test("separate KDS tasks remain separate even when names and table match", () => {
   const one = formatKdsTaskDisplay("POT", [{ name: "흑돼지김치찌개", qty: 1, kind: "POT", options: [] }]);
   const two = formatKdsTaskDisplay("POT", [{ name: "흑돼지김치찌개", qty: 1, kind: "POT", options: [] }]);
@@ -190,7 +228,7 @@ test("start undo resets the original start time and a later start records a fres
   const undone = transitionKdsState(started, "MENU", 11000);
   assert.equal(undone.status, "WAITING");
   assert.equal(undone.cookingStartedAtMs, null);
-  assert.equal(needsNewCookingGroup(undone, 12000), true);
+  assert.equal(needsNewCookingGroup(undone), true);
   const restarted = transitionKdsState(undone, "MENU", 12000, { groupId: 9, startedAtMs: 12000 });
   assert.equal(restarted.cookingStartedAtMs, 12000);
   assert.equal(restarted.cookingGroupId, 9);

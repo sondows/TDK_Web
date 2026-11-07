@@ -164,7 +164,7 @@ body {
 /* Give KDS task content more room on narrow portrait tablets without changing landscape sizing. */
 @media (orientation: portrait) and (max-width: 900px) {
   [data-kds-display] .kds-task-row[data-session-kind="DINE_IN"] {
-    grid-template-columns: 3rem minmax(0, 1fr) 5.5rem;
+    grid-template-columns: 5.5rem minmax(0, 1fr) 5.5rem;
   }
 
   [data-kds-display] .kds-task-row[data-session-kind^="TAKEOUT"] {

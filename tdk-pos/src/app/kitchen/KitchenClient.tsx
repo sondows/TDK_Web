@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { KdsViewTask } from "@/lib/kds-server";
-import { activeKdsTableTasks, attachKdsOrderBundleAddons, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsTasksByParty, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups } from "@/lib/kds-party-grouping";
+import { activeKdsTableTasks, attachKdsOrderBundleAddons, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsKitchenTasks, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups } from "@/lib/kds-party-grouping";
 import { cancelKdsTaskCompletionRequests, canUndoKdsStatusStart, canUseKdsMenuAction, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsOrderBundleSettings, KDS_WINDOW_MS, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, type KdsCookingSettings, type KdsOrderBundleSettings } from "@/lib/kds-model";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
 import { latestKdsSpicyAlert, type KdsSpicyAlert } from "@/lib/kds-spicy-alert";
@@ -44,6 +44,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const [pendingId, setPendingId] = useState<number | null>(null);
   const [pendingTableSessionIds, setPendingTableSessionIds] = useState<Set<number>>(() => new Set());
   const [pendingTableCompletionRequestIds, setPendingTableCompletionRequestIds] = useState<Set<number>>(() => new Set());
+  const [pendingTableCompletionFinalizeIds, setPendingTableCompletionFinalizeIds] = useState<Set<number>>(() => new Set());
   const [pendingStartTaskIds, setPendingStartTaskIds] = useState<Set<number>>(() => new Set());
   const [pendingCompletionTaskIds, setPendingCompletionTaskIds] = useState<Set<number>>(() => new Set());
   const [pendingStartTableIds, setPendingStartTableIds] = useState<Set<number>>(() => new Set());
@@ -63,6 +64,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const [choiceTaskId, setChoiceTaskId] = useState<number | null>(null);
   const [boilTimeChoiceStartedAtMs, setBoilTimeChoiceStartedAtMs] = useState<number | null>(null);
   const [selectedBoilTime, setSelectedBoilTime] = useState<{ taskId: number; minutes: number } | null>(null);
+  const selectedBoilTimeRef = useRef<{ taskId: number; minutes: number } | null>(null);
   const boilTimeChoiceTimer = useRef<{ taskId: number; timer: number } | null>(null);
   const tasksRef = useRef(tasks);
   const menuActionInFlight = useRef(false);
@@ -92,6 +94,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     setChoiceTaskId(null);
     setBoilTimeChoiceStartedAtMs(null);
     setSelectedBoilTime(null);
+    selectedBoilTimeRef.current = null;
   }, []);
   const projectTasks = useCallback((ids: number[], project: (task: KdsViewTask) => Partial<KdsViewTask>) => {
     setOptimisticTasks(current => {
@@ -353,6 +356,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   }, [choiceTaskId, clearBoilTimeChoice, clearProjection, clockOffset, pendingId, projectTasks, refresh, requestPendingTaskStartUndo, router, startTaskOptimistically]);
 
   const changeStatus = useCallback(async (task: KdsViewTask, action: "STATUS" | "REQUEST_COMPLETION" | "CANCEL_COMPLETION", minutes?: number) => {
+    const relatedTaskIds = [task.taskId, ...((task.kind === "POT" && (action === "REQUEST_COMPLETION" || action === "CANCEL_COMPLETION"))
+      ? task.displayAddonTaskIds ?? [] : [])];
     if (action === "STATUS" && taskStartOperations.current.has(task.taskId)) {
       requestPendingTaskStartUndo(task.taskId, "STATUS");
       return;
@@ -370,7 +375,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     if (statusActionInFlight.current.has(task.taskId) || pendingId !== null || pendingTableSessionIds.has(task.sessionId)) return;
     if (action === "REQUEST_COMPLETION") {
       completionRequestOperations.current.set(task.taskId, { cancelRequested: false });
-      setPendingCompletionTaskIds(current => new Set(current).add(task.taskId));
+      setPendingCompletionTaskIds(current => new Set([...current, ...relatedTaskIds]));
     }
     statusActionInFlight.current.add(task.taskId);
     if (action === "REQUEST_COMPLETION" && minutes !== undefined) setSelectedBoilTime({ taskId: task.taskId, minutes });
@@ -381,11 +386,11 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     setError("");
     if (action === "STATUS") projectTasks([task.taskId], () => ({ status: "WAITING", previousStatus: "COOKING",
       startedAtMs: null, changedAtMs: Date.now() + clockOffset, startSource: null }));
-    if (action === "REQUEST_COMPLETION") projectTasks([task.taskId], () => ({
+    if (action === "REQUEST_COMPLETION") projectTasks(relatedTaskIds, () => ({
       completionRequestedAtMs: Date.now() + clockOffset, completionRequestScope: "TASK",
       completionCountdownSeconds, pendingPostCookTimerMinutes: minutes ?? null,
     }));
-    if (action === "CANCEL_COMPLETION") projectTasks([task.taskId], () => ({
+    if (action === "CANCEL_COMPLETION") projectTasks(relatedTaskIds, () => ({
       completionRequestedAtMs: null, completionRequestScope: null, completionRequestId: null,
       pendingPostCookTimerMinutes: null,
     }));
@@ -421,14 +426,14 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         const receivedAtMs = Date.now();
         setClockOffset(result.requestedAtMs - Math.round((sentAtMs + receivedAtMs) / 2));
         setNow(receivedAtMs);
-        setTasks(current => current.map(item => item.taskId === task.taskId
+        setTasks(current => current.map(item => relatedTaskIds.includes(item.taskId)
           ? { ...item, completionRequestedAtMs: result.requestedAtMs!, completionRequestScope: "TASK",
               completionCountdownSeconds: isKdsCompletionCountdownSeconds(result.completionCountdownSeconds) ? result.completionCountdownSeconds : completionCountdownSeconds,
               pendingPostCookTimerMinutes: minutes ?? null } : item));
         setChoiceTaskId(null);
         setSelectedBoilTime(null);
       } else if (action === "CANCEL_COMPLETION" && result.cancelled) {
-        setTasks(current => current.map(item => item.taskId === task.taskId
+        setTasks(current => current.map(item => relatedTaskIds.includes(item.taskId)
           ? { ...item, completionRequestedAtMs: null, completionRequestScope: null,
               pendingPostCookTimerMinutes: null } : item));
       } else if (action === "CANCEL_COMPLETION" && result.expired) {
@@ -443,20 +448,22 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       setError(message);
     } finally {
       completionRequestOperations.current.delete(task.taskId);
-      setPendingCompletionTaskIds(current => { const next = new Set(current); next.delete(task.taskId); return next; });
+      setPendingCompletionTaskIds(current => { const next = new Set(current); for (const taskId of relatedTaskIds) next.delete(taskId); return next; });
       statusActionInFlight.current.delete(task.taskId);
-      clearProjection([task.taskId]);
+      clearProjection(relatedTaskIds);
       activeMutations.current--;
       setPendingId(null);
     }
   }, [clearProjection, clockOffset, completionCountdownSeconds, pendingId, pendingTableSessionIds, projectTasks, refresh, requestPendingTaskStartUndo, router, startTaskOptimistically]);
 
-  const startBoilTimeChoice = useCallback((taskId: number, onAutoSelect: (task: KdsViewTask) => void) => {
+  const startBoilTimeChoice = useCallback((taskId: number, onAutoSelect: (task: KdsViewTask, minutes: number) => void) => {
     const current = boilTimeChoiceTimer.current;
     if (current) window.clearTimeout(current.timer);
     boilTimeChoiceTimer.current = null;
     const startedAtMs = Date.now() + clockOffset;
-    setSelectedBoilTime(null);
+    const defaultMinutes = cookingSettings.defaultBoilTimeMinutes;
+    selectedBoilTimeRef.current = { taskId, minutes: defaultMinutes };
+    setSelectedBoilTime({ taskId, minutes: defaultMinutes });
     setChoiceTaskId(taskId);
     setBoilTimeChoiceStartedAtMs(startedAtMs);
     const timer = window.setTimeout(() => {
@@ -466,11 +473,13 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       setBoilTimeChoiceStartedAtMs(null);
       const task = tasksRef.current.find(candidate => candidate.taskId === taskId);
       if (task && !task.cancelled && task.status === "COOKING" && task.completionRequestedAtMs === null) {
-        onAutoSelect(task);
+        const selectedMinutes = selectedBoilTimeRef.current?.taskId === taskId
+          ? selectedBoilTimeRef.current.minutes : defaultMinutes;
+        onAutoSelect(task, selectedMinutes);
       }
     }, completionCountdownSeconds * 1000);
     boilTimeChoiceTimer.current = { taskId, timer };
-  }, [clockOffset, completionCountdownSeconds]);
+  }, [clockOffset, completionCountdownSeconds, cookingSettings.defaultBoilTimeMinutes]);
 
   const resolveBoilTimeChoice = useCallback((taskId: number, minutes: number, onSelect: (minutes: number) => void) => {
     const active = boilTimeChoiceTimer.current;
@@ -479,6 +488,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     boilTimeChoiceTimer.current = null;
     setChoiceTaskId(null);
     setBoilTimeChoiceStartedAtMs(null);
+    selectedBoilTimeRef.current = null;
     onSelect(minutes);
   }, []);
 
@@ -510,13 +520,15 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     if (task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null) {
       void changeStatus(task, "CANCEL_COMPLETION");
     } else if (choiceTaskId === task.taskId) {
-      resolveBoilTimeChoice(task.taskId, cookingSettings.defaultBoilTimeMinutes,
+      const selectedMinutes = selectedBoilTimeRef.current?.taskId === task.taskId
+        ? selectedBoilTimeRef.current.minutes : cookingSettings.defaultBoilTimeMinutes;
+      resolveBoilTimeChoice(task.taskId, selectedMinutes,
         minutes => void changeStatus(task, "REQUEST_COMPLETION", minutes));
     } else if (task.status === "WAITING" || canUndoKdsStatusStart(task.status, task.previousStatus, task.changedAtMs, serverNow, task.startSource)) {
       void changeStatus(task, "STATUS");
     } else if (task.status === "COOKING" && task.postCookTimerEligible) {
       startBoilTimeChoice(task.taskId,
-        current => void changeStatus(current, "REQUEST_COMPLETION", cookingSettings.defaultBoilTimeMinutes));
+        (current, minutes) => void changeStatus(current, "REQUEST_COMPLETION", minutes));
     } else if (task.status === "COOKING") {
       void changeStatus(task, "REQUEST_COMPLETION");
     }
@@ -529,6 +541,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     if (timer !== undefined) window.clearTimeout(timer);
     taskCompletionTimers.current.delete(taskId);
     taskCompletionFinalizeInFlight.current.add(taskId);
+    activeMutations.current++;
+    refreshRequestId.current++;
     try {
       const response = await fetch(`/api/kitchen/tasks/${taskId}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -544,10 +558,13 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       setRefreshKey(key => key + 1);
     } finally {
       taskCompletionFinalizeInFlight.current.delete(taskId);
+      activeMutations.current--;
     }
   }, [router]);
 
   const displayedTasks = tasks.map(task => ({ ...task, ...optimisticTasks.get(task.taskId) }));
+  const bundleDisplayTasks = attachKdsOrderBundleAddons(displayedTasks,
+    orderBundleSettings.enabled ? orderBundleSettings.minutes * 60_000 : 0);
   useEffect(() => {
     const currentById = new Map(displayedTasks.map(task => [task.taskId, task]));
     for (const taskId of startUndoAnchors.current.keys()) {
@@ -650,8 +667,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   };
 
   useEffect(() => {
-    for (const task of displayedTasks) {
-      if (task.completionRequestScope !== "TASK" || task.completionRequestedAtMs === null) continue;
+    for (const task of bundleDisplayTasks) {
+      if (task.displayOnlyAsAddon || task.completionRequestScope !== "TASK" || task.completionRequestedAtMs === null) continue;
       if (taskCompletionTimers.current.has(task.taskId) || taskCompletionFinalizeInFlight.current.has(task.taskId) ||
         statusActionInFlight.current.has(task.taskId)) continue;
       const requestedAtMs = task.completionRequestedAtMs;
@@ -662,12 +679,13 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       taskCompletionTimers.current.set(task.taskId, timer);
     }
     for (const [taskId, timer] of taskCompletionTimers.current) {
-      if (!displayedTasks.some(task => task.taskId === taskId && task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null)) {
+      if (!bundleDisplayTasks.some(task => task.taskId === taskId && !task.displayOnlyAsAddon &&
+        task.completionRequestScope === "TASK" && task.completionRequestedAtMs !== null)) {
         window.clearTimeout(timer);
         taskCompletionTimers.current.delete(taskId);
       }
     }
-  }, [displayedTasks, finalizeTaskCompletion, serverNow]);
+  }, [bundleDisplayTasks, finalizeTaskCompletion, serverNow]);
 
   useEffect(() => () => {
     for (const timer of taskCompletionTimers.current.values()) window.clearTimeout(timer);
@@ -681,6 +699,9 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     if (cancelIntentUntil > 0) tableCompletionCancelIntents.current.delete(key);
     if (tableCompletionFinalizeInFlight.current.has(key)) return;
     tableCompletionFinalizeInFlight.current.add(key);
+    activeMutations.current++;
+    refreshRequestId.current++;
+    setPendingTableCompletionFinalizeIds(current => new Set(current).add(sessionId));
     try {
       const response = await fetch(`/api/kitchen/tables/${sessionId}/complete`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -688,13 +709,17 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       });
       if (response.status === 401) { router.refresh(); return; }
       const result = await response.json() as { success?: boolean; message?: string; completed?: number };
-      if (!response.ok || !result.success) throw new Error(result.message ?? "테이블 전체 완료를 확정하지 못했습니다.");
+      if (!response.ok || !result.success || result.completed === 0) {
+        throw new Error(result.message ?? "조리 작업 구성이 변경되어 완료하지 못했습니다. 화면을 갱신해 주세요.");
+      }
       setRefreshKey(value => value + 1);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "테이블 전체 완료를 확정하지 못했습니다.");
       setRefreshKey(value => value + 1);
     } finally {
       tableCompletionFinalizeInFlight.current.delete(key);
+      setPendingTableCompletionFinalizeIds(current => { const next = new Set(current); next.delete(sessionId); return next; });
+      activeMutations.current--;
     }
   }, [router]);
 
@@ -737,7 +762,14 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
 
   const advanceCookingTableTasks = useCallback(async (sessionId: number, cookingTasks: KdsViewTask[], selectedPotTasks = false, postCookTimerMinutes?: number) => {
     if (!cookingTasks.length) return false;
-    const ids = cookingTasks.map(task => task.taskId);
+    const requestTasks = new Map(cookingTasks.map(task => [task.taskId, task]));
+    for (const task of cookingTasks) for (const addonTaskId of task.displayAddonTaskIds ?? []) {
+      const addonTask = tasks.find(candidate => candidate.taskId === addonTaskId && candidate.sessionId === sessionId &&
+        candidate.status === "COOKING" && !candidate.cancelled);
+      if (addonTask) requestTasks.set(addonTask.taskId, addonTask);
+    }
+    const requestedTasks = [...requestTasks.values()];
+    const ids = requestedTasks.map(task => task.taskId);
     const operation: TableCompletionRequestOperation = { taskIds: ids, cancelRequested: false };
     tableCompletionRequestOperations.current.set(sessionId, operation);
     setPendingTableCompletionRequestIds(current => new Set(current).add(sessionId));
@@ -752,7 +784,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       tableRequest = await honorQueuedKdsTableCompletionCancel((async () => {
       const response = await fetch(`/api/kitchen/tables/${sessionId}/complete`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "REQUEST", selectedPotTasks, postCookTimerMinutes, tasks: cookingTasks.map(task => ({
+        body: JSON.stringify({ action: "REQUEST", selectedPotTasks, postCookTimerMinutes, tasks: requestedTasks.map(task => ({
           taskId: task.taskId, status: task.status, changedAtMs: task.changedAtMs,
         })) }),
       });
@@ -794,13 +826,13 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     setClockOffset(typeof result.serverNowMs === "number" ? result.serverNowMs - receivedAtMs : result.requestedAtMs - receivedAtMs);
     setNow(receivedAtMs);
     setTasks(current => current.map(task => task.sessionId === sessionId &&
-      cookingTasks.some(active => active.taskId === task.taskId)
+      ids.includes(task.taskId)
       ? { ...task, completionRequestedAtMs: result.requestedAtMs!, completionRequestId: result.requestId!,
           completionRequestScope: "TABLE", completionCountdownSeconds: isKdsCompletionCountdownSeconds(result.completionCountdownSeconds) ? result.completionCountdownSeconds : completionCountdownSeconds }
       : task));
     clearProjection(ids);
     return false;
-  }, [clearLocalTableCompletion, clearProjection, clockOffset, completionCountdownSeconds, projectTasks, router]);
+  }, [clearLocalTableCompletion, clearProjection, clockOffset, completionCountdownSeconds, projectTasks, router, tasks]);
 
   const startWaitingTableTasks = useCallback(async (sessionId: number, hasWaitingTasks: boolean, selectedTaskIds?: number[]) => {
     if (!hasWaitingTasks) return null;
@@ -985,7 +1017,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         const timer = tableCompletionTimers.current.get(key);
         if (timer !== undefined) window.clearTimeout(timer);
         tableCompletionTimers.current.delete(key);
-        const requestTaskIds = activeTasks.filter(task => task.completionRequestScope === "TABLE" &&
+        const requestTaskIds = table.tasks.filter(task => task.completionRequestScope === "TABLE" &&
           task.completionRequestId === requestTask.completionRequestId).map(task => task.taskId);
         projectTasks(requestTaskIds, () => ({ completionRequestedAtMs: null, completionRequestId: null,
           completionRequestScope: null, completionCountdownSeconds: null, pendingPostCookTimerMinutes: null }));
@@ -1021,12 +1053,12 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       setPendingTableCompletionRequestIds(current => { const next = new Set(current); next.delete(table.sessionId); return next; });
       tableStartOperations.current.delete(actionKey);
       setPendingStartTableIds(current => { const next = new Set(current); next.delete(actionKey); return next; });
-      clearProjection([...startingIds, ...undoIds, ...activeTasks.map(task => task.taskId)]);
+      clearProjection([...startingIds, ...undoIds, ...table.tasks.flatMap(task => [task.taskId, ...(task.displayAddonTaskIds ?? [])])]);
       tableActionInFlight.current.delete(actionKey);
       activeMutations.current--;
       setPendingTableSessionIds(current => { const next = new Set(current); next.delete(table.sessionId); return next; });
     }
-  }, [advanceCookingTableTasks, clearBoilTimeChoice, clearLocalTableCompletion, clearProjection, clockOffset, finalizeTableCompletion, finalizeTaskCompletion, pendingStartTableIds, pendingTableSessionIds, projectTasks, refresh, router, serverNow, startWaitingTableTasks]);
+  }, [advanceCookingTableTasks, clearBoilTimeChoice, clearLocalTableCompletion, clearProjection, clockOffset, pendingStartTableIds, pendingTableSessionIds, projectTasks, refresh, router, serverNow, startWaitingTableTasks]);
 
   const cancelPotCompletion = useCallback(async (task: KdsViewTask) => {
     if (!task.completionRequestId || task.completionRequestedAtMs === null ||
@@ -1071,10 +1103,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     }
   }, [clearLocalTableCompletion, clearProjection, pendingTableSessionIds, projectTasks, refresh, router, tasks]);
 
-  const bundleDisplayTasks = attachKdsOrderBundleAddons(displayedTasks,
-    orderBundleSettings.enabled ? orderBundleSettings.minutes * 60_000 : 0);
-  const grouped = groupKdsTasksByParty(bundleDisplayTasks,
-    orderBundleSettings.enabled ? orderBundleSettings.minutes * 60_000 : 0);
+  const grouped = groupKdsKitchenTasks(bundleDisplayTasks);
   const preparingCount = countKdsTablesByStatus(grouped, "preparing");
   const completedCount = countKdsTablesByStatus(grouped, "completed");
   const visible = section === "preparing" ? preparingKdsPartyCards(grouped) : section === "completed" ? sortKdsPartyCardsByLatestOrder(grouped) : [];
@@ -1139,6 +1168,9 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           return <section className="overflow-hidden rounded-xl border" key={party.key} style={palette.card}>
           {party.tables.map((table, tableIndex) => {
             const firstTask = table.tasks[0];
+            const physicalTableSessions = firstTask.tableId == null ? [table] : party.tables.filter(candidate =>
+              candidate.tasks.some(task => task.tableId === firstTask.tableId));
+            const isFirstPhysicalTableSession = physicalTableSessions[0] === table;
             const displayRows = groupKdsPotDisplayRows(table.tasks);
             const spicyAlert = latestKdsSpicyAlert(spicyAlerts, table.sessionId, serverNow);
             const activePotRow = displayRows.findIndex(row => row.some(member => member.kind === "POT" && member.status !== "DONE"));
@@ -1146,8 +1178,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
               : displayRows.findIndex(row => row.some(member => member.kind === "POT"));
             const tableOrderedAtMs = oldestKdsTableOrderedAtMs(table.tasks, section === "preparing");
             const tableAge = elapsedMinutes(tableOrderedAtMs, serverNow);
-            return <div className={`kds-task-row grid gap-2 p-2 ${tableIndex > 0 ? "border-t border-slate-300/70" : ""} ${firstTask.sessionKind === "DINE_IN" ? "grid-cols-[3.5rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[3.5rem_minmax(0,1fr)_7rem]" : "grid-cols-[5.75rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[5.75rem_minmax(0,1fr)_7rem]"}`} data-session-kind={firstTask.sessionKind} key={table.sessionId}>
-          <button aria-label={firstTask.sessionKind === "DINE_IN" ? `${firstTask.label}번 테이블, 주문 ${tableAge}분 전` : `${firstTask.label} 포장 주문`} className="flex h-full min-h-16 flex-col items-center justify-center rounded-lg border border-slate-300 bg-white/75 px-1 text-center disabled:cursor-wait" disabled={section === "completed" || firstTask.sessionKind !== "DINE_IN" || (pendingTableSessionIds.has(table.sessionId) && !pendingStartTableIds.has(table.sessionId) && !pendingTableCompletionRequestIds.has(table.sessionId))} onClick={() => void handleTableButton(table)} style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} type="button"><strong className={`break-all font-black leading-tight ${firstTask.sessionKind === "DINE_IN" ? "text-2xl sm:text-3xl" : "text-sm sm:text-base"}`}>{firstTask.label}</strong>{firstTask.sessionKind === "DINE_IN" && <span className="mt-1 text-xs font-semibold tabular-nums text-slate-600">{tableAge}분전</span>}</button>
+            return <div className={`kds-task-row grid gap-2 p-2 ${tableIndex > 0 ? "border-t border-slate-300/70" : ""} ${firstTask.sessionKind === "DINE_IN" ? "grid-cols-[6.3rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[7rem_minmax(0,1fr)_7rem]" : "grid-cols-[5.75rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[5.75rem_minmax(0,1fr)_7rem]"}`} data-session-kind={firstTask.sessionKind} key={table.sessionId}>
+          {isFirstPhysicalTableSession ? <button aria-label={firstTask.sessionKind === "DINE_IN" ? `${firstTask.label}번 테이블, 주문 ${tableAge}분 전` : `${firstTask.label} 포장 주문`} className="flex h-full min-h-16 w-full flex-col items-center justify-center rounded-lg border border-slate-300 bg-white/75 px-1 text-center disabled:cursor-wait" disabled={section === "completed" || firstTask.sessionKind !== "DINE_IN" || physicalTableSessions.some(session => pendingTableSessionIds.has(session.sessionId) && !pendingStartTableIds.has(session.sessionId) && !pendingTableCompletionRequestIds.has(session.sessionId))} onClick={() => { for (const session of physicalTableSessions) void handleTableButton(session); }} style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} type="button"><strong className={`${firstTask.sessionKind === "DINE_IN" ? "whitespace-nowrap text-2xl sm:text-3xl" : "break-all text-sm sm:text-base"} font-black leading-tight`}>{firstTask.label}</strong>{firstTask.sessionKind === "DINE_IN" && <span className="mt-1 text-xs font-semibold tabular-nums text-slate-600">{tableAge}분전</span>}</button> : <div aria-hidden="true" className="min-h-16" style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} />}
           {displayRows.map((row, index) => {
             const task = row[0];
             const groupedPot = row.length > 1;
@@ -1214,14 +1246,15 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
                     const selectedMinutes = selectedBoilTime?.taskId === task.taskId
                       ? selectedBoilTime.minutes : cookingSettings.defaultBoilTimeMinutes;
                     const selected = selectedMinutes === minutes;
-                    return <button aria-pressed={selected} className={`flex h-full min-h-16 items-center justify-center rounded-lg border bg-[#7C3AED] text-4xl font-extrabold text-white disabled:cursor-wait ${selected ? "border-violet-900 ring-2 ring-violet-300" : "border-violet-700"}`} disabled={pendingId !== null || pendingTableSessionIds.has(table.sessionId)} key={minutes} onClick={() => resolveBoilTimeChoice(task.taskId, minutes, selectedMinutes => {
-                      if (groupedPot) void handleTableButton({ sessionId: table.sessionId, tasks: row }, true, selectedMinutes);
-                      else void changeStatus(task, "REQUEST_COMPLETION", selectedMinutes);
-                    })} type="button">{minutes}</button>;
+                    return <button aria-pressed={selected} className={`flex h-full min-h-16 items-center justify-center rounded-lg border text-4xl font-extrabold disabled:cursor-wait ${selected ? "border-violet-900 bg-[#7C3AED] text-white ring-2 ring-violet-300" : "border-violet-200 bg-violet-100 text-violet-800"}`} disabled={pendingId !== null || pendingTableSessionIds.has(table.sessionId)} key={minutes} onClick={() => {
+                      const selection = { taskId: task.taskId, minutes };
+                      selectedBoilTimeRef.current = selection;
+                      setSelectedBoilTime(selection);
+                    }} type="button">{minutes}</button>;
                   })}
                 </div>}
               </div>
-              <button className={`flex min-h-16 flex-col items-center justify-center rounded-lg border px-1 py-1 text-sm font-bold tabular-nums disabled:cursor-default ${isInactiveCompleted ? "border-slate-200 bg-slate-50/60 text-slate-400" : isHighlightedCompleted ? "border-slate-300 bg-white/75 text-slate-800" : task.cancelled ? "border-red-300 bg-white/75 text-red-700" : "border-slate-300 bg-white/75"}`} disabled={section === "completed" || (pendingId !== null && !(pendingStartTaskIds.has(task.taskId) && task.startSource === "STATUS") && !pendingCompletionTaskIds.has(task.taskId)) || (pendingTableSessionIds.has(table.sessionId) && !(groupedPot && pendingStartTableIds.has(potActionKey))) || ((!groupedPot || tableWideCompletion) && task.completionRequestScope === "TABLE" && task.completionRequestId !== null) || (!task.cancelled && task.status === "DONE")} onClick={() => { stopCountdownFlash(groupedPot ? row.map(member => member.taskId) : [task.taskId]); if (!groupedPot) { handleStatusButton(task); return; } if (task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null) { void cancelPotCompletion(task); return; } if (choiceTaskId === task.taskId) { resolveBoilTimeChoice(task.taskId, cookingSettings.defaultBoilTimeMinutes, minutes => void handleTableButton({ sessionId: table.sessionId, tasks: row }, true, minutes)); return; } if (task.status === "COOKING" && task.postCookTimerEligible && task.completionRequestedAtMs === null && !pendingStartTableIds.has(potActionKey) && remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow, task.startSource, task.bulkStartId) === null) { const rowTaskIds = new Set(row.map(member => member.taskId)); startBoilTimeChoice(task.taskId, () => { const currentRow = tasksRef.current.filter(member => rowTaskIds.has(member.taskId)); if (currentRow.length) void handleTableButton({ sessionId: table.sessionId, tasks: currentRow }, true, cookingSettings.defaultBoilTimeMinutes); }); return; } void handleTableButton(tableWideStart ? table : { sessionId: table.sessionId, tasks: row }, !tableWideStart); }} style={{ gridColumn: 3, gridRow: index + 1,
+              <button className={`flex min-h-16 flex-col items-center justify-center rounded-lg border px-1 py-1 text-sm font-bold tabular-nums disabled:cursor-default ${isInactiveCompleted ? "border-slate-200 bg-slate-50/60 text-slate-400" : isHighlightedCompleted ? "border-slate-300 bg-white/75 text-slate-800" : task.cancelled ? "border-red-300 bg-white/75 text-red-700" : "border-slate-300 bg-white/75"}`} disabled={section === "completed" || pendingTableCompletionFinalizeIds.has(table.sessionId) || (pendingId !== null && !(pendingStartTaskIds.has(task.taskId) && task.startSource === "STATUS") && !pendingCompletionTaskIds.has(task.taskId)) || (pendingTableSessionIds.has(table.sessionId) && !(groupedPot && pendingStartTableIds.has(potActionKey))) || ((!groupedPot || tableWideCompletion) && task.completionRequestScope === "TABLE" && task.completionRequestId !== null) || (!task.cancelled && task.status === "DONE")} onClick={() => { stopCountdownFlash(groupedPot ? row.map(member => member.taskId) : [task.taskId]); if (!groupedPot) { handleStatusButton(task); return; } if (task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null) { void cancelPotCompletion(task); return; } if (choiceTaskId === task.taskId) { const selectedMinutes = selectedBoilTimeRef.current?.taskId === task.taskId ? selectedBoilTimeRef.current.minutes : cookingSettings.defaultBoilTimeMinutes; resolveBoilTimeChoice(task.taskId, selectedMinutes, minutes => void handleTableButton({ sessionId: table.sessionId, tasks: row }, true, minutes)); return; } if (task.status === "COOKING" && task.postCookTimerEligible && task.completionRequestedAtMs === null && !pendingStartTableIds.has(potActionKey) && remainingKdsStartUndoSeconds(task.status, task.previousStatus, task.changedAtMs, serverNow, task.startSource, task.bulkStartId) === null) { const rowTaskIds = new Set(row.map(member => member.taskId)); startBoilTimeChoice(task.taskId, (_currentTask, minutes) => { const currentRow = tasksRef.current.filter(member => rowTaskIds.has(member.taskId)).map(member => ({ ...member, displayAddonTaskIds: row.find(candidate => candidate.taskId === member.taskId)?.displayAddonTaskIds })); if (currentRow.length) void handleTableButton({ sessionId: table.sessionId, tasks: currentRow }, true, minutes); }); return; } void handleTableButton(tableWideStart ? table : { sessionId: table.sessionId, tasks: row }, !tableWideStart); }} style={{ gridColumn: 3, gridRow: index + 1,
                 ...(statusCountdownActive ? { backgroundColor: statusCountdownFlash ? "#C4B5FD" : "#6D28D9", borderColor: "#5B21B6", color: "#FFFFFF", textShadow: "0 1px 2px #4C1D95" } : {}) }} type="button">
                 {statusValue !== null && <span className={typeof statusValue === "number" ? `text-4xl font-extrabold leading-none ${task.status === "DONE" ? "max-w-full break-all text-center" : ""}` : ""} style={typeof statusValue === "number" ? { color: statusNumberColor, ...(isHighlightedCompleted && completedShrinkStage > 0 ? { fontSize: `${36 - completedShrinkStage * 4.8}px` } : {}) } : undefined}>{displayedStatusValue}</span>}
                 {isHighlightedCompleted && mixedCompletionTimer && <span className="max-w-full break-words text-center text-[10px] leading-tight text-slate-600">{timedMenuNames.join(", ")} 시간</span>}

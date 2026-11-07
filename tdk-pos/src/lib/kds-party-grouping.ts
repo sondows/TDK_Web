@@ -1,3 +1,6 @@
+const cookOptionSignature = (options: Array<{ name: string }>) =>
+  [...new Set(options.map(option => option.name.trim()).filter(Boolean))].sort().join("|");
+
 /** Keep table sessions independent while placing members of a party in one card. */
 export type KdsPartyTask = {
   sessionId: number;
@@ -11,6 +14,7 @@ export type KdsPartyTask = {
   status: "WAITING" | "COOKING" | "DONE";
   cancelled: boolean;
   displayOnlyAsAddon?: boolean;
+  cookSignature?: string;
   displayAddonItems?: Array<{
     itemId: number; name: string; qty: number; kind: "ADDON"; kdsKind: "ADDON";
     kdsGroupKey: string | null; completionTimer: boolean; note: string | null;
@@ -26,6 +30,8 @@ export type KdsPartyCard<T> = { key: string; tables: KdsTableGroup<T>[] };
 export function attachKdsOrderBundleAddons<T extends KdsPartyTask & {
   taskId: number; confirmedAtMs: number; completedAtMs: number | null; compatibilityKey: string;
   completionRequestedAtMs?: number | null;
+  completionRequestScope?: "TASK" | "TABLE" | null;
+  completionRequestId?: string | null;
   kind: "POT" | "SOLO";
   items: Array<{ itemId: number; name: string; qty: number; kind: string; kdsKind: string;
     kdsGroupKey: string | null; completionTimer: boolean; note: string | null; options: Array<{ name: string; qty: number }> }>;
@@ -48,7 +54,8 @@ export function attachKdsOrderBundleAddons<T extends KdsPartyTask & {
     const groupKey = groupKeys[0];
     let candidates = tasks.filter(pot => pot.kind === "POT" && !pot.cancelled && pot.tableId === addon.tableId &&
       pot.orderId !== undefined && tableOrderBundles.get(`${pot.tableId}:${pot.orderId}`) === addonBundleKey &&
-      pot.completionRequestedAtMs == null &&
+      (pot.completionRequestedAtMs == null || (addon.completionRequestedAtMs === pot.completionRequestedAtMs &&
+        addon.completionRequestScope === pot.completionRequestScope && addon.completionRequestId === pot.completionRequestId)) &&
       pot.confirmedAtMs <= addon.confirmedAtMs &&
       (addon.status === "DONE"
         ? pot.status === "DONE" && pot.completedAtMs !== null && pot.completedAtMs >= addon.confirmedAtMs &&
@@ -65,6 +72,8 @@ export function attachKdsOrderBundleAddons<T extends KdsPartyTask & {
         : new Set(candidates.map(pot => pot.compatibilityKey)).size === 1 ? candidates : [];
       candidates = defaultGroup;
     }
+    const addonSignature = cookOptionSignature(addon.items.flatMap(item => item.options).map(option => ({ name: option.name })));
+    if (addonSignature) candidates = candidates.filter(pot => pot.cookSignature === addonSignature);
     if (candidates.length !== 1) continue;
     const target = candidates[0];
     target.displayAddonItems.push(...addon.items.map(item => ({ ...item, kind: "ADDON" as const, kdsKind: "ADDON" as const })));
@@ -266,18 +275,19 @@ export function completeKdsTableOrder(
 
 /** Only tasks with the same pot recipe and identical cooking state share one control. */
 export function groupKdsPotDisplayRows<T extends {
-  sessionId: number; orderId: number; kind: "POT" | "SOLO"; sessionKind: KdsPartyTask["sessionKind"];
-  compatibilityKey: string; status: "WAITING" | "COOKING" | "DONE";
+  sessionId: number; orderId: number; orderBundleKey?: string | null; kind: "POT" | "SOLO"; sessionKind: KdsPartyTask["sessionKind"];
+  compatibilityKey: string; cookSignature?: string; status: "WAITING" | "COOKING" | "DONE";
   startedAtMs: number | null; completedAtMs: number | null; changedAtMs?: number | null; completionRequestId: string | null;
   completionRequestScope: "TASK" | "TABLE" | null; completionRequestedAtMs: number | null; cancelled: boolean;
   displayOnlyAsAddon?: boolean;
-  items: Array<{ name: string; kind: string; kdsKind?: string; kdsGroupKey?: string | null }>;
+  items: Array<{ name: string; kind: string; kdsKind?: string; kdsGroupKey?: string | null; options?: Array<{ name: string; qty: number }> }>;
 }>(tasks: T[]): T[][] {
   const rows: T[][] = [];
   const keys = new Map<string, T[]>();
   for (const task of tasks) {
     if (task.kind !== "POT" || task.sessionKind !== "DINE_IN" || task.cancelled) continue;
-    const key = [task.sessionId, task.orderId, task.compatibilityKey, task.status, task.startedAtMs, task.completedAtMs,
+    const orderBundleKey = task.orderBundleKey ?? String(task.orderId);
+    const key = [task.sessionId, orderBundleKey, task.compatibilityKey, task.cookSignature ?? "", task.status, task.changedAtMs, task.startedAtMs, task.completedAtMs,
       task.completionRequestScope, task.completionRequestId, task.completionRequestedAtMs].join(":");
     let row = keys.get(key);
     if (!row) { row = []; keys.set(key, row); rows.push(row); }
@@ -291,7 +301,11 @@ export function groupKdsPotDisplayRows<T extends {
       .map(item => item.kdsGroupKey?.trim() || null))];
     if (addonGroupKeys.length !== 1) continue;
     const addonGroupKey = addonGroupKeys[0];
-    const sameOrderPotRows = rows.filter(row => row[0].sessionId === addon.sessionId && row[0].orderId === addon.orderId);
+    const addonSignature = cookOptionSignature(addon.items
+      .filter(item => item.kind !== "COMPONENT" && item.kdsKind === "ADDON")
+      .flatMap(item => item.options ?? []).map(option => ({ name: option.name })));
+    const sameOrderPotRows = rows.filter(row => row[0].sessionId === addon.sessionId &&
+      (row[0].orderBundleKey ?? String(row[0].orderId)) === (addon.orderBundleKey ?? String(addon.orderId)));
     let candidates = addonGroupKey !== null
       ? sameOrderPotRows.filter(row => row.some(pot => pot.compatibilityKey === addonGroupKey))
       : sameOrderPotRows.filter(row => row[0].compatibilityKey === "POT");
@@ -301,6 +315,7 @@ export function groupKdsPotDisplayRows<T extends {
         if (groupKeys.size === 1) candidates = sameOrderPotRows;
       }
     }
+    if (addonSignature) candidates = candidates.filter(row => (row[0].cookSignature ?? "") === addonSignature);
     candidates = candidates.filter(row => row.some(pot => pot.status === addon.status &&
       pot.startedAtMs === addon.startedAtMs && pot.completedAtMs === addon.completedAtMs &&
       pot.changedAtMs === addon.changedAtMs &&
@@ -403,13 +418,52 @@ export function buildKdsOrderBundleKeys<T extends KdsOrderBundleSource>(tasks: T
   return result;
 }
 
-export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[], bundleWindowMs = 0): KdsPartyCard<T>[] {
-  const orderBundles = bundleWindowMs > 0 ? buildKdsOrderBundleKeys(tasks, bundleWindowMs) : new Map<string, string>();
+function groupKdsTasks<T extends KdsPartyTask>(tasks: T[], bundleWindowMs: number, groupPhysicalTables: boolean): KdsPartyCard<T>[] {
+  const orderBundles = !groupPhysicalTables && bundleWindowMs > 0
+    ? buildKdsOrderBundleKeys(tasks, bundleWindowMs) : new Map<string, string>();
+  const parentByPhysicalNode = new Map<string, string>();
+  const ensureNode = (node: string) => { if (!parentByPhysicalNode.has(node)) parentByPhysicalNode.set(node, node); };
+  const findRoot = (node: string): string => {
+    ensureNode(node);
+    const parent = parentByPhysicalNode.get(node)!;
+    if (parent === node) return node;
+    const root = findRoot(parent);
+    parentByPhysicalNode.set(node, root);
+    return root;
+  };
+  const unionNodes = (left: string, right: string) => {
+    const leftRoot = findRoot(left);
+    const rightRoot = findRoot(right);
+    if (leftRoot !== rightRoot) parentByPhysicalNode.set(rightRoot, leftRoot);
+  };
+  for (const task of groupPhysicalTables ? tasks : []) {
+    if (task.sessionKind !== "DINE_IN") continue;
+    if (task.tableId != null) ensureNode(`table:${task.tableId}`);
+    if (task.groupId !== null) ensureNode(`party:${task.groupId}`);
+    if (task.tableId != null && task.groupId !== null) unionNodes(`table:${task.tableId}`, `party:${task.groupId}`);
+  }
+  const physicalNodeKeys = new Map<string, { parties: number[]; tables: number[] }>();
+  for (const node of parentByPhysicalNode.keys()) {
+    const root = findRoot(node);
+    const component = physicalNodeKeys.get(root) ?? { parties: [], tables: [] };
+    const [kind, id] = node.split(":");
+    if (kind === "party") component.parties.push(Number(id));
+    else component.tables.push(Number(id));
+    physicalNodeKeys.set(root, component);
+  }
+  const cardKeyByPhysicalNode = new Map<string, string>();
+  for (const [root, component] of physicalNodeKeys) {
+    const key = component.parties.length ? `party:${Math.min(...component.parties)}` : `table:${Math.min(...component.tables)}`;
+    cardKeyByPhysicalNode.set(root, key);
+  }
   const cards = new Map<string, { card: KdsPartyCard<T>; tables: Map<number, KdsTableGroup<T>> }>();
   for (const task of tasks) {
-    const key = task.orderBundleKey ?? (task.sessionKind === "DINE_IN" && task.groupId !== null
-      ? `party:${task.groupId}`
-      : orderBundles.get(`${task.tableId}:${task.orderId}`) ?? `session:${task.sessionId}`);
+    const physicalNode = task.tableId != null ? `table:${task.tableId}` : task.groupId !== null ? `party:${task.groupId}` : null;
+    const key = groupPhysicalTables && task.sessionKind === "DINE_IN" && physicalNode !== null
+      ? cardKeyByPhysicalNode.get(findRoot(physicalNode)) ?? physicalNode
+      : task.orderBundleKey ?? (task.sessionKind === "DINE_IN" && task.groupId !== null
+        ? `party:${task.groupId}`
+        : orderBundles.get(`${task.tableId}:${task.orderId}`) ?? `session:${task.sessionId}`);
     let entry = cards.get(key);
     if (!entry) {
       entry = { card: { key, tables: [] }, tables: new Map() };
@@ -424,6 +478,16 @@ export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[], bundleW
     table.tasks.push(task);
   }
   return [...cards.values()].map(({ card }) => card);
+}
+
+/** Legacy party/order-bundle grouping used by POS table-order and alert surfaces. */
+export function groupKdsTasksByParty<T extends KdsPartyTask>(tasks: T[], bundleWindowMs = 0): KdsPartyCard<T>[] {
+  return groupKdsTasks(tasks, bundleWindowMs, false);
+}
+
+/** KDS display grouping: one outer card per physical table, independent of order sessions and bundle windows. */
+export function groupKdsKitchenTasks<T extends KdsPartyTask>(tasks: T[]): KdsPartyCard<T>[] {
+  return groupKdsTasks(tasks, 0, true);
 }
 
 export function preparingKdsPartyCards<T extends KdsPartyTask>(cards: KdsPartyCard<T>[]): KdsPartyCard<T>[] {

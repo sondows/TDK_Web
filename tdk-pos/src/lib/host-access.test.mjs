@@ -31,6 +31,7 @@ test("public aliases map to their actual application routes", () => {
   assert.deepEqual(externalAliasTarget("/tdkkds"), { surface: "kds", target: "/kitchen" });
   assert.deepEqual(externalAliasTarget("/tdkkds/status"), { surface: "kds", target: "/kitchen/status" });
   assert.deepEqual(externalAliasTarget("/tdkhos"), { surface: "hos", target: "/hos" });
+  assert.deepEqual(externalAliasTarget("/tdkhos/manifest.webmanifest"), { surface: "hos", target: "/hos/manifest.webmanifest" });
   assert.equal(externalAliasTarget("/tdkpos-evil"), null);
   assert.equal(internalCanonicalPath("/pos"), "/tdkpos");
   assert.equal(internalCanonicalPath("/pos/session/4"), "/tdkpos/session/4");

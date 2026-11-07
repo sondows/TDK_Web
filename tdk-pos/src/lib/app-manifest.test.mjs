@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import test from "node:test";
 import { buildAppManifest } from "./app-manifest.ts";
 import { posAppMetadata } from "./pos-app-metadata.ts";
+import { adminAppMetadata } from "./admin-app-metadata.ts";
 import { applyKdsDisplayOptions } from "./kds-manifest.ts";
 
 test("POS page metadata explicitly links its own install manifest and icons", () => {
@@ -9,6 +11,14 @@ test("POS page metadata explicitly links its own install manifest and icons", ()
   assert.equal(posAppMetadata.manifest, "/tdkpos/manifest.webmanifest");
   assert.deepEqual(posAppMetadata.icons.apple, [
     { url: "/icons/tdk-pos-180.png", sizes: "180x180", type: "image/png" },
+  ]);
+});
+
+test("ADM page explicitly links its stable install manifest and dedicated icons", () => {
+  assert.equal(adminAppMetadata.applicationName, "TDKON ADM");
+  assert.equal(adminAppMetadata.manifest, "/tdkadm/manifest.webmanifest");
+  assert.deepEqual(adminAppMetadata.icons.apple, [
+    { url: "/icons/tdk-adm-180.png", sizes: "180x180", type: "image/png" },
   ]);
 });
 
@@ -39,6 +49,23 @@ test("each installable surface has an isolated identity, start path, scope, and 
     } else {
       assert.equal(manifest.short_name, name);
       assert.equal(manifest.icons.length, 2);
+    }
+  }
+});
+
+test("ADM, HOS, KDS, and POS manifest IDs are all distinct", () => {
+  const ids = ["admin", "hos", "kds", "pos"].map(surface =>
+    buildAppManifest(surface, surface === "admin").id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("each install manifest references icon files present in public", () => {
+  for (const surface of ["admin", "hos", "kds", "pos"]) {
+    const manifest = surface === "kds"
+      ? applyKdsDisplayOptions(buildAppManifest(surface, false))
+      : buildAppManifest(surface, surface === "admin");
+    for (const icon of manifest.icons ?? []) {
+      assert.equal(existsSync(new URL(`../../public${icon.src}`, import.meta.url)), true, icon.src);
     }
   }
 });

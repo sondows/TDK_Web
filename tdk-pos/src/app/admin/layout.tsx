@@ -1,10 +1,7 @@
-import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { adminAppMetadata } from "@/lib/admin-app-metadata";
 
-export const metadata: Metadata = {
-  title: "TDKON ADM",
-  description: "TDK 매장 운영 관리센터",
-};
+export const metadata = adminAppMetadata;
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return children;
