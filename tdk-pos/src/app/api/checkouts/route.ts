@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
@@ -132,7 +133,13 @@ async function currentBill(tx: Parameters<Parameters<typeof db.transaction>[0]>[
   discounts.forEach(discount => discountBySessionId.set(discount.sessionId, (discountBySessionId.get(discount.sessionId) ?? 0) + discount.amount));
   const financials = summarizeSessionFinancials({ sessionIds: scope.sessionIds, grossBySessionId, discountBySessionId, prepaidBySessionId: new Map() });
   const balanceBySessionId = new Map(scope.sessionIds.map(sessionId => [sessionId, Math.max(0, won((grossBySessionId.get(sessionId) ?? 0) - (discountBySessionId.get(sessionId) ?? 0)))]));
-  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)), total: financials.total, balanceBySessionId };
+  const billVersion = createHash("sha256").update(JSON.stringify({
+    sessionIds: scope.sessionIds.slice().sort((a, b) => a - b),
+    items: items.map(item => [item.orderItemId, item.sessionId, item.effectiveQty, item.checkoutUnitPrice]).sort((a, b) => Number(a[0]) - Number(b[0])),
+    discounts: discounts.map(discount => [discount.sessionId, discount.label, discount.type, discount.amount]).sort((a, b) => Number(a[0]) - Number(b[0]) || String(a[1]).localeCompare(String(b[1]))),
+    total: financials.total,
+  })).digest("hex");
+  return { ...scope, items, gross, discounts, discount: won(discounts.reduce((sum, row) => sum + row.amount, 0)), total: financials.total, balanceBySessionId, billVersion };
 }
 
 async function savePaymentSessionAllocations(
@@ -291,7 +298,7 @@ export async function GET(request: Request) {
     const state = await snapshot(tableId);
     const methods = await db.select({ code: paymentMethods.methodCode, name: paymentMethods.methodName, type: paymentMethods.methodType }).from(paymentMethods).where(eq(paymentMethods.isActive, 1));
     const history = state.checkoutIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, state.checkoutIds)) : [];
-    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, checkoutIds: state.checkoutIds, settled: state.settled, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds });
+    return Response.json({ success: true, gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, billVersion: state.bill.billVersion, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, checkoutIds: state.checkoutIds, settled: state.settled, payments: history, methods, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds });
   } catch (error) { const e = error instanceof CheckoutError ? error : new CheckoutError("결제 정보를 불러올 수 없습니다.", 500); return Response.json({ success: false, message: e.message }, { status: e.status }); }
 }
 
@@ -300,7 +307,7 @@ export async function POST(request: Request) {
   try {
     const processedByStaffId = await actor();
     requestPhase = "request parsing";
-    const body = await request.json() as { tableId?: unknown; sessionId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; quantityMode?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown };
+    const body = await request.json() as { tableId?: unknown; sessionId?: unknown; action?: unknown; amount?: unknown; methodCode?: unknown; roundUnit?: unknown; otherLabel?: unknown; paymentId?: unknown; paymentMethodId?: unknown; inputValue?: unknown; quantityMode?: unknown; customerId?: unknown; prepaidOverpaymentConfirmed?: unknown; requestKey?: unknown; couponQuantity?: unknown; expectedBillVersion?: unknown };
     const tableId = body.sessionId === undefined ? Number(body.tableId) : -Number(body.sessionId);
     if (!Number.isSafeInteger(tableId) || tableId === 0 || (body.sessionId !== undefined && Number(body.sessionId) <= 0)) throw new CheckoutError("주문을 확인해 주세요.", 400);
     const action = body.action;
@@ -309,6 +316,9 @@ export async function POST(request: Request) {
         await ensureDailyOpeningCash(tx);
       requestPhase = `load bill (${String(action)})`;
       const bill = await currentBill(tx, tableId);
+      if (["PAY", "PAY_OTHER", "PAY_CUSTOMER", "COMPLETE", "ROUND"].includes(String(action)) && body.expectedBillVersion !== bill.billVersion) {
+        throw new CheckoutError("주문 내용 또는 결제 대상 금액이 변경되었습니다. 결제는 진행하지 않았습니다. 결제창을 닫고 최신 주문내역을 확인해 주세요.", 409);
+      }
       const beforeDiscount = bill.total;
       if (action === "ROUND") {
         const unit = Number(body.roundUnit);
@@ -601,7 +611,7 @@ export async function POST(request: Request) {
     const history = result.completed && "completedPayments" in result
       ? result.completedPayments
       : historyIds.length ? await db.transaction(tx => paymentStateForCheckouts(tx, historyIds)) : [];
-    return Response.json({ success: true, ...result, completedCheckoutIds, completedPayments: result.completed ? history : undefined, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds } });
+    return Response.json({ success: true, ...result, completedCheckoutIds, completedPayments: result.completed ? history : undefined, state: state && { gross: state.bill.gross, discounts: state.bill.discounts, total: state.bill.total, billVersion: state.bill.billVersion, paid: state.paid, remaining: state.remaining, prepaidCredit: state.prepaidCredit, checkoutId: state.checkoutId, payments: history, isPartyBill: state.bill.isPartyBill, tableNos: state.bill.tableNos, sessionIds: state.bill.sessionIds } });
   } catch (error) {
     if (error instanceof DailyOpeningRequiredError)
       return Response.json({ success: false, openingRequired: true, message: error.message }, { status: 428 });

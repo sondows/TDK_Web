@@ -3,21 +3,24 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RowDataPacket } from "mysql2";
 import { db, pool } from "@/db";
-import { diningTables, orderItemCancellations, orderItems, orders, paymentSessionAllocations,
+import { customers, diningTables, orderItemCancellations, orderItems, orders, paymentSessionAllocations,
   payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { calculateTableFinancials } from "@/lib/table-session-financials";
 import { parseHosTableLayout, resolveHosTableLayouts } from "@/lib/hos-table-layout";
 import { HOS_DIVIDER_SETTING_KEY, parseHosDividerPositions } from "@/lib/hos-section-layout";
 
 type QrSessionRow = RowDataPacket & { sessionId: number };
+type SessionCustomerRow = RowDataPacket & { sessionId: number; customerName: string | null; paidAt: Date; paymentId: number };
 
 export async function loadHosTables(includeHidden = false) {
   const [tableRows, sessions, merges, dividerSettings] = await Promise.all([
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, tableName: diningTables.tableName,
       capacity: diningTables.capacity }).from(diningTables).where(eq(diningTables.isActive, 1)),
     db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, personCount: tableSessions.personCount,
-      babyCount: tableSessions.babyCount, openedAt: sql<string>`DATE_FORMAT(${tableSessions.openedAt}, '%Y-%m-%dT%H:%i:%s')` })
-      .from(tableSessions).where(and(eq(tableSessions.status, "OPEN"), sql`${tableSessions.tableId} IS NOT NULL`)),
+      babyCount: tableSessions.babyCount, openedAt: sql<string>`DATE_FORMAT(${tableSessions.openedAt}, '%Y-%m-%dT%H:%i:%s')`,
+      pickupCustomerName: sql<string | null>`COALESCE(${customers.name}, ${tableSessions.pickupName})` })
+      .from(tableSessions).leftJoin(customers, eq(tableSessions.pickupCustomerId, customers.customerId))
+      .where(and(eq(tableSessions.status, "OPEN"), sql`${tableSessions.tableId} IS NOT NULL`)),
     db.select({ sourceSessionId: tableSessionMerges.sourceSessionId, destinationSessionId: tableSessionMerges.destinationSessionId,
       sourceTableId: tableSessionMerges.sourceTableId, destinationTableId: tableSessionMerges.destinationTableId })
       .from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE")),
@@ -38,6 +41,29 @@ export async function loadHosTables(includeHidden = false) {
   const layouts = resolveHosTableLayouts(tableRows.map(table => ({ ...table, tableId: Number(table.tableId) })), storedLayouts);
 
   const sessionIds = sessions.map(row => row.sessionId);
+  const customerRows: SessionCustomerRow[] = sessionIds.length
+    ? (await pool.query<SessionCustomerRow[]>(`
+        SELECT linked.sessionId,linked.customerName,linked.paidAt,linked.paymentId FROM (
+          SELECT psa.session_id AS sessionId,c.name AS customerName,p.paid_at AS paidAt,p.payment_id AS paymentId
+          FROM payments p LEFT JOIN customers c ON c.customer_id=p.customer_id
+          INNER JOIN payment_session_allocations psa ON psa.payment_id=p.payment_id
+          WHERE p.status='APPROVED' AND psa.session_id IN (?)
+          UNION ALL
+          SELECT DISTINCT o.session_id AS sessionId,c.name AS customerName,p.paid_at AS paidAt,p.payment_id AS paymentId
+          FROM payments p LEFT JOIN customers c ON c.customer_id=p.customer_id
+          INNER JOIN checkout_items ci ON ci.checkout_id=p.checkout_id
+          INNER JOIN order_items oi ON oi.order_item_id=ci.order_item_id
+          INNER JOIN orders o ON o.order_id=oi.order_id
+          WHERE p.status='APPROVED' AND o.session_id IN (?)
+            AND NOT EXISTS (SELECT 1 FROM payment_session_allocations psa WHERE psa.payment_id=p.payment_id)
+        ) linked ORDER BY linked.paidAt DESC,linked.paymentId DESC`, [sessionIds, sessionIds]))[0]
+    : [];
+  const customerNameBySessionId = new Map<number, string | null>();
+  for (const row of customerRows) {
+    if (!customerNameBySessionId.has(Number(row.sessionId))) {
+      customerNameBySessionId.set(Number(row.sessionId), row.customerName);
+    }
+  }
   const qrRows: QrSessionRow[] = sessionIds.length
     ? (await pool.query<QrSessionRow[]>(`SELECT DISTINCT qs.session_id AS sessionId
         FROM qr_orders qo
@@ -114,6 +140,8 @@ export async function loadHosTables(includeHidden = false) {
       personCount: isMergedSource ? null : session?.personCount ?? null,
       babyCount: isMergedSource ? null : session?.babyCount ?? null,
       openedAt: isMergedSource ? null : session?.openedAt ?? null,
+      customerName: isMergedSource || !session ? null
+        : session.pickupCustomerName ?? customerNameBySessionId.get(session.sessionId) ?? null,
       mergedSourceTableNos: sources.map(source => tableNoById.get(source.tableId!) ?? ""),
       relatedSessionIds: isMergedSource ? [] : [session?.sessionId, ...sources.map(source => source.sessionId)]
         .filter((id): id is number => id !== undefined),

@@ -19,6 +19,7 @@ export type HosTableCanvasRow = {
   personCount?: number | null;
   babyCount?: number | null;
   openedAt?: string | null;
+  customerName?: string | null;
   hasQrOrder?: boolean;
   hasTableToken?: boolean;
   isMergedSource: boolean;
@@ -230,13 +231,18 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
             <span aria-hidden="true" className="h-1/2 w-full" />
           </span>
           <span className="grid h-full w-[67%] min-w-0 shrink-0 grid-rows-4">
-            <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden border-b border-slate-200/90 text-right font-bold tabular-nums" style={{ fontSize: "clamp(12px, 20cqw, 16px)" }}>{occupied ? money(table.amountDue) : ""}</span>
-            <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden whitespace-nowrap border-b border-slate-200/90 text-right" style={{ fontSize: "clamp(9px, 5.8cqw, 14px)" }}>{usageDetails}</span>
-            <span className="flex min-h-0 min-w-0 items-center justify-end gap-1 overflow-hidden border-b border-slate-200/90 text-right">
-              {table.hasQrOrder && <span className={statusBadgeClass("QR")}>QR</span>}
-              {table.hasTableToken && <span className={statusBadgeClass("TI")}>TI</span>}
+            <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden border-b border-slate-200/90 text-right font-bold tabular-nums" style={{ fontSize: "clamp(15px, calc(20cqw + 3px), 19px)" }}>{occupied ? money(table.amountDue) : ""}</span>
+            <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden whitespace-nowrap border-b border-slate-200/90 text-right" style={{ fontSize: "clamp(12px, calc(5.8cqw + 3px), 17px)" }}>{usageDetails}</span>
+            <span className={`flex min-h-0 min-w-0 items-center justify-end gap-1 overflow-hidden border-b border-slate-200/90 text-right ${table.customerName?.trim() ? "truncate text-slate-600" : ""}`}
+              style={table.customerName?.trim() ? { fontSize: "clamp(12px, calc(5.8cqw + 3px), 17px)", fontWeight: 400 } : undefined}
+              title={table.customerName?.trim() || undefined}>
+              {table.customerName?.trim() || <>{table.hasQrOrder && <span className={statusBadgeClass("QR")}>QR</span>}{table.hasTableToken && <span className={statusBadgeClass("TI")}>TI</span>}</>}
             </span>
-            <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden text-right text-xs text-slate-600">{occupied ? "" : mergeLabels.join(" ")}</span>
+            <span className="flex min-h-0 min-w-0 items-center justify-end gap-1 overflow-hidden text-right text-xs text-slate-600">
+              {table.customerName?.trim()
+                ? <>{table.hasQrOrder && <span className={statusBadgeClass("QR")}>QR</span>}{table.hasTableToken && <span className={statusBadgeClass("TI")}>TI</span>}</>
+                : occupied ? "" : mergeLabels.join(" ")}
+            </span>
           </span>
         </span>}
       </button>;

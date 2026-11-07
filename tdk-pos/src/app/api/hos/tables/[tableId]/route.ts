@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { diningTables, orderItemCancellations, orderItemOptions, orderItems, orders,
+import { customers, diningTables, orderItemCancellations, orderItemOptions, orderItems, orders,
   tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentHosStaff } from "@/lib/hos-auth";
 
@@ -16,8 +16,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tab
       .where(and(eq(diningTables.tableId, tableId), eq(diningTables.isActive, 1))).limit(1);
     if (!table) return Response.json({ success: false }, { status: 404 });
     const [main] = await db.select({ sessionId: tableSessions.sessionId, groupId: tableSessions.groupId,
+      customerId: tableSessions.pickupCustomerId, customerName: customers.name,
       personCount: tableSessions.personCount, babyCount: tableSessions.babyCount, openedAt: tableSessions.openedAt })
-      .from(tableSessions).where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN"))).limit(1);
+      .from(tableSessions).leftJoin(customers, eq(customers.customerId, tableSessions.pickupCustomerId))
+      .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN"))).limit(1);
     if (!main) return Response.json({ success: true, table, session: null, orders: [] },
       { headers: { "Cache-Control": "no-store" } });
     const mergeRows = await db.select({ sourceSessionId: tableSessionMerges.sourceSessionId })
@@ -60,7 +62,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ tab
       }),
     }));
     return Response.json({ success: true, table,
-      session: { sessionId: main.sessionId, groupId: main.groupId, personCount: main.personCount,
+      session: { sessionId: main.sessionId, groupId: main.groupId, customerId: main.customerId,
+        customerName: main.customerName, personCount: main.personCount,
         babyCount: main.babyCount, openedAt: main.openedAt, relatedSessionIds: sessionIds },
       orders: responseOrders,
     }, { headers: { "Cache-Control": "no-store" } });

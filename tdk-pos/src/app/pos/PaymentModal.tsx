@@ -43,6 +43,7 @@ type State = {
   gross: number;
   discounts: Discount[];
   total: number;
+  billVersion: string;
   paid: number;
   remaining: number;
   prepaidCredit: number;
@@ -113,6 +114,7 @@ export default function PaymentModal({
   receiptPrinting: boolean;
 }) {
   const [state, setState] = useState<State | null>(null);
+  const billVersionRef = useRef<string | null>(null);
   const [orderTab, setOrderTab] = useState<"summary" | "detail">("summary");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -158,7 +160,8 @@ export default function PaymentModal({
         if (!response.ok || !result.success) {
         }
         setInitialPaymentIds(result.payments.map((payment) => payment.paymentId));
-        setState({ gross: result.gross, discounts: result.discounts, total: result.total, paid: result.paid, remaining: result.remaining, prepaidCredit: result.prepaidCredit ?? 0, checkoutId: result.checkoutId, payments: result.payments, isPartyBill: result.isPartyBill, tableNos: result.tableNos, sessionIds: result.sessionIds });
+        billVersionRef.current = result.billVersion;
+        setState({ gross: result.gross, discounts: result.discounts, total: result.total, billVersion: result.billVersion, paid: result.paid, remaining: result.remaining, prepaidCredit: result.prepaidCredit ?? 0, checkoutId: result.checkoutId, payments: result.payments, isPartyBill: result.isPartyBill, tableNos: result.tableNos, sessionIds: result.sessionIds });
         if (result.settled) {
           const checkoutIds = result.checkoutIds ?? [];
           setCompletedCheckoutIds(checkoutIds);
@@ -212,7 +215,7 @@ export default function PaymentModal({
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), ...body }),
+        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), ...body, expectedBillVersion: billVersionRef.current }),
       });
       const result = await readJsonResponse<{
         success?: boolean;
@@ -305,6 +308,7 @@ export default function PaymentModal({
         return { ok: true };
       }
       if (result.state) {
+        billVersionRef.current = result.state.billVersion;
         setState(result.state);
         setStagedCustomerPayment(current => current && current.amount > result.state!.remaining ? null : current);
       }
@@ -413,7 +417,7 @@ export default function PaymentModal({
       const response = await fetch("/api/checkouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "COMPLETE" }),
+        body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "COMPLETE", expectedBillVersion: state.billVersion }),
       });
       const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean };
       if (response.status === 428 && result.openingRequired) {
@@ -488,6 +492,7 @@ export default function PaymentModal({
         return;
       }
       setState(result.state);
+      billVersionRef.current = result.state.billVersion;
       if (result.state.remaining > 0) clearCompletionCountdown();
       else {
         setLastPaymentAutoCompleteEnabled(result.state.payments.at(-1)?.autoCompleteEnabled !== false);
@@ -520,6 +525,7 @@ export default function PaymentModal({
         const result = await response.json() as { success?: boolean; message?: string; state?: State };
         if (!response.ok || !result.success || !result.state) throw new Error(result.message ?? "결제를 초기화할 수 없습니다.");
         refreshedState = result.state;
+        billVersionRef.current = result.state.billVersion;
         setState(refreshedState);
       }
       setStagedCustomerPayment(null);
@@ -538,6 +544,7 @@ export default function PaymentModal({
         const response = await fetch(sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`);
         const refreshed = await response.json() as { success?: boolean } & State;
         if (response.ok && refreshed.success) {
+          billVersionRef.current = refreshed.billVersion;
           setState(refreshed);
           if (refreshed.remaining > 0) clearCompletionCountdown();
         }

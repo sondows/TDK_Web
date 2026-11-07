@@ -6,12 +6,14 @@ import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { clampHosRemainingQuantity, getHosCancellationQuantity } from "@/lib/hos-order-quantity";
 import { getHosMenuCategoryAtTop } from "@/lib/hos-menu-scroll";
 import { menuCategoryDisplayName } from "@/lib/menu-category-display";
+import { formatTradeBalance, tradeDescription, tradeTypeLabel, type CustomerTradeDetail, type CustomerTradeDetailResponse,
+  type CustomerTradeResponse, type CustomerTradeRow } from "@/lib/customer-trade";
 import HosTableCanvas from "./HosTableCanvas";
 
 type TableRow = {
   tableId: number; tableNo: string; tableName: string | null; positionX: number; positionY: number;
   layoutWidth: number; layoutHeight: number; isVisible: boolean; sessionId: number | null;
-  amountDue: number; personCount?: number | null; babyCount?: number | null; openedAt?: string | null; hasQrOrder?: boolean; hasTableToken?: boolean; mergedSourceTableNos: string[];
+  amountDue: number; personCount?: number | null; babyCount?: number | null; openedAt?: string | null; customerName?: string | null; hasQrOrder?: boolean; hasTableToken?: boolean; mergedSourceTableNos: string[];
   isMergedSource: boolean; mergedIntoTableNo: string | null;
 };
 type OrderItem = {
@@ -21,9 +23,11 @@ type OrderItem = {
 };
 type TableDetail = {
   table: { tableId: number; tableNo: string; tableName: string | null };
-  session: { sessionId: number; relatedSessionIds: number[] } | null;
+  session: { sessionId: number; relatedSessionIds: number[]; customerId: number | null; customerName: string | null } | null;
   orders: Array<{ orderId: number; status: string; orderedAt: string; totalAmount: string; items: OrderItem[] }>;
 };
+type HosCustomer = { customerId: number; name: string; isPaymentManaged: boolean; createdAt: string; tradeBalance?: number };
+type TradePeriod = "all" | "90" | "30" | "month";
 type Menu = { menuId: number; categoryId: number | null; name: string; price: string; categoryName: string | null };
 type Modifier = { menuId: number; modifierGroupId: number; groupName: string; choiceDefaultOptionId: number | null;
   modifierOptionId: number; optionName: string; priceDelta: string; optionSortOrder: number };
@@ -33,6 +37,16 @@ type DraftItem = { menuId: number; name: string; qty: number; options: Array<{ m
 type PendingCancel = { orderItemId: number; keepQty: number };
 
 const money = (amount: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(amount);
+function koreaToday() {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+function shiftDate(date: string, days: number) {
+  const result = new Date(`${date}T00:00:00Z`);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result.toISOString().slice(0, 10);
+}
 async function readJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null) as T | null;
   if (!response.ok || !body) {
@@ -48,7 +62,17 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [dividerPositions, setDividerPositions] = useState<number[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [detail, setDetail] = useState<TableDetail | null>(null);
-  const [screen, setScreen] = useState<"tables" | "detail" | "menu">("tables");
+  const [screen, setScreen] = useState<"tables" | "detail" | "menu" | "customer" | "balance" | "tradeDetail">("tables");
+  const [hosCustomers, setHosCustomers] = useState<HosCustomer[]>([]);
+  const [customersLoadedKey, setCustomersLoadedKey] = useState("");
+  const [customerError, setCustomerError] = useState("");
+  const [balanceView, setBalanceView] = useState(false);
+  const [managedCustomersOnly, setManagedCustomersOnly] = useState(true);
+  const [balanceCustomer, setBalanceCustomer] = useState<{ customerId: number; name: string } | null>(null);
+  const [tradePeriod, setTradePeriod] = useState<TradePeriod>("month");
+  const [tradeDataState, setTradeDataState] = useState<{ key: string; data: CustomerTradeResponse } | null>(null);
+  const [selectedTrade, setSelectedTrade] = useState<CustomerTradeRow | null>(null);
+  const [tradeDetailState, setTradeDetailState] = useState<{ key: string; detail: CustomerTradeDetail } | null>(null);
   const [draft, setDraft] = useState<DraftItem[]>([]);
   const [cancellations, setCancellations] = useState<PendingCancel[]>([]);
   const [pendingTableId, setPendingTableId] = useState<number | null>(null);
@@ -66,16 +90,31 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [refreshing, setRefreshing] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
+  const [logoutMenuOpen, setLogoutMenuOpen] = useState(false);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const [exitMessage, setExitMessage] = useState("");
   const sendLock = useRef(false);
   const tableRequestRef = useRef<Promise<void> | null>(null);
+  const detailRequestVersionRef = useRef(0);
+  const activeDetailTableIdRef = useRef<number | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
   const tableScreenRef = useRef<HTMLElement | null>(null);
+  const logoutMenuRef = useRef<HTMLDivElement | null>(null);
+  const logoutMenuHistoryRef = useRef(false);
   const menuTabsRef = useRef<HTMLDivElement | null>(null);
   const menuListRef = useRef<HTMLDivElement | null>(null);
   const menuSectionRefs = useRef(new Map<number, HTMLElement>());
   const menuTabRefs = useRef(new Map<number | null, HTMLButtonElement>());
   const programmaticMenuScrollRef = useRef(false);
   const menuScrollReleaseTimerRef = useRef<number | null>(null);
+  const closeLogoutMenu = useCallback(() => {
+    if (!logoutMenuOpen) return;
+    setLogoutMenuOpen(false);
+    if (logoutMenuHistoryRef.current) {
+      logoutMenuHistoryRef.current = false;
+      window.history.back();
+    }
+  }, [logoutMenuOpen]);
 
   const loadTables = useCallback((manual = false) => {
     if (manual) setManualRefreshing(true);
@@ -108,6 +147,31 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       window.clearInterval(timer);
     };
   }, [loadTables, screen]);
+
+  useEffect(() => {
+    if (!logoutMenuOpen) return;
+    window.history.pushState({ ...(window.history.state ?? {}), hosLogoutMenu: true }, "", window.location.href);
+    logoutMenuHistoryRef.current = true;
+    const onPopState = () => {
+      if (!logoutMenuHistoryRef.current) return;
+      logoutMenuHistoryRef.current = false;
+      setLogoutMenuOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!logoutMenuRef.current?.contains(event.target as Node)) closeLogoutMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeLogoutMenu();
+    };
+    window.addEventListener("popstate", onPopState);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [logoutMenuOpen, closeLogoutMenu]);
 
   useEffect(() => {
     if (screen !== "tables") return;
@@ -195,13 +259,30 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, []);
 
   const refreshDetail = useCallback(async (tableId: number) => {
+    if (activeDetailTableIdRef.current !== tableId) return;
+    const requestVersion = ++detailRequestVersionRef.current;
     try {
       const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
+      if (requestVersion !== detailRequestVersionRef.current || activeDetailTableIdRef.current !== tableId ||
+        response.table.tableId !== tableId) return;
       setDetail(response);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "주문 내역을 새로 고치지 못했습니다."); }
+    } catch (cause) {
+      if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId) {
+        setError(cause instanceof Error ? cause.message : "주문 내역을 새로 고치지 못했습니다.");
+      }
+    }
   }, []);
 
   const activeTableId = detail?.table.tableId ?? null;
+  const activeCustomerId = detail?.session?.customerId ?? null;
+  const activeCustomerName = detail?.session?.customerName ?? null;
+  const activeCustomer = activeCustomerId && activeCustomerName
+    ? { customerId: activeCustomerId, name: activeCustomerName } : null;
+  const customerLoading = customersLoadedKey !== (balanceView ? "balance" : "plain") && !customerError;
+  const balanceCustomerId = balanceCustomer?.customerId ?? null;
+  const tradeData = tradeDataState?.key === `${balanceCustomerId}:${tradePeriod}` ? tradeDataState.data : null;
+  const tradeLoading = screen === "balance" && !tradeData && !customerError;
+  const tradeDetail = tradeDetailState?.key === `${balanceCustomerId}:${selectedTrade?.ledgerId}` ? tradeDetailState.detail : null;
   useEffect(() => {
     if (screen !== "detail" || activeTableId === null) return;
     const tableId = activeTableId;
@@ -209,12 +290,62 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     return () => window.clearInterval(timer);
   }, [activeTableId, refreshDetail, screen]);
 
+  useEffect(() => {
+    if (screen !== "customer") return;
+    const controller = new AbortController();
+    const key = balanceView ? "balance" : "plain";
+    void fetch(`/api/hos/customers${balanceView ? "?includeBalance=1" : ""}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const result = await response.json() as { success?: boolean; customers?: HosCustomer[]; message?: string };
+        if (!response.ok || !result.success || !Array.isArray(result.customers)) throw new Error(result.message || "고객 목록을 불러오지 못했습니다.");
+        if (!controller.signal.aborted) { setHosCustomers(result.customers); setCustomersLoadedKey(key); setCustomerError(""); }
+      })
+      .catch(cause => { if (!controller.signal.aborted) setCustomerError(cause instanceof Error ? cause.message : "고객 목록을 불러오지 못했습니다."); })
+      .finally(() => undefined);
+    return () => controller.abort();
+  }, [balanceView, screen]);
+
+  useEffect(() => {
+    if (screen !== "balance" || !balanceCustomerId) return;
+    const controller = new AbortController();
+    const today = koreaToday();
+    const range = tradePeriod === "all" ? null : tradePeriod === "month"
+      ? { startDate: `${today.slice(0, 7)}-01`, endDate: today }
+      : { startDate: shiftDate(today, tradePeriod === "90" ? -89 : -29), endDate: today };
+    const query = new URLSearchParams();
+    if (range) { query.set("startDate", range.startDate); query.set("endDate", range.endDate); }
+    void fetch(`/api/customers/${balanceCustomerId}/ledger?${query}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const result = await response.json() as CustomerTradeResponse;
+        if (!response.ok || !result.success) throw new Error((result as CustomerTradeResponse & { message?: string }).message || "잔액 내역을 불러오지 못했습니다.");
+        if (!controller.signal.aborted) { setTradeDataState({ key: `${balanceCustomerId}:${tradePeriod}`, data: result }); setCustomerError(""); }
+      })
+      .catch(cause => { if (!controller.signal.aborted) setCustomerError(cause instanceof Error ? cause.message : "잔액 내역을 불러오지 못했습니다."); })
+      .finally(() => undefined);
+    return () => controller.abort();
+  }, [balanceCustomerId, screen, tradePeriod]);
+
+  useEffect(() => {
+    if (screen !== "tradeDetail" || !balanceCustomerId || !selectedTrade) return;
+    const controller = new AbortController();
+    void fetch(`/api/customers/${balanceCustomerId}/ledger/${selectedTrade.ledgerId}`, { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        const result = await response.json() as CustomerTradeDetailResponse;
+        if (!response.ok || !result.success || !result.detail) throw new Error(result.message || "거래 상세를 불러오지 못했습니다.");
+        if (!controller.signal.aborted) { setTradeDetailState({ key: `${balanceCustomerId}:${selectedTrade.ledgerId}`, detail: result.detail }); setCustomerError(""); }
+      })
+      .catch(cause => { if (!controller.signal.aborted) setCustomerError(cause instanceof Error ? cause.message : "거래 상세를 불러오지 못했습니다."); });
+    return () => controller.abort();
+  }, [balanceCustomerId, screen, selectedTrade]);
+
   async function openTable(table: TableRow) {
     const hasPendingChanges = draft.length > 0 || cancellations.length > 0;
     if (hasPendingChanges && pendingTableId !== table.tableId) {
       setError("미전송 주문 변경사항이 있습니다. 같은 테이블로 돌아가 주문완료하거나 취소해 주세요.");
       return;
     }
+    const requestVersion = ++detailRequestVersionRef.current;
+    activeDetailTableIdRef.current = table.tableId;
     setBusy(true); setError("");
     if (pendingTableId !== table.tableId) {
       setDraft([]); setCancellations([]); setCancelMode(false); setPendingTableId(null);
@@ -222,9 +353,15 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     setCancelReauthRequired(false); setCancelPin("");
     try {
       const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${table.tableId}`, { cache: "no-store" }));
+      if (requestVersion !== detailRequestVersionRef.current || activeDetailTableIdRef.current !== table.tableId ||
+        response.table.tableId !== table.tableId) return;
       setDetail(response); setScreen("detail");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "주문 내역을 불러오지 못했습니다."); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === table.tableId) {
+        setError(cause instanceof Error ? cause.message : "주문 내역을 불러오지 못했습니다.");
+      }
+    }
+    finally { if (requestVersion === detailRequestVersionRef.current) setBusy(false); }
   }
 
   async function openMenuPicker() {
@@ -326,7 +463,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           }));
           sessionId = created.sessionId;
           setDetail(current => current ? { ...current,
-            session: { sessionId: created.sessionId, relatedSessionIds: [created.sessionId] } } : current);
+            session: { sessionId: created.sessionId, relatedSessionIds: [created.sessionId], customerId: null, customerName: null } } : current);
         }
         await readJson(await fetch(`/api/table-sessions/${sessionId}/orders`, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -336,6 +473,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       }
       if (!submittingCancellations) setDraft([]);
       setCancellations([]); setPendingTableId(submittingCancellations && draft.length ? detail.table.tableId : null);
+      detailRequestVersionRef.current += 1;
+      activeDetailTableIdRef.current = null;
       setDetail(null); setScreen("tables");
       setCancelMode(false); setCancelPin(""); setCancelReauthRequired(false);
       await loadTables();
@@ -362,13 +501,35 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       setCancelMode(false);
       if (draft.length) return;
     }
+    detailRequestVersionRef.current += 1;
+    activeDetailTableIdRef.current = null;
     setCancelMode(false); setPendingTableId(null); setDetail(null); setScreen("tables"); setError("");
     await loadTables();
   }
 
   function returnToTables() {
+    detailRequestVersionRef.current += 1;
+    activeDetailTableIdRef.current = null;
     setDetail(null); setScreen("tables"); setError("");
     void loadTables();
+  }
+
+  function attemptAppExit() {
+    setExitConfirmOpen(false);
+    const isInstalledApp = window.matchMedia("(display-mode: standalone)").matches
+      || window.matchMedia("(display-mode: fullscreen)").matches
+      || ("standalone" in navigator && navigator.standalone === true);
+    if (!isInstalledApp) {
+      setExitMessage("일반 브라우저에서는 탭을 자동으로 닫지 않습니다. 브라우저의 탭 닫기 기능을 이용해 주세요.");
+      return;
+    }
+    setExitMessage("앱 종료를 요청했습니다. 종료되지 않으면 화면 아래에서 위로 밀어 홈 화면으로 이동하거나 홈 버튼을 눌러 주세요.");
+    try { window.close(); } catch { /* Keep the home-screen instructions visible when closing is unsupported. */ }
+    window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        setExitMessage("이 환경에서는 앱을 자동으로 닫을 수 없습니다. 화면 아래에서 위로 밀어 홈 화면으로 이동하거나 홈 버튼을 눌러 주세요.");
+      }
+    }, 700);
   }
 
   async function logout() {
@@ -467,30 +628,123 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     else if (tabRect.right > tabsRect.right) tabs.scrollBy({ left: tabRect.right - tabsRect.right + 8, behavior: "smooth" });
   }, [activeCategoryId, screen]);
 
+  async function chooseHosCustomer(customer: HosCustomer | null) {
+    if (!detail || !detail.session || busy) {
+      setCustomerError("고객을 연결하려면 영업 중인 테이블이어야 합니다.");
+      return;
+    }
+    setBusy(true);
+    setCustomerError("");
+    try {
+      const response = await fetch(`/api/hos/tables/${detail.table.tableId}/customer`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: customer?.customerId ?? null }),
+      });
+      const result = await response.json() as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message || "고객 연결을 저장하지 못했습니다.");
+      setScreen("detail");
+      await refreshDetail(detail.table.tableId);
+      void loadTables();
+    } catch (cause) {
+      setCustomerError(cause instanceof Error ? cause.message : "고객 연결을 저장하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openTradeEntry(entry: CustomerTradeRow) {
+    setSelectedTrade(entry);
+    setCustomerError("");
+    setScreen("tradeDetail");
+  }
+
   useEffect(() => () => {
     if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
   }, []);
 
   return <main className="flex min-h-dvh flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900" ref={mainRef}>
-    {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-1 text-slate-900">
+    {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 pb-1 pt-[19px] text-slate-900">
       <div className="flex min-w-0 flex-col items-start leading-tight">
-        <strong className="shrink-0 text-lg font-extrabold text-[#2563EB]">TDK HOS</strong>
+        <button aria-label="TDK HOS 앱 종료" className="bg-transparent p-0 text-left" onClick={() => { setExitMessage(""); setExitConfirmOpen(true); }} type="button"><strong className="shrink-0 text-lg font-extrabold text-[#2563EB]">TDK HOS</strong></button>
         <span className="mt-0.5 max-w-full break-all text-xs leading-tight text-slate-400">{staffLoginId ?? ""}</span>
       </div>
-      <button className="min-h-11 min-w-11 shrink-0 bg-transparent px-3 text-[11px] font-medium text-slate-600" disabled={busy} onClick={() => void logout()} type="button">로그아웃</button>
-    </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 text-slate-900">
-      <div className="flex min-h-12 items-center border-b border-slate-200">
+      <div className="relative shrink-0" ref={logoutMenuRef}>
+        <button aria-expanded={logoutMenuOpen} aria-haspopup="menu" aria-label="메뉴" className="flex min-h-11 min-w-11 items-center justify-center bg-transparent p-0 text-2xl leading-none text-slate-600" disabled={busy} onClick={() => logoutMenuOpen ? closeLogoutMenu() : setLogoutMenuOpen(true)} type="button">⋮</button>
+        {logoutMenuOpen && <div className="absolute right-0 top-full z-30 mt-1 min-w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg" role="menu">
+          <button className="min-h-11 w-full px-4 text-left text-sm font-medium text-slate-700" onClick={() => { closeLogoutMenu(); void logout(); }} role="menuitem" type="button">로그아웃</button>
+        </div>}
+      </div>
+    </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 pt-[15px] text-slate-900">
+      <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
         <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={returnToTables} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
+        <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[55%] min-w-12 truncate bg-transparent px-2 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>
       </div>
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 py-1">
-        <span className="text-sm font-normal text-slate-500">TNo.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
-        <strong className="text-right text-sm font-extrabold text-slate-900">{money(orderAmount)}</strong>
+        <span className="text-[17px] font-normal text-slate-500">T.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
+        <strong className="text-right text-[17px] font-extrabold text-slate-900">{money(orderAmount)}</strong>
       </div>
+    </header> : screen === "customer" ? <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3 pt-[15px]">
+      <button aria-label="주문 화면으로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>고객</span></button>
+    </header> : screen === "balance" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-1 border-b border-slate-200 bg-white px-2 pt-[15px]">
+      <button aria-label="고객 목록으로 돌아가기" className="flex min-h-11 min-w-11 shrink-0 items-center gap-1 bg-transparent pr-1 text-xl font-bold text-slate-700" onClick={() => { setCustomerError(""); setScreen("customer"); }} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>잔액관리</span></button>
+      <div aria-label="거래 조회기간" className="flex min-w-0 gap-1" role="group">{([ ["all", "전부"], ["90", "90"], ["30", "30"], ["month", "당월"] ] as const).map(([period, label]) => <button aria-pressed={tradePeriod === period} className={`min-h-9 min-w-9 rounded-lg px-2 text-xs font-bold ${tradePeriod === period ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700"}`} key={period} onClick={() => { setTradePeriod(period); setCustomerError(""); }} type="button">{label}</button>)}</div>
+    </header> : screen === "tradeDetail" ? <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3 pt-[15px]">
+      <button aria-label="잔액관리로 돌아가기" className="flex min-h-11 items-center gap-1.5 bg-transparent pr-2 text-xl font-bold text-slate-700" onClick={() => { setCustomerError(""); setScreen("balance"); }} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>거래 상세</span></button>
     </header> : <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3">
       <button className="min-h-11 rounded-lg px-2 text-sm font-bold text-slate-700 active:bg-slate-100" onClick={() => setScreen("detail")} type="button">← 주문내역</button>
       <strong className="text-base">메뉴 선택</strong>
     </header>}
-    {error && <div className="mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">{error}</div>}
+    {error && <div className={`mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">{error}</div>}
+
+    {customerError && <div className="mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">{customerError}</div>}
+    {screen === "customer" && <section className="flex min-h-0 flex-1 flex-col">
+      <div aria-label="고객 목록" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2" role="listbox">
+        {customerLoading && !hosCustomers.length ? <p className="py-8 text-center text-sm text-slate-500">고객 목록을 불러오는 중입니다.</p>
+          : !customerLoading && !customerError && hosCustomers.filter(customer => !managedCustomersOnly || customer.isPaymentManaged).length === 0
+            ? <p className="py-8 text-center text-sm text-slate-500">표시할 고객이 없습니다.</p>
+            : hosCustomers.filter(customer => !managedCustomersOnly || customer.isPaymentManaged).map(customer => <article className="mb-2 flex min-h-14 items-center gap-2" key={customer.customerId}>
+              <button aria-selected={activeCustomer?.customerId === customer.customerId} className={`flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border px-3 text-left ${activeCustomer?.customerId === customer.customerId ? "border-blue-600 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-800"}`} disabled={busy} onClick={() => void chooseHosCustomer(activeCustomer?.customerId === customer.customerId ? null : customer)} role="option" type="button">
+                <span className="min-w-0 truncate font-semibold">{customer.name}</span>
+                {balanceView && customer.isPaymentManaged && <span className="shrink-0 text-sm font-semibold text-slate-600">{formatTradeBalance(customer.tradeBalance ?? 0)}</span>}
+              </button>
+              {balanceView && customer.isPaymentManaged && <button aria-label={`${customer.name} 잔액관리`} className="min-h-11 shrink-0 rounded-lg bg-blue-50 px-3 text-xs font-bold text-blue-700" onClick={() => { setCustomerError(""); setBalanceCustomer({ customerId: customer.customerId, name: customer.name }); setScreen("balance"); }} type="button">내역</button>}
+            </article>)}
+        {customerLoading && hosCustomers.length > 0 && <p className="py-2 text-center text-xs text-slate-400">고객 정보를 갱신하고 있습니다.</p>}
+      </div>
+      <div className="sticky bottom-0 border-t border-slate-200 bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="grid grid-cols-2 gap-2">
+          <button aria-checked={balanceView} className="flex min-h-12 min-w-0 items-center justify-between gap-1 rounded-xl bg-slate-50 px-2 text-left text-xs font-semibold text-slate-700" onClick={() => setBalanceView(value => !value)} role="switch" type="button"><span className="whitespace-nowrap">잔액보기</span><span aria-hidden="true" className={"relative h-7 w-12 shrink-0 rounded-full transition-colors " + (balanceView ? "bg-blue-700" : "bg-slate-300")}><span className={"absolute top-1 size-5 rounded-full bg-white shadow transition-transform " + (balanceView ? "translate-x-6" : "translate-x-1")} /></span></button>
+          <button aria-checked={managedCustomersOnly} className="flex min-h-12 min-w-0 items-center justify-between gap-1 rounded-xl bg-slate-50 px-2 text-left text-xs font-semibold text-slate-700" onClick={() => setManagedCustomersOnly(value => !value)} role="switch" type="button"><span className="whitespace-nowrap">선불관리</span><span aria-hidden="true" className={"relative h-8 w-14 shrink-0 rounded-full transition-colors " + (managedCustomersOnly ? "bg-blue-700" : "bg-slate-300")}><span className={"absolute top-1 size-6 rounded-full bg-white shadow transition-transform " + (managedCustomersOnly ? "translate-x-7" : "translate-x-1")} /><span className={"absolute top-0 flex h-full items-center text-[9px] font-bold " + (managedCustomersOnly ? "left-1.5 text-white" : "right-1.5 text-slate-600")}>{managedCustomersOnly ? "ON" : "OFF"}</span></span></button>
+        </div>
+      </div>
+    </section>}
+
+    {(screen === "balance" || screen === "tradeDetail") && <>
+      <section aria-label="고객 잔액관리" className={`flex min-h-0 flex-1 flex-col ${screen === "tradeDetail" ? "hidden" : ""}`}>
+        <div className="shrink-0 border-b border-slate-100 px-4 py-3">
+          <div className="truncate text-sm font-semibold text-slate-600">{balanceCustomer?.name ?? "고객"}</div>
+          <div className="mt-1 flex items-center justify-between gap-3"><span className="text-sm text-slate-500">현재 잔액</span><strong className="text-lg font-extrabold text-blue-700">{formatTradeBalance(tradeData?.balance ?? 0)}</strong></div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+          {tradeLoading ? <p className="py-8 text-center text-sm text-slate-500">거래내역을 불러오는 중입니다.</p>
+            : tradeData?.entries?.length ? tradeData.entries.filter(entry => !tradeData.hideableLedgerIds?.includes(entry.ledgerId)).map(entry => <button className="mb-2 flex min-h-16 w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left" key={entry.ledgerId} onClick={() => openTradeEntry(entry)} type="button">
+              <span className="min-w-0"><span className="block truncate text-sm font-semibold text-slate-800">{tradeDescription(entry)}</span><time className="mt-1 block text-xs text-slate-500" dateTime={entry.transactionAt}>{entry.transactionAt.replace("T", " ").slice(0, 16)}</time></span>
+              <span className="shrink-0 text-right"><strong className={`block text-sm ${entry.amount < 0 ? "text-red-600" : "text-blue-700"}`}>{formatTradeBalance(entry.amount)}</strong><span className="block text-[11px] text-slate-500">잔액 {formatTradeBalance(entry.balance)}</span></span>
+            </button>) : !customerError && <p className="py-8 text-center text-sm text-slate-500">거래내역이 없습니다.</p>}
+        </div>
+      </section>
+      {screen === "tradeDetail" && <section aria-label="거래 상세" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+        {tradeLoading || (!tradeDetail && !customerError) ? <p className="py-8 text-center text-sm text-slate-500">거래 상세를 불러오는 중입니다.</p> : tradeDetail && <>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3"><time className="block text-sm font-semibold" dateTime={tradeDetail.entry.transactionAt}>{tradeDetail.entry.transactionAt.replace("T", " ").slice(0, 16)}</time><p className="mt-1 text-sm text-slate-600">{tradeDetail.customerName} · {tradeDetail.checkout?.place ?? "테이블 정보 없음"}</p><p className="mt-2 text-sm font-semibold">{tradeTypeLabel(tradeDetail.entry.entryType)} <strong className="ml-2">{money(Math.abs(tradeDetail.entry.amount))}원</strong></p></div>
+          {tradeDetail.checkout && <section className="mb-3 rounded-xl border border-slate-200 p-3"><h2 className="mb-2 text-sm font-bold">주문 메뉴</h2>
+            {tradeDetail.checkout.items.map(item => <div className="border-b border-slate-100 py-2 last:border-0" key={item.checkoutItemId}><div className="flex items-start justify-between gap-2 text-sm"><span className="min-w-0 truncate font-medium">{item.name}</span><span className="shrink-0">{item.qty} × {money(item.unitPrice)}원</span><strong className="shrink-0">{money(item.amount)}원</strong></div>{item.options.length > 0 && <p className="mt-1 text-xs text-slate-500">{item.options.join(" · ")}</p>}</div>)}
+            <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 text-sm"><span>결제 대상 합계</span><strong>{money(tradeDetail.checkout.totalAmount)}원</strong></div>
+          </section>}
+          {tradeDetail.payment && <section className="mb-3 rounded-xl border border-slate-200 p-3"><h2 className="mb-2 text-sm font-bold">결제 내역</h2><div className="flex justify-between gap-3 text-sm"><span>{tradeDetail.payment.methodName}</span><strong>{money(tradeDetail.payment.appliedAmount)}원</strong></div><p className="mt-1 text-xs text-slate-500">상태: {tradeDetail.payment.status}</p></section>}
+          <section className="rounded-xl border border-slate-200 p-3"><h2 className="mb-2 text-sm font-bold">고객 잔액 거래</h2><div className="flex justify-between text-sm"><span>거래 전 잔액</span><strong>{formatTradeBalance(tradeDetail.balanceBefore)}</strong></div><div className="mt-1 flex justify-between text-sm"><span>거래 금액</span><strong>{formatTradeBalance(tradeDetail.entry.amount)}</strong></div><div className="mt-1 flex justify-between text-sm"><span>거래 후 잔액</span><strong>{formatTradeBalance(tradeDetail.entry.balance)}</strong></div>{tradeDetail.entry.memo && <p className="mt-2 break-words text-xs text-slate-500">{tradeDetail.entry.memo}</p>}</section>
+        </>}
+      </section>}
+    </>}
 
     {screen === "tables" && <section className="relative overscroll-y-contain p-3" ref={tableScreenRef}>
       <div aria-live="polite" className={`flex items-center justify-center gap-2 overflow-hidden text-xs text-slate-500 transition-[height] ${manualRefreshing || pullDistance > 0 ? "h-8" : "h-0"}`}>
@@ -509,8 +763,9 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
 
     {screen === "detail" && detail && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col p-3">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3">
+        {orderItems.length > 0 && <>
         <section aria-labelledby="confirmed-orders-title">
-          <h2 className="mb-2 text-sm font-bold text-slate-500" id="confirmed-orders-title">기존 주문내역</h2>
+          <h2 className="mb-2 text-[17px] font-bold text-slate-500" id="confirmed-orders-title">기존 주문내역</h2>
           {orderItems.length ? <div className="divide-y divide-slate-100">
             {orderItems.map(item => {
               const pending = cancellations.find(row => row.orderItemId === item.orderItemId);
@@ -518,41 +773,40 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
               const canCancel = cancelMode && ["OPEN", "ACCEPTED"].includes(item.orderStatus) && item.status !== "CANCELLED";
               const displayQty = cancelMode && canCancel ? keepQty : item.effectiveQty;
               const itemAmount = Number(item.unitPrice || 0) * displayQty;
-              const optionNames = item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`);
-              return <article className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 py-3 ${pending && keepQty < item.effectiveQty ? "bg-red-50" : ""}`} key={item.orderItemId}>
-                <div className="min-w-0">
-                  <strong className="block break-words text-[15px] font-bold text-slate-900">{item.itemName}</strong>
-                  {optionNames.length > 0 && <p className="mt-0.5 break-words text-xs text-slate-500">{optionNames.join(" · ")}</p>}
-                  {pending && keepQty < item.effectiveQty && <p className="mt-0.5 text-xs font-medium text-red-600">{item.effectiveQty - keepQty}개 취소 예정</p>}
-                  {cancelMode && !canCancel && <p className="mt-0.5 text-xs text-slate-400">취소 불가</p>}
+              const optionNames = item.options.map(option => option.optionName);
+              return <article className={`py-3 ${pending && keepQty < item.effectiveQty ? "bg-red-50" : ""}`} key={item.orderItemId}>
+                <div className="grid grid-cols-[minmax(0,1fr)_7rem_4.5rem] items-center gap-x-2">
+                  <strong className="min-w-0 truncate text-lg font-bold text-slate-900" title={item.itemName}>{item.itemName}</strong>
+                  <div aria-label={`${item.itemName} 남길 수량`} className="flex w-28 items-center justify-center gap-1.5">
+                    <button aria-label={`${item.itemName} 남길 수량 감소`} aria-hidden={!canCancel} className={`size-9 shrink-0 rounded-lg bg-slate-100 text-[21px] font-bold disabled:opacity-40 ${canCancel ? "" : "invisible"}`} disabled={!canCancel || keepQty <= 0} onClick={() => changeKeepQuantity(item, -1)} tabIndex={canCancel ? 0 : -1} type="button">−</button>
+                    <strong className="min-w-5 text-center text-[17px]">{money(displayQty)}</strong>
+                    <button aria-label={`${item.itemName} 남길 수량 증가`} aria-hidden={!canCancel} className={`size-9 shrink-0 rounded-lg bg-slate-100 text-[21px] font-bold disabled:opacity-40 ${canCancel ? "" : "invisible"}`} disabled={!canCancel || keepQty >= item.effectiveQty} onClick={() => changeKeepQuantity(item, 1)} tabIndex={canCancel ? 0 : -1} type="button">+</button>
+                  </div>
+                  <strong className="min-w-[4.5rem] text-right text-[17px] font-semibold text-slate-800">{money(itemAmount)}</strong>
                 </div>
-                <div className="min-w-12 text-right">
-                  {canCancel ? <div aria-label={`${item.itemName} 남길 수량`} className="flex items-center gap-1">
-                    <button aria-label={`${item.itemName} 남길 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold disabled:opacity-40" disabled={keepQty <= 0} onClick={() => changeKeepQuantity(item, -1)} type="button">−</button>
-                    <strong className="min-w-5 text-center text-sm">{money(keepQty)}</strong>
-                    <button aria-label={`${item.itemName} 남길 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold disabled:opacity-40" disabled={keepQty >= item.effectiveQty} onClick={() => changeKeepQuantity(item, 1)} type="button">+</button>
-                  </div> : <span className="text-right text-sm font-semibold text-slate-700">{money(item.effectiveQty)}</span>}
-                </div>
-                <strong className="min-w-[4.5rem] text-right text-sm font-semibold text-slate-800">{money(itemAmount)}</strong>
+                {optionNames.length > 0 && <p className="mt-0.5 break-words text-[13px] leading-tight text-slate-400">{optionNames.join(" · ")}</p>}
+                {pending && keepQty < item.effectiveQty && <p className="mt-0.5 text-[13px] font-medium text-red-600">{item.effectiveQty - keepQty}개 취소 예정</p>}
+                {cancelMode && !canCancel && <p className="mt-0.5 text-[13px] text-slate-400">취소 불가</p>}
               </article>;
             })}
-          </div> : <p className="py-3 text-sm text-slate-400">확정된 주문이 없습니다.</p>}
+          </div> : <p className="py-3 text-[17px] text-slate-400">확정된 주문이 없습니다.</p>}
           {cancelMode && cancellationRequests.length > 0 && <div className="mt-2 rounded-lg bg-slate-50 p-3">
-            <label className="block text-sm font-bold text-slate-700">취소 사유
-              <select className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3" onChange={event => setCancellationReason(event.target.value)} value={cancellationReason}>
+            <label className="block text-[17px] font-bold text-slate-700">취소 사유
+              <select className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-[19px]" onChange={event => setCancellationReason(event.target.value)} value={cancellationReason}>
                 {["고객 요청", "주문 실수", "조리 불량", "이물질", "에러", "기타"].map(reason => <option key={reason} value={reason}>{reason}</option>)}
               </select>
             </label>
-            {cancellationReason === "기타" && <input className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3" onChange={event => setCancellationDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요" value={cancellationDetail} />}
+            {cancellationReason === "기타" && <input className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-[19px]" onChange={event => setCancellationDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요" value={cancellationDetail} />}
           </div>}
         </section>
 
         <div aria-hidden="true" className="my-4 h-[2px] w-full bg-[#D9DEE5]" />
+        </>}
 
         <section aria-labelledby="cart-title">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-bold text-slate-700" id="cart-title">장바구니</h2>
-            {draft.length > 0 && <span className="text-xs text-slate-500">합계 {money(draftOrderAmount)}</span>}
+            <h2 className="text-[17px] font-bold text-slate-700" id="cart-title">장바구니</h2>
+            {draft.length > 0 && <span className="text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</span>}
           </div>
           {draft.length ? <div className="divide-y divide-slate-100">
             {draft.map((item, index) => {
@@ -560,23 +814,29 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
               const optionAmount = item.options.reduce((sum, option) => sum + Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
               const itemAmount = (Number(menu?.price ?? 0) + optionAmount) * item.qty;
               const optionNames = item.options.map(option => catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.optionName).filter(Boolean);
-              return <article className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 py-3" key={`${item.menuId}-${index}`}>
-                <div className="min-w-0"><span className="mb-0.5 inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">신규</span><strong className="block break-words text-[15px] font-bold">{item.name}</strong>
-                  {optionNames.length > 0 && <p className="mt-0.5 break-words text-xs text-slate-500">{optionNames.join(" · ")}</p>}</div>
-                <div className="flex items-center gap-1">
-                  <button aria-label={`${item.name} 장바구니 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold" onClick={() => changeDraftQuantity(index, -1)} type="button">−</button>
-                  <strong className="min-w-5 text-center text-sm">{money(item.qty)}</strong>
-                  <button aria-label={`${item.name} 장바구니 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-lg font-bold" disabled={item.qty >= 1000} onClick={() => changeDraftQuantity(index, 1)} type="button">+</button>
+              return <article className="py-3" key={`${item.menuId}-${index}`}>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="inline-flex shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[13px] font-bold text-blue-700">신규</span>
+                    <strong className="min-w-0 truncate text-lg font-bold" title={item.name}>{item.name}</strong>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button aria-label={`${item.name} 장바구니 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold" onClick={() => changeDraftQuantity(index, -1)} type="button">−</button>
+                    <strong className="min-w-5 text-center text-[17px]">{money(item.qty)}</strong>
+                    <button aria-label={`${item.name} 장바구니 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold" disabled={item.qty >= 1000} onClick={() => changeDraftQuantity(index, 1)} type="button">+</button>
+                  </div>
+                  <strong className="min-w-[4.5rem] text-right text-[17px] font-semibold">{money(itemAmount)}</strong>
                 </div>
-                <strong className="min-w-[4.5rem] text-right text-sm font-semibold">{money(itemAmount)}</strong>
+                {optionNames.length > 0 && <p className="mt-0.5 break-words text-[13px] leading-tight text-slate-400">{optionNames.join(" · ")}</p>}
               </article>;
             })}
-          </div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-400">추가한 메뉴가 없습니다.</p>}
+          </div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-[17px] text-slate-400">추가한 메뉴가 없습니다.</p>}
         </section>
       </div>
-      <div className="sticky bottom-0 grid grid-cols-3 gap-2 border-t border-slate-200 bg-white/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <button className="min-h-14 rounded-xl bg-violet-600 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">주문</button>
-        <button className={`min-h-14 rounded-xl text-sm font-extrabold text-white disabled:opacity-50 ${cancelMode ? "bg-red-700" : "bg-red-600"}`} disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
+      <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="grid grid-cols-[4fr_3fr_3fr] gap-2">
+        <button className="min-h-14 rounded-xl bg-blue-700 text-[17px] font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
+        <button className="min-h-14 rounded-xl border border-red-500 bg-red-50 text-[17px] font-extrabold text-red-700" disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
           if (cancelMode) {
             setCancelMode(false); setCancellations([]);
             if (!draft.length) setPendingTableId(null);
@@ -586,7 +846,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           }
           setError("");
         }} type="button">취소</button>
-        <button className="min-h-14 rounded-xl bg-blue-600 text-sm font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
+        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">주문</button>
+        </div>
       </div>
     </section>}
 
@@ -620,6 +881,25 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         })()}
         <div className="mt-5 flex items-center justify-center gap-5"><button className="size-12 rounded-xl bg-slate-100 text-2xl" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><strong className="text-xl">{quantity}</strong><button className="size-12 rounded-xl bg-slate-100 text-2xl" onClick={() => setQuantity(value => Math.min(1000, value + 1))} type="button">+</button></div>
         <div className="mt-5 grid grid-cols-2 gap-2"><button className="min-h-12 rounded-xl bg-slate-100 font-bold" onClick={() => setSelectedMenu(null)} type="button">닫기</button><button className="min-h-12 rounded-xl bg-blue-600 font-extrabold text-white" onClick={addDraft} type="button">추가 예정에 담기</button></div>
+      </section>
+    </div>}
+    {exitConfirmOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
+      <section aria-labelledby="hos-exit-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
+        <h2 className="text-lg font-extrabold" id="hos-exit-title">종료하시겠습니까?</h2>
+        {draft.length > 0 || cancellations.length > 0 || busy
+          ? <p className="mt-2 text-sm leading-relaxed text-amber-700">{busy ? "처리 중인 요청이 있습니다. 완료 전에 종료하면 결과가 반영되지 않을 수 있습니다. " : ""}{draft.length > 0 ? "미전송 주문이 있습니다. " : ""}{cancellations.length > 0 ? "저장하지 않은 취소 변경이 있습니다. " : ""}앱을 종료하면 미전송 변경사항이 사라질 수 있습니다.</p>
+          : <p className="mt-2 text-sm text-slate-600">TDK HOS 앱을 종료합니다.</p>}
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button autoFocus className="min-h-12 rounded-xl bg-slate-100 font-bold text-slate-700" onClick={() => setExitConfirmOpen(false)} type="button">취소</button>
+          <button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={busy} onClick={attemptAppExit} type="button">종료</button>
+        </div>
+      </section>
+    </div>}
+    {exitMessage && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4">
+      <section aria-labelledby="hos-exit-message-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
+        <h2 className="text-lg font-extrabold" id="hos-exit-message-title">앱 종료</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-600">{exitMessage}</p>
+        <button autoFocus className="mt-5 min-h-12 w-full rounded-xl bg-blue-600 font-bold text-white" onClick={() => setExitMessage("")} type="button">확인</button>
       </section>
     </div>}
     {cancelReauthRequired && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">

@@ -4,11 +4,12 @@ import { db } from "@/db";
 import { customers } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
 
-/** Read-only customer trade history is available to ADM or to POS for active trade-managed customers. */
+/** Read-only customer trade history is available to ADM, POS, and HOS for active trade-managed customers. */
 export async function canReadCustomerTradeLedger(customerId: number): Promise<boolean> {
   if (await getCurrentAdminStaff()) return true;
-  if (!await getCurrentStaff()) return false;
+  if (!await getCurrentStaff() && !await getCurrentHosStaff()) return false;
 
   const [customer] = await db.select({ customerId: customers.customerId }).from(customers).where(and(
     eq(customers.customerId, customerId),

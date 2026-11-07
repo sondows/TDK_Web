@@ -234,7 +234,7 @@ export default function OrderSummaryPanel({
   discounts: SessionDiscount[];
   menuModifiers: Array<MenuChoiceModifier & { menuId: number; priceDelta: string }>;
   potMenuIds: number[];
-  onCustomerSelectionChanged: (sessionIds: number[], customerName: string | null) => void;
+  onCustomerSelectionChanged: (sessionIds: number[], customerName: string | null, customerId: number | null) => void;
   onOptionSaved: (sessionId: number, optionName: string, orderItemId: number) => void;
 }) {
   type SpicyOverride = { optionId: number; optionName: string; groupId: number; previousOptionId: number | null };
@@ -306,7 +306,7 @@ export default function OrderSummaryPanel({
   const selectCustomer = (customer: SelectedCustomer | null) => {
     if (customerScopeKey !== null) {
       setCustomersByScope(current => ({ ...current, [customerScopeKey]: customer }));
-      onCustomerSelectionChanged(physicalSessionIds, customer?.name ?? null);
+      onCustomerSelectionChanged(physicalSessionIds, customer?.name ?? null, customer?.customerId ?? null);
     }
   };
   const blockingUiOpen = paymentOpen || customerSelectOpen || c.confirm || c.reauth || activeSpicyEdit !== null;
