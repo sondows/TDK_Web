@@ -621,7 +621,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       setDraft([]);
       if (!cancellations.length) setPendingTableId(null);
       setError("");
-      showSuccessToast("장바구니를 비웠습니다.");
+      showSuccessToast("장바구니를 비웠습니다.", "center");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "장바구니를 비우지 못했습니다.");
     } finally {
@@ -1105,10 +1105,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         </>}
 
         <section aria-labelledby="cart-title">
-          <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+          <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
             <h2 className="text-[17px] font-bold text-slate-700" id="cart-title">장바구니</h2>
+            {draft.length > 0 && <span className="shrink-0 whitespace-nowrap text-right text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</span>}
           </div>
-          {draft.length > 0 && <div className="mb-2 text-right text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</div>}
           {draft.length ? <div className="divide-y divide-slate-100">
             {draft.map((item, index) => {
               const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
