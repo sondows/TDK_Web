@@ -20,6 +20,14 @@ function withSearch(pathname: string, request: NextRequest): URL {
   return url;
 }
 
+function preventHosPageCaching(response: NextResponse, request: NextRequest) {
+  if ((request.method === "GET" || request.method === "HEAD") &&
+    ["/tdkhos", "/hos"].includes(request.nextUrl.pathname)) {
+    response.headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  }
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const host = request.headers.get("host");
   const pathname = request.nextUrl.pathname;
@@ -45,9 +53,11 @@ export function proxy(request: NextRequest) {
       }
       if (alias) {
         internalHeaders.set("x-tdk-external-surface", alias.surface);
-        return NextResponse.rewrite(withSearch(alias.target, request), { request: { headers: internalHeaders } });
+        return preventHosPageCaching(NextResponse.rewrite(withSearch(alias.target, request), {
+          request: { headers: internalHeaders },
+        }), request);
       }
-      return NextResponse.next({ request: { headers: internalHeaders } });
+      return preventHosPageCaching(NextResponse.next({ request: { headers: internalHeaders } }), request);
     }
     return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
   }
@@ -93,11 +103,11 @@ export function proxy(request: NextRequest) {
     const forwardedHeaders = new Headers(externalHeaders);
     forwardedHeaders.set("x-tdk-external-surface", alias.surface);
     const target = withSearch(alias.target, request);
-    return NextResponse.rewrite(target, { request: { headers: forwardedHeaders } });
+    return preventHosPageCaching(NextResponse.rewrite(target, { request: { headers: forwardedHeaders } }), request);
   }
 
   if (protectedSurfacePath && verifiedIngress) {
-    return NextResponse.next({ request: { headers: externalHeaders } });
+    return preventHosPageCaching(NextResponse.next({ request: { headers: externalHeaders } }), request);
   }
   if (isExternalKdsPath(pathname)) {
     return NextResponse.next({ request: { headers: externalHeaders } });
