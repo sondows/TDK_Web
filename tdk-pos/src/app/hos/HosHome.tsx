@@ -56,8 +56,18 @@ async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
+const HOS_SESSION_EXPIRED_EVENT = "tdk-hos-session-expired";
+async function fetchHos(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init);
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(HOS_SESSION_EXPIRED_EVENT));
+  }
+  return response;
+}
+
 export default function HosHome({ staffLoginId }: { staffLoginId: string | null }) {
   const router = useRouter();
+  const sessionRefreshRequestedRef = useRef(false);
   const [tables, setTables] = useState<TableRow[]>([]);
   const [dividerPositions, setDividerPositions] = useState<number[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -116,13 +126,23 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     }
   }, [logoutMenuOpen]);
 
+  useEffect(() => {
+    const refreshForExpiredSession = () => {
+      if (sessionRefreshRequestedRef.current) return;
+      sessionRefreshRequestedRef.current = true;
+      router.refresh();
+    };
+    window.addEventListener(HOS_SESSION_EXPIRED_EVENT, refreshForExpiredSession);
+    return () => window.removeEventListener(HOS_SESSION_EXPIRED_EVENT, refreshForExpiredSession);
+  }, [router]);
+
   const loadTables = useCallback((manual = false) => {
     if (manual) setManualRefreshing(true);
     if (tableRequestRef.current) return tableRequestRef.current;
     setRefreshing(true);
     const request = (async () => {
       try {
-        const result = await readJson<{ tables: TableRow[]; dividerPositions?: number[] }>(await fetch("/api/hos/tables", { cache: "no-store" }));
+        const result = await readJson<{ tables: TableRow[]; dividerPositions?: number[] }>(await fetchHos("/api/hos/tables", { cache: "no-store" }));
         setTables(result.tables);
         setDividerPositions(Array.isArray(result.dividerPositions) ? result.dividerPositions : []);
         setError("");
@@ -256,7 +276,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, [screen]);
 
   const loadCatalog = useCallback(async () => {
-    const result = await readJson<Catalog>(await fetch("/api/hos/menu-catalog", { cache: "no-store" }));
+    const result = await readJson<Catalog>(await fetchHos("/api/hos/menu-catalog", { cache: "no-store" }));
     setCatalog(result);
     return result;
   }, []);
@@ -265,7 +285,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (activeDetailTableIdRef.current !== tableId) return;
     const requestVersion = ++detailRequestVersionRef.current;
     try {
-      const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
+      const response = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
       if (requestVersion !== detailRequestVersionRef.current || activeDetailTableIdRef.current !== tableId ||
         response.table.tableId !== tableId) return;
       setDetail(response);
@@ -298,7 +318,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (screen !== "customer") return;
     const controller = new AbortController();
     const key = balanceView ? "balance" : "plain";
-    void fetch(`/api/hos/customers${balanceView ? "?includeBalance=1" : ""}`, { cache: "no-store", signal: controller.signal })
+    void fetchHos(`/api/hos/customers${balanceView ? "?includeBalance=1" : ""}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const result = await response.json() as { success?: boolean; customers?: HosCustomer[]; message?: string };
         if (!response.ok || !result.success || !Array.isArray(result.customers)) throw new Error(result.message || "고객 목록을 불러오지 못했습니다.");
@@ -318,7 +338,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       : { startDate: shiftDate(today, tradePeriod === "90" ? -89 : -29), endDate: today };
     const query = new URLSearchParams();
     if (range) { query.set("startDate", range.startDate); query.set("endDate", range.endDate); }
-    void fetch(`/api/customers/${balanceCustomerId}/ledger?${query}`, { cache: "no-store", signal: controller.signal })
+    void fetchHos(`/api/customers/${balanceCustomerId}/ledger?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const result = await response.json() as CustomerTradeResponse;
         if (!response.ok || !result.success) throw new Error((result as CustomerTradeResponse & { message?: string }).message || "잔액 내역을 불러오지 못했습니다.");
@@ -332,7 +352,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   useEffect(() => {
     if (screen !== "tradeDetail" || !balanceCustomerId || !selectedTrade) return;
     const controller = new AbortController();
-    void fetch(`/api/customers/${balanceCustomerId}/ledger/${selectedTrade.ledgerId}`, { cache: "no-store", signal: controller.signal })
+    void fetchHos(`/api/customers/${balanceCustomerId}/ledger/${selectedTrade.ledgerId}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const result = await response.json() as CustomerTradeDetailResponse;
         if (!response.ok || !result.success || !result.detail) throw new Error(result.message || "거래 상세를 불러오지 못했습니다.");
@@ -355,7 +375,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       setDraft([]); setCancellations([]); setCancelMode(false); setPendingTableId(null);
     }
     try {
-      const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${table.tableId}`, { cache: "no-store" }));
+      const response = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${table.tableId}`, { cache: "no-store" }));
       if (requestVersion !== detailRequestVersionRef.current || activeDetailTableIdRef.current !== table.tableId ||
         response.table.tableId !== table.tableId) return;
       setDetail(response); setScreen("detail");
@@ -493,7 +513,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     sendLock.current = true; setBusy(true); setError("");
     try {
       if (submittingCancellations) {
-        const response = await fetch("/api/order-items/cancellations/batch", {
+        const response = await fetchHos("/api/order-items/cancellations/batch", {
           method: "POST", headers: { "Content-Type": "application/json", "X-TDK-Program": "HOS" },
           body: JSON.stringify({ currentSessionId: detail.session?.sessionId,
             reason: cancellationReason, detail: cancellationDetail.trim(),
@@ -504,7 +524,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       } else {
         let sessionId = detail.session?.sessionId;
         if (!sessionId) {
-          const created = await readJson<{ sessionId: number }>(await fetch("/api/table-sessions", {
+          const created = await readJson<{ sessionId: number }>(await fetchHos("/api/table-sessions", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tableId: detail.table.tableId, personCount: 0, babyCount: 0 }),
           }));
@@ -512,7 +532,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           setDetail(current => current ? { ...current,
             session: { sessionId: created.sessionId, relatedSessionIds: [created.sessionId], customerId: null, customerName: null } } : current);
         }
-        await readJson(await fetch(`/api/table-sessions/${sessionId}/orders`, {
+        await readJson(await fetchHos(`/api/table-sessions/${sessionId}/orders`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ items: draft.map(item => ({ menuId: item.menuId, qty: item.qty, isComplimentary: false,
             options: item.options, components: item.components })) }),
@@ -582,7 +602,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   async function logout() {
     setBusy(true);
     try {
-      const response = await fetch("/api/hos/auth/logout", { method: "POST" });
+      const response = await fetchHos("/api/hos/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("로그아웃하지 못했습니다. 다시 시도해 주세요.");
       router.replace("/tdkhos");
     } catch (cause) {
@@ -686,7 +706,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     setBusy(true);
     setCustomerError("");
     try {
-      const response = await fetch(`/api/hos/tables/${detail.table.tableId}/customer`, {
+      const response = await fetchHos(`/api/hos/tables/${detail.table.tableId}/customer`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customerId: customer?.customerId ?? null }),
       });
