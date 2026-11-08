@@ -83,8 +83,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [choices, setChoices] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [cancelPin, setCancelPin] = useState("");
-  const [cancelReauthRequired, setCancelReauthRequired] = useState(false);
   const [cancellationReason, setCancellationReason] = useState("고객 요청");
   const [cancellationDetail, setCancellationDetail] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -94,6 +92,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
   const [exitMessage, setExitMessage] = useState("");
   const sendLock = useRef(false);
+  const optionAddLockRef = useRef(false);
   const tableRequestRef = useRef<Promise<void> | null>(null);
   const detailRequestVersionRef = useRef(0);
   const activeDetailTableIdRef = useRef<number | null>(null);
@@ -106,6 +105,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const menuSectionRefs = useRef(new Map<number, HTMLElement>());
   const menuTabRefs = useRef(new Map<number | null, HTMLButtonElement>());
   const programmaticMenuScrollRef = useRef(false);
+  const keepMenuOpenAfterOptionRef = useRef(false);
   const menuScrollReleaseTimerRef = useRef<number | null>(null);
   const closeLogoutMenu = useCallback(() => {
     if (!logoutMenuOpen) return;
@@ -226,6 +226,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     };
     const onTouchMove = (event: TouchEvent) => {
       if (startX === null || startY === null || event.touches.length !== 1) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && menuListRef.current?.contains(target)) return;
       const touch = event.touches[0];
       const deltaY = touch.clientY - startY;
       if (deltaY <= 6 || deltaY <= Math.abs(touch.clientX - startX)) return;
@@ -256,6 +258,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const loadCatalog = useCallback(async () => {
     const result = await readJson<Catalog>(await fetch("/api/hos/menu-catalog", { cache: "no-store" }));
     setCatalog(result);
+    return result;
   }, []);
 
   const refreshDetail = useCallback(async (tableId: number) => {
@@ -274,6 +277,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, []);
 
   const activeTableId = detail?.table.tableId ?? null;
+  const canManageCustomer = Boolean(detail?.session?.sessionId);
   const activeCustomerId = detail?.session?.customerId ?? null;
   const activeCustomerName = detail?.session?.customerName ?? null;
   const activeCustomer = activeCustomerId && activeCustomerName
@@ -350,7 +354,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (pendingTableId !== table.tableId) {
       setDraft([]); setCancellations([]); setCancelMode(false); setPendingTableId(null);
     }
-    setCancelReauthRequired(false); setCancelPin("");
     try {
       const response = await readJson<TableDetail>(await fetch(`/api/hos/tables/${table.tableId}`, { cache: "no-store" }));
       if (requestVersion !== detailRequestVersionRef.current || activeDetailTableIdRef.current !== table.tableId ||
@@ -371,32 +374,81 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       if (!draft.length) setPendingTableId(null);
     }
     try {
-      if (!catalog) await loadCatalog();
-      setError(""); setActiveCategoryId(null); setScreen("menu");
+      const currentCatalog = catalog ?? await loadCatalog();
+      const defaultCategory = currentCatalog.categories.find(category => menuCategoryDisplayName(category.name) === "찌개")
+        ?? currentCatalog.categories[0];
+      setError(""); setActiveCategoryId(defaultCategory?.categoryId ?? null); setScreen("menu");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "메뉴를 불러오지 못했습니다."); }
   }
 
-  function chooseMenu(menu: Menu) {
+  function chooseMenu(menu: Menu, keepMenuOpenAfterOption = false) {
     if (!catalog) return;
+    optionAddLockRef.current = false;
     const modifiers = catalog.modifiers.filter(item => item.menuId === menu.menuId);
     const choice = getMenuChoice(modifiers);
     const defaults: Record<number, number> = {};
-    if (choice.selected) defaults[choice.selected.modifierGroupId] = choice.selected.modifierOptionId;
+    const defaultOption = choice.title === "매운맛"
+      ? choice.options.find(option => /^\s*2\s*[.)]\s*약간매운맛\s*$/.test(option.optionName)) ?? choice.selected
+      : choice.selected;
+    if (defaultOption) defaults[defaultOption.modifierGroupId] = defaultOption.modifierOptionId;
+    keepMenuOpenAfterOptionRef.current = keepMenuOpenAfterOption;
     setSelectedMenu(menu); setQuantity(1); setChoices(defaults); setError("");
   }
 
+  function appendDraftItem(menu: Menu, qty: number, modifierOptionId: number | undefined, keepMenuOpen: boolean) {
+    if (!catalog) return;
+    const selectedOptions = Number.isSafeInteger(modifierOptionId) ? [{ modifierOptionId: modifierOptionId!, qty: 1 }] : [];
+    const components = catalog.components.filter(item => item.menuId === menu.menuId)
+      .map(item => ({ menuComponentId: item.menuComponentId, qty: item.quantity * qty }));
+    setDraft(current => {
+      const sameOptions = (left: DraftItem["options"], right: DraftItem["options"]) =>
+        left.length === right.length && left.every(option =>
+          right.some(candidate => candidate.modifierOptionId === option.modifierOptionId && candidate.qty === option.qty));
+      const existing = current.find(item => item.menuId === menu.menuId && sameOptions(item.options, selectedOptions));
+      if (!existing) return [...current, { menuId: menu.menuId, name: menu.name, qty, options: selectedOptions, components }];
+
+      const nextQty = existing.qty + qty;
+      return current.map(item => item === existing ? {
+        ...item,
+        qty: nextQty,
+        components: catalog.components.filter(component => component.menuId === menu.menuId)
+          .map(component => ({ menuComponentId: component.menuComponentId, qty: component.quantity * nextQty })),
+      } : item);
+    });
+    setPendingTableId(detail?.table.tableId ?? null);
+    setSelectedMenu(null);
+    if (!keepMenuOpen) setScreen("detail");
+    setError("");
+    keepMenuOpenAfterOptionRef.current = false;
+  }
+
   function addDraft() {
-    if (!catalog || !selectedMenu) return;
+    if (!catalog || !selectedMenu || optionAddLockRef.current) return;
+    optionAddLockRef.current = true;
     const modifiers = catalog.modifiers.filter(item => item.menuId === selectedMenu.menuId);
     const choice = getMenuChoice(modifiers);
     const choiceId = choice.selected ? choices[choice.selected.modifierGroupId] : undefined;
-    const selectedOptions = Number.isSafeInteger(choiceId) ? [{ modifierOptionId: choiceId!, qty: 1 }] : [];
-    const components = catalog.components.filter(item => item.menuId === selectedMenu.menuId)
-      .map(item => ({ menuComponentId: item.menuComponentId, qty: item.quantity * quantity }));
-    setDraft(current => [...current, { menuId: selectedMenu.menuId, name: selectedMenu.name, qty: quantity,
-      options: selectedOptions, components }]);
-    setPendingTableId(detail?.table.tableId ?? null);
-    setSelectedMenu(null); setScreen("detail"); setError("");
+    appendDraftItem(selectedMenu, quantity, choiceId, keepMenuOpenAfterOptionRef.current);
+  }
+
+  function quickAddMenu(menu: Menu) {
+    if (!catalog) return;
+    const modifiers = catalog.modifiers.filter(item => item.menuId === menu.menuId);
+    const choice = getMenuChoice(modifiers);
+    if (!choice.options.length) {
+      appendDraftItem(menu, 1, undefined, true);
+      return;
+    }
+
+    const quickOption = choice.title === "매운맛"
+      ? choice.options.find(option => /^\s*2\s*[.)]\s*약간매운맛\s*$/.test(option.optionName))
+      : choice.options.find(option => option.choiceDefaultOptionId === option.modifierOptionId)
+        ?? (choice.options.length === 1 ? choice.options[0] : undefined);
+    if (!quickOption) {
+      chooseMenu(menu, true);
+      return;
+    }
+    appendDraftItem(menu, 1, quickOption.modifierOptionId, true);
   }
 
   function changeKeepQuantity(item: OrderItem & { orderStatus: string }, delta: number) {
@@ -430,7 +482,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (nextQuantity <= 0 && draft.length === 1 && !cancellations.length) setPendingTableId(null);
   }
 
-  async function sendChanges(cancellationPin?: string) {
+  async function sendChanges() {
     const cancellationRequests = cancellations.map(item => {
       const orderItem = orderItems.find(candidate => candidate.orderItemId === item.orderItemId);
       return orderItem ? { orderItemId: item.orderItemId,
@@ -442,17 +494,12 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     try {
       if (submittingCancellations) {
         const response = await fetch("/api/order-items/cancellations/batch", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", "X-TDK-Program": "HOS" },
           body: JSON.stringify({ currentSessionId: detail.session?.sessionId,
-            ...(cancellationPin && staffLoginId ? { loginId: staffLoginId, pin: cancellationPin } : {}),
             reason: cancellationReason, detail: cancellationDetail.trim(),
             cancellations: cancellationRequests }),
         });
-        const result = await response.json().catch(() => null) as { success?: boolean; reauth?: boolean; message?: string } | null;
-        if (response.status === 401 && result?.reauth && !cancellationPin) {
-          setCancelReauthRequired(true);
-          return;
-        }
+        const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
         if (!response.ok || !result?.success) throw new Error(result?.message || `취소 전송에 실패했습니다. (HTTP ${response.status})`);
       } else {
         let sessionId = detail.session?.sessionId;
@@ -476,7 +523,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       detailRequestVersionRef.current += 1;
       activeDetailTableIdRef.current = null;
       setDetail(null); setScreen("tables");
-      setCancelMode(false); setCancelPin(""); setCancelReauthRequired(false);
+      setCancelMode(false);
       await loadTables();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "변경 내용을 전송하지 못했습니다."); }
     finally { setBusy(false); sendLock.current = false; }
@@ -547,6 +594,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     .filter(item => item.itemType !== "COMPONENT" && item.effectiveQty > 0)
     .map(item => ({ ...item, orderStatus: order.status })));
   const confirmedOrderAmount = detail?.orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0) ?? 0;
+  const draftQuantityTotal = draft.reduce((sum, item) => sum + item.qty, 0);
   const draftOrderAmount = draft.reduce((sum, item) => {
     const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
     const optionAmount = item.options.reduce((optionSum, option) => optionSum +
@@ -564,6 +612,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     displayName: menuCategoryDisplayName(category.name),
     menus: (catalog?.menus ?? []).filter(menu => menu.categoryId === category.categoryId),
   }));
+  const defaultMenuCategoryId = menuSections.find(category => category.displayName === "찌개")?.categoryId
+    ?? menuSections[0]?.categoryId ?? null;
   const nonEmptyMenuSections = menuSections.filter(section => section.menus.length > 0);
   const categorizedMenuIds = new Set(nonEmptyMenuSections.flatMap(section => section.menus.map(menu => menu.menuId)));
   const uncategorizedMenus = (catalog?.menus ?? []).filter(menu => !categorizedMenuIds.has(menu.menuId));
@@ -605,7 +655,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       return;
     }
     if (list.scrollTop <= 1) {
-      setActiveCategoryId(null);
+      setActiveCategoryId(defaultMenuCategoryId);
       return;
     }
     const listTop = list.getBoundingClientRect().top;
@@ -614,7 +664,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       top: (menuSectionRefs.current.get(section.categoryId)?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY) - listTop,
     })).filter(section => Number.isFinite(section.top));
     const nextCategoryId = getHosMenuCategoryAtTop(positions, 8);
-    setActiveCategoryId(nextCategoryId === -1 ? null : nextCategoryId);
+    setActiveCategoryId(nextCategoryId === -1 ? defaultMenuCategoryId : nextCategoryId);
   }
 
   useEffect(() => {
@@ -662,7 +712,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
   }, []);
 
-  return <main className="flex min-h-dvh flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900" ref={mainRef}>
+  return <main className={`flex flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900 ${screen === "menu" ? "h-dvh overflow-hidden" : "min-h-dvh"}`} ref={mainRef}>
     {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 pb-1 pt-[19px] text-slate-900">
       <div className="flex min-w-0 flex-col items-start leading-tight">
         <button aria-label="TDK HOS 앱 종료" className="bg-transparent p-0 text-left" onClick={() => { setExitMessage(""); setExitConfirmOpen(true); }} type="button"><strong className="shrink-0 text-lg font-extrabold text-[#2563EB]">TDK HOS</strong></button>
@@ -677,7 +727,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 pt-[15px] text-slate-900">
       <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
         <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={returnToTables} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
-        <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[55%] min-w-12 truncate bg-transparent px-2 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>
+        {canManageCustomer && <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[55%] min-w-12 truncate bg-transparent px-2 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>}
       </div>
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 py-1">
         <span className="text-[17px] font-normal text-slate-500">T.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
@@ -690,9 +740,11 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       <div aria-label="거래 조회기간" className="flex min-w-0 gap-1" role="group">{([ ["all", "전부"], ["90", "90"], ["30", "30"], ["month", "당월"] ] as const).map(([period, label]) => <button aria-pressed={tradePeriod === period} className={`min-h-9 min-w-9 rounded-lg px-2 text-xs font-bold ${tradePeriod === period ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700"}`} key={period} onClick={() => { setTradePeriod(period); setCustomerError(""); }} type="button">{label}</button>)}</div>
     </header> : screen === "tradeDetail" ? <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3 pt-[15px]">
       <button aria-label="잔액관리로 돌아가기" className="flex min-h-11 items-center gap-1.5 bg-transparent pr-2 text-xl font-bold text-slate-700" onClick={() => { setCustomerError(""); setScreen("balance"); }} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>거래 상세</span></button>
-    </header> : <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3">
-      <button className="min-h-11 rounded-lg px-2 text-sm font-bold text-slate-700 active:bg-slate-100" onClick={() => setScreen("detail")} type="button">← 주문내역</button>
-      <strong className="text-base">메뉴 선택</strong>
+    </header> : <header className="sticky top-0 z-20 shrink-0 bg-white px-3 pt-[15px] text-slate-900">
+      <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
+        <button aria-label={"\uC8FC\uBB38\uB0B4\uC5ED\uC73C\uB85C \uB3CC\uC544\uAC00\uAE30"} className="flex min-h-11 min-w-0 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uBA54\uB274\uC120\uD0DD"}</span></button>
+        <span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{draft.length > 0 ? <>{"\uC7A5\uBC14\uAD6C\uB2C8"} {draft.length}/{draftQuantityTotal}</> : "\uC7A5\uBC14\uAD6C\uB2C8"}</span>
+      </div>
     </header>}
     {error && <div className={`mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">{error}</div>}
 
@@ -846,41 +898,43 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           }
           setError("");
         }} type="button">취소</button>
-        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">주문</button>
+        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">전송</button>
         </div>
       </div>
     </section>}
 
-    {screen === "menu" && catalog && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-3 pb-3">
-      <div aria-label="메뉴 분류" className="-mx-3 flex shrink-0 gap-2 overflow-x-auto border-b border-slate-100 bg-white px-3 py-2" ref={menuTabsRef}>
-        <button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${activeCategoryId === null ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} onClick={() => scrollToMenuCategory(null)} ref={element => {
-          if (element) menuTabRefs.current.set(null, element); else menuTabRefs.current.delete(null);
-        }} type="button">전체</button>
-        {menuSections.map(item => <button className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${activeCategoryId === item.categoryId ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
+    {screen === "menu" && catalog && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden px-3 pb-3">
+      <div aria-label="메뉴 분류" className="-mx-3 grid shrink-0 grid-cols-5 gap-2 border-b border-slate-100 bg-white px-3 py-2" ref={menuTabsRef}>
+        {menuSections.map(item => <button className={`min-h-11 w-full min-w-0 whitespace-nowrap rounded-full px-1 text-[17px] font-bold ${activeCategoryId === item.categoryId ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
           if (element) menuTabRefs.current.set(item.categoryId, element); else menuTabRefs.current.delete(item.categoryId);
         }} type="button">{item.displayName}</button>)}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth pb-2" onScroll={syncMenuCategoryFromScroll} ref={menuListRef}>
-        {menuSectionsForDisplay.map(section => <div data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
+      <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain scroll-smooth px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onScroll={syncMenuCategoryFromScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch" }}>
+        {menuSectionsForDisplay.map(section => <div className="-mx-3 mb-[11.2px] border-y border-[#e5ebf0] bg-[#fbfcfe] px-3 shadow-[0_1px_3px_rgba(71,85,105,0.08)] last:mb-0" data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
           if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
         }}>
-          {section.menus.map(menu => <button className="flex min-h-14 w-full items-center justify-between gap-3 border-b border-slate-100 bg-white px-1 py-3 text-left active:bg-blue-50" key={menu.menuId} onClick={() => chooseMenu(menu)} type="button"><span className="font-bold">{menu.name}</span><span className="shrink-0 text-sm font-semibold text-slate-600">{money(Number(menu.price))}</span></button>)}
-          <div aria-hidden="true" className="my-4 h-[4px] w-full bg-[#D9DEE5]" />
+          {section.menus.map(menu => <div className="flex min-h-14 w-full items-center border-b border-slate-100 last:border-b-0" key={menu.menuId}>
+            <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={() => chooseMenu(menu)} type="button"><span className="min-w-0 truncate whitespace-nowrap text-[19px] font-bold">{menu.name}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
+            <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={() => quickAddMenu(menu)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
+          </div>)}
         </div>)}
         <div aria-hidden="true" className="h-[50vh]" />
       </div>
       <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-slate-800 font-extrabold text-white" onClick={() => setScreen("detail")} type="button">주문내역으로 돌아가기</button></div>
     </section>}
 
-    {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => setSelectedMenu(null)}>
+    {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => { optionAddLockRef.current = false; setSelectedMenu(null); }}>
       <section aria-modal="true" className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
-        <h2 className="text-xl font-extrabold">{selectedMenu.name}</h2><p className="mt-1 text-slate-600">{money(Number(selectedMenu.price))}</p>
+        <div className="flex min-w-0 items-center justify-between gap-3"><h2 className="min-w-0 truncate text-xl font-extrabold" title={selectedMenu.name}>{selectedMenu.name}</h2><p className="shrink-0 whitespace-nowrap text-lg font-semibold text-slate-600">{money(Number(selectedMenu.price))}</p></div>
         {(() => {
           const choice = getMenuChoice(catalog.modifiers.filter(item => item.menuId === selectedMenu.menuId));
-          return choice.options.length > 0 && <fieldset className="mt-4"><legend className="mb-2 text-sm font-bold">{choice.title}</legend><div className="grid grid-cols-2 gap-2">{choice.options.map(option => <button className={`min-h-12 rounded-lg px-3 text-sm font-bold ${choices[option.modifierGroupId] === option.modifierOptionId ? "bg-blue-600 text-white" : "bg-slate-100"}`} key={option.modifierOptionId} onClick={() => setChoices(current => ({ ...current, [option.modifierGroupId]: option.modifierOptionId }))} type="button">{option.optionName}{Number(option.priceDelta) ? ` (${money(Number(option.priceDelta))})` : ""}</button>)}</div></fieldset>;
+          return choice.options.length > 0 && <fieldset className="mt-4 min-w-0"><legend className="mb-2 text-left text-sm font-bold">{choice.title}</legend><div className="grid min-w-0 grid-cols-4 gap-2">{choice.options.map(option => {
+            const label = `${option.optionName}${Number(option.priceDelta) ? ` (${money(Number(option.priceDelta))})` : ""}`;
+            return <button aria-label={label} className={`min-h-12 w-full min-w-0 overflow-hidden rounded-lg px-1 text-sm font-bold ${choices[option.modifierGroupId] === option.modifierOptionId ? "bg-blue-600 text-white" : "bg-slate-100"}`} key={option.modifierOptionId} onClick={() => setChoices(current => ({ ...current, [option.modifierGroupId]: option.modifierOptionId }))} title={label} type="button"><span className="block truncate whitespace-nowrap">{label}</span></button>;
+          })}</div></fieldset>;
         })()}
-        <div className="mt-5 flex items-center justify-center gap-5"><button className="size-12 rounded-xl bg-slate-100 text-2xl" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><strong className="text-xl">{quantity}</strong><button className="size-12 rounded-xl bg-slate-100 text-2xl" onClick={() => setQuantity(value => Math.min(1000, value + 1))} type="button">+</button></div>
-        <div className="mt-5 grid grid-cols-2 gap-2"><button className="min-h-12 rounded-xl bg-slate-100 font-bold" onClick={() => setSelectedMenu(null)} type="button">닫기</button><button className="min-h-12 rounded-xl bg-blue-600 font-extrabold text-white" onClick={addDraft} type="button">추가 예정에 담기</button></div>
+        <div className="mt-5 flex min-h-[72px] items-center justify-center gap-6"><button className="size-[72px] shrink-0 rounded-xl bg-slate-100 text-4xl" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><strong className="min-w-[2ch] text-center text-[30px] tabular-nums">{quantity}</strong><button className="size-[72px] shrink-0 rounded-xl bg-slate-100 text-4xl" onClick={() => setQuantity(value => Math.min(1000, value + 1))} type="button">+</button></div>
+        <div className="mt-5 grid grid-cols-[7fr_3fr] gap-2"><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-blue-600 px-1 text-sm font-extrabold text-white" onClick={addDraft} type="button">장바구니에 담기</button><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-slate-100 px-1 text-sm font-bold text-slate-900" onClick={() => { optionAddLockRef.current = false; setSelectedMenu(null); }} type="button">취소</button></div>
       </section>
     </div>}
     {exitConfirmOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
@@ -900,15 +954,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         <h2 className="text-lg font-extrabold" id="hos-exit-message-title">앱 종료</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">{exitMessage}</p>
         <button autoFocus className="mt-5 min-h-12 w-full rounded-xl bg-blue-600 font-bold text-white" onClick={() => setExitMessage("")} type="button">확인</button>
-      </section>
-    </div>}
-    {cancelReauthRequired && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
-      <section aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
-        <h2 className="text-lg font-extrabold">전체 취소 확인</h2>
-        <p className="mt-2 text-sm text-slate-600">전체 주문 취소에는 현재 로그인 직원의 PIN 확인이 필요합니다.</p>
-        <input autoFocus autoComplete="current-password" className="mt-4 min-h-14 w-full rounded-xl border border-slate-300 text-center text-2xl tracking-[0.5em]" inputMode="numeric" maxLength={6} onChange={event => setCancelPin(event.target.value.replace(/\D/g, "").slice(0, 6))} type="password" value={cancelPin} />
-        {error && <p className="mt-2 text-sm text-red-600" role="alert">{error}</p>}
-        <div className="mt-4 grid grid-cols-2 gap-2"><button className="min-h-12 rounded-xl bg-slate-100 font-bold" onClick={() => { setCancelReauthRequired(false); setCancelPin(""); setError(""); }} type="button">취소</button><button className="min-h-12 rounded-xl bg-red-600 font-bold text-white disabled:opacity-40" disabled={busy || cancelPin.length !== 6} onClick={() => void sendChanges(cancelPin)} type="button">확인 후 전송</button></div>
       </section>
     </div>}
   </main>;

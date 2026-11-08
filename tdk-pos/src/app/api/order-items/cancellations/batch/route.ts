@@ -19,10 +19,12 @@ type CancellationRequest = { orderItemId: number; qty: number };
 type ComponentQuantityRequest = { orderItemId: number; quantity: number };
 
 export async function POST(request: Request) {
-  const posStaff = await getCurrentStaff();
-  const hosStaff = posStaff ? null : await getCurrentHosStaff();
+  const hosRequest = request.headers.get("x-tdk-program") === "HOS";
+  const posStaff = hosRequest ? null : await getCurrentStaff();
+  const hosStaff = hosRequest || !posStaff ? await getCurrentHosStaff() : null;
   const current = posStaff ?? hosStaff;
   const sharedMode = await getPosLoginMode() === "SHARED";
+  if (hosRequest && !hosStaff) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   if (!current && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
 
   try {
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
         const items = sessionItems.filter(item => item.sessionId === targetSessionId);
         return items.length > 0 && items.every(item => item.qty - (existingCancelledByItem.get(item.orderItemId) ?? 0) - (effectiveRequestedByItem.get(item.orderItemId) ?? 0) === 0);
       });
-      const requiresReauth = shouldRequireCancellationPin(isFullOrderCancellation);
+      const requiresReauth = shouldRequireCancellationPin(isFullOrderCancellation, hosRequest ? "HOS" : "POS");
       const [sharedStaff] = sharedMode ? await tx.select({ staffId: staff.staffId }).from(staff).where(and(eq(staff.staffCode, "000"), eq(staff.isActive, 1))).limit(1) : [];
       let cancelledByStaffId = sharedMode ? sharedStaff?.staffId : current?.staffId;
       if (requiresReauth) {
