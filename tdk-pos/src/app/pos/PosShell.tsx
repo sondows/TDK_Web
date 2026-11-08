@@ -104,8 +104,6 @@ export default function PosShell({ staffName, tables, takeouts, menus: initialMe
    setMenuRefreshing(false);
   }
  }, []);
- const [takeoutCarts, setTakeoutCarts] = useState<Record<number, PendingCartItem[]>>({});
- const [tableCarts, setTableCarts] = useState<Record<number, PendingCartItem[]>>({});
  const [businessOpening, setBusinessOpening] = useState(false);
  const [businessClosing, setBusinessClosing] = useState(false);
  const [businessCloseConfirmed, setBusinessCloseConfirmed] = useState(false);
@@ -142,7 +140,7 @@ export default function PosShell({ staffName, tables, takeouts, menus: initialMe
  const shutdownRequest = useRef(false);
  const [exitMessage, setExitMessage] = useState("");
 
- const router = useRouter(); const searchParams = useSearchParams(); const refreshedOnTableManagementReturn = useRef(false); const serverRefreshPendingRef = useRef(false); const queuedServerRefreshRef = useRef(false); const serverRefreshWatchdogRef = useRef<number | null>(null); const serverRefreshFnRef = useRef<((force?: boolean) => void) | null>(null); const serverSnapshotRef = useRef({ tables, takeouts, orders, orderItems, orderDetails, discounts, sessionFinancials }); const [selectedId, setSelectedId] = useState<number | null>(null); const [selectionVersion, setSelectionVersion] = useState(0); const [view, setView] = useState<"tables"|"takeout"|"reservation"|"waiting">("tables"); const [tab, setTab] = useState<"summary" | "pending" | "detail" | "table" | "kitchen">("summary"); const [fullscreen, setFullscreen] = useState(false); const [personModal, setPersonModal] = useState(false); const [discountModal, setDiscountModal] = useState(false); const [riceStockModal, setRiceStockModal] = useState(false); const [openingFundModal, setOpeningFundModal] = useState(false); const [personBusy, setPersonBusy] = useState(false); const [personError, setPersonError] = useState(""); const [cart, setCart] = useState<PendingCartItem[]>([]); const [quantityMenu, setQuantityMenu] = useState<Menu | null>(null); const [submittingOrder, setSubmittingOrder] = useState(false); const [orderError, setOrderError] = useState(""); const [menuResetVersion, setMenuResetVersion] = useState(0); const [tableOverrides, setTableOverrides] = useState<Record<number, Partial<Table>>>({}); const [customerNameOverrides, setCustomerNameOverrides] = useState<Record<number, string | null>>({}); const [newTakeouts, setNewTakeouts] = useState<Table[]>([]); const [cancelledTakeoutIds, setCancelledTakeoutIds] = useState<number[]>([]); const displayTables = tables.map(table => ({ ...table, ...tableOverrides[table.tableId], customerName: table.sessionId !== null && Object.prototype.hasOwnProperty.call(customerNameOverrides, table.sessionId) ? customerNameOverrides[table.sessionId] : table.customerName })); const displayTakeouts = [...takeouts.filter(session => !cancelledTakeoutIds.includes(session.sessionId!)), ...newTakeouts.filter(session => !takeouts.some(persisted => persisted.sessionId === session.sessionId) && !cancelledTakeoutIds.includes(session.sessionId!))]; const openTableCount = countOpenTables(displayTables);
+ const router = useRouter(); const searchParams = useSearchParams(); const refreshedOnTableManagementReturn = useRef(false); const serverRefreshPendingRef = useRef(false); const queuedServerRefreshRef = useRef(false); const serverRefreshWatchdogRef = useRef<number | null>(null); const serverRefreshFnRef = useRef<((force?: boolean) => void) | null>(null); const serverSnapshotRef = useRef({ tables, takeouts, orders, orderItems, orderDetails, discounts, sessionFinancials }); const [selectedId, setSelectedId] = useState<number | null>(null); const [selectionVersion, setSelectionVersion] = useState(0); const [view, setView] = useState<"tables"|"takeout"|"reservation"|"waiting">("tables"); const [tab, setTab] = useState<"summary" | "pending" | "detail" | "kitchen">("summary"); const [fullscreen, setFullscreen] = useState(false); const [personModal, setPersonModal] = useState(false); const [discountModal, setDiscountModal] = useState(false); const [riceStockModal, setRiceStockModal] = useState(false); const [openingFundModal, setOpeningFundModal] = useState(false); const [personBusy, setPersonBusy] = useState(false); const [personError, setPersonError] = useState(""); const [cart, setCart] = useState<PendingCartItem[]>([]); const [quantityMenu, setQuantityMenu] = useState<Menu | null>(null); const [submittingOrder, setSubmittingOrder] = useState(false); const [orderError, setOrderError] = useState(""); const [menuResetVersion, setMenuResetVersion] = useState(0); const [tableOverrides, setTableOverrides] = useState<Record<number, Partial<Table>>>({}); const [customerNameOverrides, setCustomerNameOverrides] = useState<Record<number, string | null>>({}); const [newTakeouts, setNewTakeouts] = useState<Table[]>([]); const [cancelledTakeoutIds, setCancelledTakeoutIds] = useState<number[]>([]); const displayTables = tables.map(table => ({ ...table, ...tableOverrides[table.tableId], customerName: table.sessionId !== null && Object.prototype.hasOwnProperty.call(customerNameOverrides, table.sessionId) ? customerNameOverrides[table.sessionId] : table.customerName })); const displayTakeouts = [...takeouts.filter(session => !cancelledTakeoutIds.includes(session.sessionId!)), ...newTakeouts.filter(session => !takeouts.some(persisted => persisted.sessionId === session.sessionId) && !cancelledTakeoutIds.includes(session.sessionId!))]; const openTableCount = countOpenTables(displayTables);
  const requestServerRefresh = useCallback((force = false) => {
   if (serverRefreshPendingRef.current) {
    if (force) queuedServerRefreshRef.current = true;
@@ -360,7 +358,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   setSubmittingOrder(true); setOrderError("");
   const message = await saveCartToSession(selected.sessionId);
   if (message === "OPENING_REQUIRED") requireBusinessOpening(() => void submitCart());
-  else if (message) setOrderError(message); else { setCart([]); if (view === "takeout") setTakeoutCarts(current => ({ ...current, [selected.sessionId!]: [] })); else setTableCarts(current => { const next = { ...current }; delete next[selected.tableId]; return next; }); setTab("summary"); requestServerRefresh(true); }
+  else if (message) setOrderError(message); else { setCart([]); setTab("summary"); requestServerRefresh(true); }
   setSubmittingOrder(false);
  };
  const tableSpicyChoice = (menu: Menu) => {
@@ -414,18 +412,23 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
    return;
   }
   if (refreshedOnTableManagementReturn.current) return;
+  const selectedTableId = Number(searchParams.get("selectedTableId"));
+  if (Number.isInteger(selectedTableId) && selectedTableId > 0 && selectedId !== selectedTableId && (submittingOrder || firstOrderBusy)) return;
   refreshedOnTableManagementReturn.current = true;
   setTableOverrides({});
-  const selectedTableId = Number(searchParams.get("selectedTableId"));
   if (Number.isInteger(selectedTableId) && selectedTableId > 0) {
+   if (selectedId !== selectedTableId) {
+    setCart([]);
+    setQuantityMenu(null);
+   }
    setSelectedId(selectedTableId);
    setSelectionVersion(version => version + 1);
    setTab("summary");
   }
   requestServerRefresh(true);
   window.history.replaceState(null, "", "/tdkpos");
- }, [searchParams, requestServerRefresh]);
- const resetPosWorkspace = useCallback(() => { setSelectedId(null); setSelectionVersion(version => version + 1); setFirstOrderPersonModal(false); setFirstOrderBusy(false); setFirstOrderError(""); setCart([]); setTableCarts({}); setQuantityMenu(null); setDiscountModal(false); setOrderError(""); setTab("summary"); setMenuResetVersion(version => version + 1); }, []);
+ }, [searchParams, requestServerRefresh, selectedId, submittingOrder, firstOrderBusy]);
+ const resetPosWorkspace = useCallback(() => { setSelectedId(null); setSelectionVersion(version => version + 1); setFirstOrderPersonModal(false); setFirstOrderBusy(false); setFirstOrderError(""); setCart([]); setQuantityMenu(null); setDiscountModal(false); setOrderError(""); setTab("summary"); setMenuResetVersion(version => version + 1); }, []);
  const handleOpenCashDrawer = useCallback(async () => {
   if (drawerOpeningRef.current) return;
   drawerOpeningRef.current = true;
@@ -446,13 +449,16 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   if (selected?.sessionKind && selected.sessionKind !== "DINE_IN" && selected.sessionId) {
    setCancelledTakeoutIds(current => [...current, selected.sessionId!]);
    setNewTakeouts(current => current.filter(session => session.sessionId !== selected.sessionId));
-   setTakeoutCarts(current => { const next = { ...current }; delete next[selected.sessionId!]; return next; });
   }
   setTableOverrides({});
   resetPosWorkspace();
   requestServerRefresh(true);
  }, [resetPosWorkspace, requestServerRefresh, selected]);
- const changeWorkTab = (nextView: typeof view) => { if (nextView === view) return; if (view === "takeout" && selected?.sessionId) setTakeoutCarts(current => ({ ...current, [selected.sessionId!]: cart })); resetPosWorkspace(); setView(nextView); };
+ const changeWorkTab = (nextView: typeof view) => {
+  if (nextView === view || submittingOrder || firstOrderBusy) return;
+  resetPosWorkspace();
+  setView(nextView);
+ };
  useEffect(() => {
   if (!Number.isInteger(idleResetSeconds) || idleResetSeconds <= 0 || isBlockingUiOpen) return;
   let timer: number | undefined;
@@ -653,16 +659,34 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
    const message = await saveCartToSession(sessionId);
    if (message === "OPENING_REQUIRED") { requireBusinessOpening(() => requestServerRefresh(true)); setOrderError("준비금 등록 후 주문을 다시 눌러주세요."); return; }
    if (message) { setOrderError(message); return; }
-   setCart([]); setTableCarts(current => { const next = { ...current }; delete next[selected.tableId]; return next; }); setTab("summary"); requestServerRefresh(true);
+   setCart([]); setTab("summary"); requestServerRefresh(true);
   } catch { setFirstOrderError("네트워크 오류가 발생했습니다."); }
   finally { setFirstOrderBusy(false); }
  }
  async function savePersonCount(personCount: number, babyCount: number) { if (!selected?.sessionId || personBusy) return; setPersonBusy(true); setPersonError(""); try { const response = await fetch(`/api/table-sessions/${selected.sessionId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personCount, babyCount }) }); const result = await response.json() as { success?: boolean; message?: string; personCount?: number; babyCount?: number }; if (!response.ok || !result.success || result.personCount === undefined || result.babyCount === undefined) { setPersonError(result.message ?? "인원 정보를 저장할 수 없습니다."); return; } setTableOverrides(current => ({ ...current, [selected.tableId]: { personCount: result.personCount, babyCount: result.babyCount } })); setPersonModal(false); } catch { setPersonError("네트워크 오류가 발생했습니다."); } finally { setPersonBusy(false); } }
- function choose(t: Table) { if (selectedId !== t.tableId) { if (selectedId !== null) setTableCarts(current => ({ ...current, [selectedId]: cart })); setCart(tableCarts[t.tableId] ?? []); } setMenuResetVersion(version => version + 1); setSelectionVersion(version => version + 1); setSelectedId(t.tableId); setTab("summary"); setFirstOrderPersonModal(false); setDiscountModal(false); setFirstOrderError(""); }
+ function choose(t: Table) {
+  const targetChanged = view !== "tables" || selectedId !== t.tableId;
+  if (targetChanged) {
+   if (submittingOrder || firstOrderBusy) return;
+   setCart([]);
+   setQuantityMenu(null);
+  }
+  setMenuResetVersion(version => version + 1);
+  setSelectionVersion(version => version + 1);
+  setSelectedId(t.tableId);
+  setTab("summary");
+  setFirstOrderPersonModal(false);
+  setDiscountModal(false);
+  setFirstOrderError("");
+ }
  function selectTakeout(session: TakeoutSession) {
-  if (selected?.sessionKind && selected.sessionKind !== "DINE_IN" && selected.sessionId) setTakeoutCarts(current => ({ ...current, [selected.sessionId!]: cart }));
+  const sameTarget = view === "takeout" && selectedId === session.tableId && selected?.sessionKind !== "DINE_IN" && selected?.sessionId === session.sessionId;
+  if (!sameTarget) {
+   if (submittingOrder || firstOrderBusy) return;
+   setCart([]);
+   setQuantityMenu(null);
+  }
   setSelectedId(session.tableId);
-  setCart(takeoutCarts[session.sessionId] ?? []);
   setSelectionVersion(version => version + 1);
   setTab("summary");
   setOrderError("");
@@ -675,7 +699,6 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
  function takeoutCancelled(sessionId: number) {
   setCancelledTakeoutIds(current => [...current, sessionId]);
   setNewTakeouts(current => current.filter(session => session.sessionId !== sessionId));
-  setTakeoutCarts(current => { const next = { ...current }; delete next[sessionId]; return next; });
   if (selected?.sessionId === sessionId) { setSelectedId(null); setCart([]); }
   requestServerRefresh(true);
  }
@@ -683,13 +706,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   <div className="flex min-h-0 flex-col gap-3"><section className="pos-display-copy shrink-0 rounded-2xl bg-white p-4 shadow-sm"><header><div className="flex items-center justify-between gap-3"><p className="text-xs font-bold tracking-[.18em] text-blue-600">TDK POS</p><div className="flex items-center gap-1"><button aria-label="POS 데이터 새로고침" title="POS 데이터 새로고침" disabled={menuRefreshing} onClick={refreshPosData} className={`${POS_TOP_CONTROL_CLASS_NAME} h-[30px] w-[30px] shrink-0 p-0 text-base disabled:opacity-50`} type="button">↻</button><button aria-label="영업준비금 등록" onClick={() => setOpeningFundModal(true)} className={POS_TOP_CONTROL_CLASS_NAME} type="button">시재</button><button aria-pressed={fullscreen} onClick={() => void handleFullscreen()} className={`${POS_TOP_CONTROL_CLASS_NAME} whitespace-nowrap`} type="button">{fullscreen ? "전체화면 종료" : "전체화면"}</button><button onClick={() => { setExitMessage(""); setExitDialogOpen(true); }} className={POS_TOP_CONTROL_CLASS_NAME} type="button">{text.exit}</button></div></div><h1 className="mt-1 text-xl font-bold">{text.store}</h1><div className="mt-2 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="text-sm font-semibold">{staffName}</span><LogoutButton /></div><time className="text-xs text-slate-500">{new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short" }).format(new Date())}</time></div></header></section>
   <OrderSummaryPanel selected={selected} customerSelectOpen={customerSelectOpen} setCustomerSelectOpen={setCustomerSelectOpen} items={items} total={displayTotal} cart={cart} cartTotal={cartTotal} tab={tab} setTab={setTab} submitCart={submitCart} clearCart={() => {
    if (!selected || !cart.length || submittingOrder || firstOrderBusy) return;
-   const target = selected;
    setCart([]);
-   if (view === "takeout" && target.sessionId !== null) {
-    setTakeoutCarts(current => ({ ...current, [target.sessionId!]: [] }));
-   } else if (view === "tables") {
-    setTableCarts(current => { const next = { ...current }; delete next[target.tableId]; return next; });
-   }
    setOrderError("");
   }} adjustCartItem={adjustCartItem} adjustCartComponent={adjustCartComponent} submitting={submittingOrder || firstOrderBusy} submitError={orderError} orderDetails={orderDetails} workspaceResetVersion={menuResetVersion} selectionVersion={selectionVersion} onBlockingUiChange={setOrderSummaryBlockingUiOpen} onCancellationSuccess={() => requestServerRefresh(true)} onPaymentCompleted={handlePaymentCompleted} onCashPaymentRegistered={() => void handleOpenCashDrawer()} onBusinessOpeningRequired={requireBusinessOpening} onPrintReceipt={(checkoutId, isReprint) => sendReceipt(checkoutId ? { checkoutId, isReprint } : { tableId: selected?.tableId })} receiptPrinting={receiptPrinting} party={selectedParty} physicalSessionIds={selectedPhysicalSessionIds} sessionTableNos={Object.fromEntries([...displayTables, ...displayTakeouts].flatMap(table => table.sessionId === null ? [] : [[table.sessionId, table.tableNo]]))} discounts={discounts} menuModifiers={menuModifiers} potMenuIds={menus.filter(menu => menu.kdsKind === "POT").map(menu => menu.menuId)} onCustomerSelectionChanged={(sessionIds, customerName, customerId) => setSessionCustomerName(sessionIds, customerName, customerId)} onOptionSaved={(sessionId, optionName, orderItemId) => { setTableSpicyOverrides(current => ({ ...current, [sessionId]: { name: optionName, orderItemId, expiresAt: Date.now() + 10000 } })); requestServerRefresh(true); }} /></div>
   <section className={`grid min-h-0 ${view === "takeout" ? "grid-rows-[10%_minmax(0,1fr)]" : view === "tables" ? "grid-rows-[10%_minmax(0,1fr)_minmax(140px,18%)]" : "grid-rows-[10%_60%_30%]"} rounded-2xl bg-white shadow-sm`} data-pos-middle-panel style={view === "tables" ? { gridTemplateRows: POS_TABLE_GRID_ROWS } : undefined}><div className="flex min-h-0 flex-col justify-center px-4" data-pos-top-tabs><div className="grid w-full grid-cols-4 gap-2">{([ ["tables", `테이블(${openTableCount})`], ["takeout", `포장(${displayTakeouts.length})`], ["reservation", "예약(0)"], ["waiting", "대기자(0)"] ] as const).map(([key, name]) => <button key={key} onClick={() => changeWorkTab(key)} className={`relative overflow-hidden whitespace-nowrap rounded-xl px-1 py-3 text-sm font-bold ${view === key ? `${viewTabStyles[key].activeClass} text-white` : "bg-slate-100 text-slate-600"}`} type="button"><span aria-hidden="true" className="pointer-events-none absolute left-0 top-0 size-7 rounded-br-[2rem] brightness-75" style={{ backgroundColor: viewTabStyles[key].color }} /><span className="relative">{name}</span></button>)}</div><div aria-hidden="true" className={`mt-1.5 h-[3px] w-full rounded-full ${viewTabStyles[view].activeClass}`} /></div>{view === "tables" ? <><TableLayoutRenderer tables={displayTables} renderTable={(table, fixedPosition) => <TableVisual fixedPosition={fixedPosition} selectedGroupId={selectedGroupId} table={table} tables={displayTables} selected={table.tableId === selectedId} choose={() => choose(table)} />} className="justify-self-center rounded-2xl border border-dashed border-slate-300 bg-slate-50" debugName="pos-table-area" style={{ width: "calc(100% - 2rem)", overflow: "visible" }}><PosFanLayer /></TableLayoutRenderer><div className="min-h-0 px-4 pb-4 pt-1.5"><RequestMessagePanel /></div></> : view === "takeout" ? <TakeoutPanel sessions={takeoutPanelSessions} selectedId={selectedId} onSelect={selectTakeout} onCreated={takeoutCreated} onCancelled={takeoutCancelled} onBlockingUiChange={setTakeoutBlockingUiOpen} onBusinessOpeningRequired={requireBusinessOpening} /> : <><p className="flex min-h-0 items-center justify-center px-4 text-sm text-slate-400">준비 중입니다.</p><div aria-hidden="true" className="min-h-0" /></>}</section>

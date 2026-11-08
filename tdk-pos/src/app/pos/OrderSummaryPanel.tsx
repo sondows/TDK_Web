@@ -72,7 +72,7 @@ type OrderDetail = {
   status: string;
   items: DetailItem[];
 };
-type Tab = "summary" | "pending" | "detail" | "table" | "kitchen";
+type Tab = "summary" | "pending" | "detail" | "kitchen";
 type Draft = Record<
   number,
   { checked: boolean; keep: number; touched: boolean }
@@ -120,17 +120,23 @@ export const pendingCartItemKey = (item: PendingCartItem) => {
   return `${item.menuId}:${item.unitPrice}:${item.isComplimentary ? "complimentary" : "paid"}:${JSON.stringify(item.options ?? [])}:${componentSignature}`;
 };
 const styles: Record<Tab, { bg: string; color: string; tint: string }> = {
-  pending: { bg: "bg-[#DC2626]", color: "#DC2626", tint: "#FEF2F2" },
+  pending: { bg: "bg-[#7C3AED]", color: "#7C3AED", tint: "#F5F3FF" },
   summary: ORDER_INFO_STYLES.summary,
-  detail: ORDER_INFO_STYLES.detail,
-  table: { bg: "bg-[#EA580C]", color: "#EA580C", tint: "#FFF7ED" },
+  detail: { bg: "bg-[#EA580C]", color: "#EA580C", tint: "#FFF9F4" },
   kitchen: { bg: "bg-[#2563EB]", color: "#2563EB", tint: "#EFF6FF" },
 };
+const detailOrangeTheme = {
+  border: "border-[#FED7AA]",
+  text: "text-[#EA580C]",
+  deepText: "text-[#C2410C]",
+  selected: "border-[#FED7AA] bg-[#FFF9F4] text-[#C2410C]",
+};
+const cancelActionButtonClass = "bg-[#B91C1C] text-white hover:bg-[#991B1B] active:bg-[#991B1B] disabled:bg-[#FECACA] disabled:text-[#B91C1C]";
+const cancelModeEntryButtonClass = "border border-[#FECACA] bg-[#FFF1F2] text-[#DC2626] transition-colors hover:bg-[#FFE4E6] active:bg-[#FECDD3] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DC2626] disabled:cursor-not-allowed disabled:opacity-50";
 const tabs: [Tab, string][] = [
   ["pending", "주문예정"],
   ["summary", "주문합계"],
   ["detail", "주문상세"],
-  ["table", "주문순서"],
   ["kitchen", "주방알림"],
 ];
 const reasons = [
@@ -246,29 +252,27 @@ export default function OrderSummaryPanel({
   } | null>(null);
   const [spicyBusy, setSpicyBusy] = useState(false);
   const [spicyError, setSpicyError] = useState<{ key: string; message: string } | null>(null);
-  const [clearCartConfirmTarget, setClearCartConfirmTarget] = useState<{
-    selectionVersion: number; tableId: number; sessionId: number | null; cartSignature: string;
-  } | null>(null);
-  const clearCartConfirmLockRef = useRef(false);
+  const [cartClearedToastId, setCartClearedToastId] = useState<number | null>(null);
+  const cartClearLockRef = useRef(false);
+  const cartClearedToastCounterRef = useRef(0);
   const cartSignature = JSON.stringify(cart);
+  useEffect(() => {
+    if (cartClearedToastId === null) return;
+    const timer = window.setTimeout(() => setCartClearedToastId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [cartClearedToastId]);
   const requestClearCart = () => {
-    if (!selected || !cart.length || submitting) return;
-    clearCartConfirmLockRef.current = false;
-    setClearCartConfirmTarget({ selectionVersion, tableId: selected.tableId, sessionId: selected.sessionId, cartSignature });
-  };
-  const closeClearCartConfirm = () => {
-    clearCartConfirmLockRef.current = false;
-    setClearCartConfirmTarget(null);
-  };
-  const confirmClearCart = () => {
-    if (clearCartConfirmLockRef.current) return;
-    clearCartConfirmLockRef.current = true;
-    const target = clearCartConfirmTarget;
-    const targetStillMatches = Boolean(target && selected && !submitting && cart.length > 0 &&
-      target.selectionVersion === selectionVersion && target.tableId === selected.tableId &&
-      target.sessionId === selected.sessionId && target.cartSignature === cartSignature);
-    setClearCartConfirmTarget(null);
-    if (targetStillMatches) clearCart();
+    if (!selected || !cart.length || submitting || cartClearLockRef.current) return;
+    const target = { selectionVersion, tableId: selected.tableId, sessionId: selected.sessionId, cartSignature };
+    if (target.selectionVersion !== selectionVersion || target.tableId !== selected.tableId ||
+      target.sessionId !== selected.sessionId || target.cartSignature !== JSON.stringify(cart)) return;
+    cartClearLockRef.current = true;
+    try {
+      clearCart();
+      setCartClearedToastId(++cartClearedToastCounterRef.current);
+    } finally {
+      cartClearLockRef.current = false;
+    }
   };
   const displayOrderDetails = orderDetails.map(order => ({ ...order, items: order.items.map(item => {
     const override = spicyOverrides[item.orderItemId];
@@ -541,15 +545,16 @@ export default function OrderSummaryPanel({
   };
   const renderDetailRows = (readOnly: boolean, scopedDetails = details, showTable = false) => scopedDetails.map((o, n) => (
     <section
-      className="pos-display-copy border-b border-violet-200 py-2 last:border-0"
+      className={`pos-display-copy border-b py-2 last:border-0 ${detailOrangeTheme.border}`}
       key={o.orderId}
     >
-      <header className="flex items-baseline gap-1.5 border-b border-violet-100 pb-1 text-sm font-bold text-violet-800">
+      <header className={`flex items-baseline gap-1.5 border-b pb-1 text-sm font-bold ${detailOrangeTheme.border} ${detailOrangeTheme.deepText}`}>
         {showTable && <span>{sessionTableNos[o.sessionId] ? salePlaceLabel(sessionTableNos[o.sessionId]) : `세션 ${o.sessionId}`} ·</span>}
         <span>{scopedDetails.slice(0, n).filter(previous => previous.sessionId === o.sessionId).length + 1}차 주문</span>
-        <time className="font-medium text-violet-700">({time(o.orderedAt)})</time>
+        <time className={`font-medium ${detailOrangeTheme.text}`}>({time(o.orderedAt)})</time>
       </header>
       {orderedItems(o.items).map((i) => {
+        const cancellationLayout = !readOnly && c.mode;
         const d = draft(i),
           editableComponent = !readOnly && c.mode && isFreeComponent(i) && i.status !== "CANCELLED" &&
             o.items.some(parent => parent.orderItemId === i.parentOrderItemId && parent.status !== "CANCELLED") &&
@@ -562,15 +567,17 @@ export default function OrderSummaryPanel({
           effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
         return (
           <div
-            className={`pos-display-copy mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-red-50" : ""} ${selectedForCancellation ? "bg-red-50 ring-1 ring-red-200" : ""}`}
+            className={`pos-display-copy mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-orange-50" : ""} ${selectedForCancellation ? "bg-orange-50 ring-1 ring-orange-200" : ""}`}
             key={i.orderItemId}
             onClick={() => selectable && (editableComponent
               ? edit(i, { checked: !d.checked, keep: i.effectiveQty, touched: true })
               : toggle(i))}
           >
-            <div className="grid grid-cols-[minmax(0,1fr)_52px_52px_68px] items-center gap-1 text-sm">
+            <div className={`grid items-center text-sm ${cancellationLayout
+              ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5"
+              : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"}`}>
               <span
-                className={`truncate font-medium ${selectedForCancellation ? (editableComponent ? "text-red-700" : "text-red-700 line-through") : fullyCancelled ? "text-slate-500 line-through" : ""}`}
+                className={`truncate font-medium ${selectedForCancellation ? (editableComponent ? "text-orange-800" : "text-orange-800 line-through") : fullyCancelled ? "text-slate-500 line-through" : ""}`}
               >
                 {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
                 {i.itemName}{i.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
@@ -581,7 +588,7 @@ export default function OrderSummaryPanel({
                 {money(i.itemType === "SERVICE" ? 0 : Number(i.unitPrice))}
               </span>
               {selectedForCancellation ? (
-                <span className="grid grid-cols-[1.5rem_1fr_1.5rem] items-center text-center">
+                <span className="grid grid-cols-[40px_minmax(2ch,1fr)_40px] items-center gap-2 text-center">
                   <button
                     disabled={d.keep <= (editableComponent ? 0 : 1)}
                     onClick={(e) => {
@@ -593,11 +600,11 @@ export default function OrderSummaryPanel({
                       });
                     }}
                     type="button"
-                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700"
+                    className="size-10 rounded-lg border border-orange-200 bg-white text-lg font-bold text-orange-700"
                   >
                     −
                   </button>
-                  <b className="tabular-nums text-red-700">{d.keep}</b>
+                  <b className="tabular-nums text-orange-700">{d.keep}</b>
                   <button
                     disabled={d.keep >= (editableComponent ? i.qty : i.effectiveQty)}
                     onClick={(e) => {
@@ -609,7 +616,7 @@ export default function OrderSummaryPanel({
                       });
                     }}
                     type="button"
-                    className="size-6 rounded border border-red-200 bg-white font-bold text-red-700"
+                    className="size-10 rounded-lg border border-orange-200 bg-white text-lg font-bold text-orange-700"
                   >
                     +
                   </button>
@@ -628,7 +635,7 @@ export default function OrderSummaryPanel({
               </b>
             </div>
             {i.cancelledQty > 0 && !fullyCancelled && (
-              <p className="ml-2 mt-1 text-xs font-semibold text-violet-700">
+              <p className={`ml-2 mt-1 text-xs font-semibold ${detailOrangeTheme.text}`}>
                 취소 완료 {i.cancelledQty}
               </p>
             )}
@@ -708,12 +715,12 @@ export default function OrderSummaryPanel({
   ) : null;
   const partyOrdersSection = (viewTab: "summary" | "detail") =>
     partySessionIds.length > 0 ? (
-      <section className="mt-5 border-t-2 border-violet-200 pt-3">
-        <h3 className="mb-2 text-sm font-extrabold text-violet-800">
+      <section className={`mt-5 border-t-2 pt-3 ${viewTab === "detail" ? detailOrangeTheme.border : "border-violet-200"}`}>
+        <h3 className={`mb-2 text-sm font-extrabold ${viewTab === "detail" ? detailOrangeTheme.deepText : "text-violet-800"}`}>
           일행 주문
         </h3>
         {viewTab !== "summary" && (
-          <div className="grid grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1 border-b border-violet-100 pb-1 text-[11px] font-bold text-slate-500">
+          <div className={`grid ${c.mode && viewTab === "detail" ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5" : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"} border-b pb-1 text-[11px] font-bold text-slate-500 ${viewTab === "detail" ? detailOrangeTheme.border : "border-violet-100"}`}>
             <span>메뉴명</span>
             <span className="text-right">단가</span>
             <span className="text-center">수량</span>
@@ -725,7 +732,7 @@ export default function OrderSummaryPanel({
             <div className="space-y-1" key={item.rowKey}>
               {[item, ...item.components].map((row, index) => (
                 <div
-                  className={`grid grid-cols-[minmax(0,1fr)_52px_52px_68px] items-center gap-1 text-sm ${index > 0 ? "pl-3 text-slate-600" : ""}`}
+                  className={`grid ${viewTab === "detail" && c.mode ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5" : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"} items-center text-sm ${index > 0 ? "pl-3 text-slate-600" : ""}`}
                   key={row.rowKey}
                 >
                   <span className="min-w-0 truncate font-medium">
@@ -747,14 +754,14 @@ export default function OrderSummaryPanel({
             </div>
           ))}
         </div>
-        <div className="mt-3 space-y-1 border-t border-violet-100 pt-3 text-sm">
+        <div className={`mt-3 space-y-1 border-t pt-3 text-sm ${viewTab === "detail" ? detailOrangeTheme.border : "border-violet-100"}`}>
           <div className="flex justify-between"><span>일행 주문금액</span><b>{money(partyGross)}</b></div>
           {partyDiscountTotal > 0 && <div className="flex justify-between"><span>할인금액</span><b className="text-red-600">- {money(partyDiscountTotal)}</b></div>}
           {partyPrepaidTotal > 0 && <div className="flex justify-between"><span>선불금액</span><b className="text-blue-600">- {money(partyPrepaidTotal)}</b></div>}
         </div>
-        <div className="mt-2 flex justify-between border-t border-violet-200 pt-3 text-base font-extrabold">
+        <div className={`mt-2 flex justify-between border-t pt-3 text-base font-extrabold ${viewTab === "detail" ? detailOrangeTheme.border : "border-violet-200"}`}>
           <span>일행 받을금액</span>
-          <b className="text-xl font-extrabold text-violet-700">
+          <b className={`text-xl font-extrabold ${viewTab === "detail" ? detailOrangeTheme.text : "text-violet-700"}`}>
             {money(partyReceivable)}
           </b>
         </div>
@@ -776,7 +783,7 @@ export default function OrderSummaryPanel({
             ? readOnly ? renderDetailRows(true) : rows
             : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>}
         {hasBillingDiscount && <>
-          <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : "border-violet-200"} pt-3 text-base font-bold text-slate-700`}>
+          <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : detailOrangeTheme.border} pt-3 text-base font-bold text-slate-700`}>
             <span>주문금액</span>
             <b>{money(billingGrossTotal)}</b>
           </div>
@@ -786,7 +793,7 @@ export default function OrderSummaryPanel({
           </div>
         </>}
         {hasBillingDiscount && prepaidRow}
-        <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : "border-violet-200"} pt-3 text-base font-bold text-slate-900`}>
+        <div className={`mt-3 flex justify-between border-t ${viewTab === "summary" ? "border-blue-200" : detailOrangeTheme.border} pt-3 text-base font-bold text-slate-900`}>
           <span>받을금액</span>
           <b className="text-lg font-extrabold text-blue-700">{money(receivableAmount)}</b>
         </div>
@@ -796,7 +803,7 @@ export default function OrderSummaryPanel({
   );
   return (
     <section className="relative flex min-h-0 flex-1 flex-col rounded-2xl bg-white p-4 shadow-sm">
-      <nav className="grid grid-cols-5 gap-1 rounded-xl bg-slate-100 p-1">
+      <nav className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">
         {tabs.map(([k, l]) => (
           <button
             className={`relative overflow-hidden rounded-lg py-2 text-[10px] font-bold ${tab === k ? `${styles[k].bg} text-white` : "border border-slate-200 bg-white text-slate-500"}`}
@@ -820,7 +827,7 @@ export default function OrderSummaryPanel({
       >
         {tab !== "kitchen" && <>
           <OrderTableInfoHeader selected={selected} selectedCustomer={selectedCustomer} partyTableNos={partyTableNos} partyTotals={partyTotals} now={now} onSelectCustomer={() => setCustomerSelectOpen(true)} />
-          <OrderSummaryColumnHeader className="mt-3" />
+          <OrderSummaryColumnHeader className="mt-3" cancellationMode={tab === "detail" && c.mode} />
         </>}
         <div className="min-h-0 flex flex-1 flex-col">
           {tab === "kitchen" ? (
@@ -842,7 +849,7 @@ export default function OrderSummaryPanel({
                   </p>
                 )}
               </div>
-              <div className="flex justify-between border-t border-red-200 pt-3 font-bold">
+              <div className="flex justify-between border-t border-violet-200 pt-3 font-bold">
                 <span>주문 예정 금액</span>
                 <b className="text-blue-700">{money(cartTotal)}</b>
               </div>
@@ -850,18 +857,12 @@ export default function OrderSummaryPanel({
                 <p className="text-sm text-red-600">{submitError}</p>
               )}
             </div>
-          ) : tab === "detail" ? (
-            renderOrderContent("detail")
-          ) : (
-            <p className="py-6 text-center text-sm text-slate-400">
-              해당 기능은 준비 중입니다.
-            </p>
-          )}
+          ) : renderOrderContent("detail")}
         </div>
         {tab === "detail" &&
           (c.mode ? (
             <div className="shrink-0 pb-2.5 pt-3">
-              <p className="mb-2 text-center text-sm font-medium text-violet-700">
+              <p className={`mb-2 text-center text-sm font-medium ${detailOrangeTheme.deepText}`}>
                 취소할 메뉴를 선택하고 유지 수량을 조절하세요.
               </p>
               {c.error && (
@@ -879,7 +880,7 @@ export default function OrderSummaryPanel({
                   취소
                 </button>
                 <button
-                  className="min-h-14 rounded-xl bg-[#7C3AED] font-bold text-white"
+                  className={`min-h-14 rounded-xl font-bold ${cancelActionButtonClass}`}
                   disabled={(!chosen.length && !componentChanges.length) || c.busy}
                   onClick={() => {
                     onBlockingUiChange(true);
@@ -894,7 +895,7 @@ export default function OrderSummaryPanel({
           ) : (
             <div className="shrink-0 pb-2.5 pt-3">
               <button
-                className="min-h-14 w-full rounded-xl bg-[#7C3AED] font-bold text-white"
+                className={`min-h-14 w-full rounded-xl font-bold ${cancelModeEntryButtonClass}`}
                 disabled={!sessionId || (!cancelables.length && !freeComponents.length)}
                 onClick={start}
                 type="button"
@@ -1012,18 +1013,9 @@ export default function OrderSummaryPanel({
           onSelect={customer => { selectCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
         />
       )}
-      {clearCartConfirmTarget && clearCartConfirmTarget.selectionVersion === selectionVersion && (
-        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/50 p-4" onClick={closeClearCartConfirm}>
-          <section aria-labelledby="pos-clear-cart-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="alertdialog">
-            <h2 className="text-lg font-extrabold text-slate-800" id="pos-clear-cart-title">장바구니 비우기</h2>
-            <p className="mt-3 text-sm leading-relaxed text-slate-600">장바구니에 담긴 모든 메뉴를 삭제하시겠습니까?</p>
-            <div className="mt-5 grid grid-cols-2 gap-2">
-              <button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50" onClick={closeClearCartConfirm} type="button">취소</button>
-              <button className="min-h-12 rounded-xl bg-red-600 font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={!cart.length || submitting} onClick={confirmClearCart} type="button">비우기</button>
-            </div>
-          </section>
-        </div>
-      )}
+      {cartClearedToastId !== null && <div aria-live="polite" className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center px-4" role="status">
+        <div className="rounded-full bg-slate-800/95 px-4 py-2 text-sm font-semibold text-white shadow-lg">장바구니를 비웠습니다.</div>
+      </div>}
     </section>
   );
 }
@@ -1088,7 +1080,7 @@ function Confirm({
             </div>
             <div className="grid min-h-[48px] shrink-0 items-center border-t border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={cancelDetailGridStyle}>
               <span className="col-span-4 text-xs font-bold text-slate-500">취소금액</span>
-              <b className="col-start-5 text-right font-extrabold text-violet-700">{money(amount)}</b>
+              <b className={`col-start-5 text-right font-extrabold ${detailOrangeTheme.text}`}>{money(amount)}</b>
             </div>
           </div>
         </section>
@@ -1098,7 +1090,7 @@ function Confirm({
             {reasons.map((r, index) => (
               <button
                 autoFocus={index === 0}
-                className={`min-h-11 rounded-lg border text-sm font-bold ${c.reason === r ? "border-violet-600 bg-violet-50 text-violet-700" : "border-slate-300 bg-white text-slate-700"}`}
+                className={`min-h-11 rounded-lg border text-sm font-bold ${c.reason === r ? detailOrangeTheme.selected : "border-slate-300 bg-white text-slate-700"}`}
                 key={r}
                 onClick={() => setReason(r)}
                 type="button"
@@ -1118,7 +1110,7 @@ function Confirm({
         </section>
         {c.error && <p className="mt-2 text-sm text-red-600">{c.error}</p>}
         <button
-          className="mt-5 min-h-12 w-full rounded-xl bg-[#7C3AED] font-bold text-white"
+          className={`mt-5 min-h-12 w-full rounded-xl font-bold ${cancelActionButtonClass}`}
           disabled={c.busy || (c.reason === "기타" && !c.detail.trim())}
           onClick={submit}
           type="button"

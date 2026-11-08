@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getHosMenuCategoryAtTop } from "./hos-menu-scroll.ts";
+import { getHosMenuCategoryAtTop, getHosMenuTailSpacerHeight } from "./hos-menu-scroll.ts";
 import { menuCategoryDisplayName } from "./menu-category-display.ts";
 
 test("HOS menu labels reuse the POS menu management category display names", () => {
@@ -21,4 +21,10 @@ test("menu scrolling activates the section whose start has reached the list top"
 
 test("menu scroll tracking returns no active section when catalog sections are empty", () => {
   assert.equal(getHosMenuCategoryAtTop([], 0), null);
+});
+
+test("menu tail spacer provides only the missing scroll range to align the last section", () => {
+  assert.equal(getHosMenuTailSpacerHeight(600, 400, 800), 200);
+  assert.equal(getHosMenuTailSpacerHeight(600, 400, 1200), 0);
+  assert.equal(getHosMenuTailSpacerHeight(600, 400, 950), 50);
 });
