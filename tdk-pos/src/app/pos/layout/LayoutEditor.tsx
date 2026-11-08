@@ -6,6 +6,7 @@ import { clampTableLayoutPosition, clampTableLayoutToCanvas, layoutSizeFromDispl
 import TableShape from "../TableShape";
 import TableLayoutRenderer from "../TableLayoutRenderer";
 import ManagementPageHeader from "../admin/ManagementPageHeader";
+import { DEFAULT_POS_FAN_LAYOUTS, isValidPosFanLayouts, type PosFanLayout } from "@/lib/pos-fan-layout";
 
 type Table = TableLayoutValues & { tableId: number; tableNo: string; tableName: string | null; capacity: number; isActive: number };
 type NewTable = { tableNo: string; capacity: number };
@@ -27,6 +28,23 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
   const currentBodySize = current ? posMainFixedTableBodySize(current) : null;
   const currentSizeLimits = current ? tableBodySizeLimitsForCanvas(current, canvasSize.width, canvasSize.height) : TABLE_BODY_SIZE_LIMITS;
   const [sizeDraft, setSizeDraft] = useState<{ tableId: number; width: string; height: string } | null>(null);
+  const [fans, setFans] = useState<PosFanLayout[]>(DEFAULT_POS_FAN_LAYOUTS);
+  const [selectedFanId, setSelectedFanId] = useState<number | null>(null);
+  const [fansLoaded, setFansLoaded] = useState(readOnly);
+  const [fanOverlap, setFanOverlap] = useState(false);
+
+  useEffect(() => {
+    if (readOnly) return;
+    let active = true;
+    fetch("/api/admin-center/pos/fans/layout", { cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error("fan layout unavailable");
+      const result = await response.json() as { fans?: unknown };
+      if (!active || !isValidPosFanLayouts(result.fans)) throw new Error("invalid fan layout");
+      setFans(result.fans);
+      setFansLoaded(true);
+    }).catch(() => { if (active) setMessage("선풍기 배치를 불러오지 못했습니다. 테이블 배치는 계속 편집할 수 있습니다."); });
+    return () => { active = false; };
+  }, [readOnly]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); };
@@ -59,9 +77,49 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
       ? { x: ((event.clientX - rect.left) / rect.width) * 100, y: ((event.clientY - rect.top) / rect.height) * 100 }
       : null;
   };
+  const fanOverlaps = (fan: PosFanLayout, x = fan.positionX, y = fan.positionY) => {
+    const fanHalfSize = 32;
+    const left = (x / 100) * canvasSize.width - fanHalfSize;
+    const right = left + fanHalfSize * 2;
+    const top = (y / 100) * canvasSize.height - fanHalfSize;
+    const bottom = top + fanHalfSize * 2;
+    const hitsTable = tables.some(table => {
+      if (!table.isActive) return false;
+      const size = posMainFixedTableSize(table);
+      const width = table.rotation === 90 || table.rotation === 270 ? size.height : size.width;
+      const height = table.rotation === 90 || table.rotation === 270 ? size.width : size.height;
+      const cx = (table.positionX / 100) * canvasSize.width;
+      const cy = (table.positionY / 100) * canvasSize.height;
+      return left < cx + width / 2 && right > cx - width / 2 && top < cy + height / 2 && bottom > cy - height / 2;
+    });
+    const hitsFan = fans.some(other => other.fanId !== fan.fanId && other.isVisible &&
+      Math.abs(((x - other.positionX) / 100) * canvasSize.width) < fanHalfSize * 2 &&
+      Math.abs(((y - other.positionY) / 100) * canvasSize.height) < fanHalfSize * 2);
+    return hitsTable || hitsFan;
+  };
+  const updateFan = (fanId: number, patch: Partial<PosFanLayout>) => {
+    setFans(items => items.map(item => item.fanId === fanId ? { ...item, ...patch } : item));
+    setDirty(true);
+  };
+  const dragFan = (event: React.PointerEvent<HTMLButtonElement>, fan: PosFanLayout) => {
+    if (readOnly || !fansLoaded) return;
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    const start = point(event.nativeEvent); if (!start) return;
+    const move = (nextEvent: PointerEvent) => {
+      const next = point(nextEvent); if (!next) return;
+      const x = clamp(snap(fan.positionX + next.x - start.x), 0, 100);
+      const y = clamp(snap(fan.positionY + next.y - start.y), 0, 100);
+      if (fanOverlaps(fan, x, y)) { setFanOverlap(true); return; }
+      setFanOverlap(false);
+      setFans(items => items.map(item => item.fanId === fan.fanId ? { ...item, positionX: x, positionY: y } : item));
+      setDirty(true);
+    };
+    const end = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", end);
+  };
   const drag = (event: React.PointerEvent<HTMLButtonElement>, table: Table) => {
     if ((event.target as HTMLElement).dataset.resize) return;
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setSelected(table.tableId);
+    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setSelectedFanId(null); setSelected(table.tableId);
     const start = point(event.nativeEvent); if (!start) return;
     const move = (nextEvent: PointerEvent) => {
       const next = point(nextEvent); if (!next) return;
@@ -91,6 +149,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
   };
   const save = async () => {
     setSaving(true); setMessage("");
+    if (fansLoaded && !isValidPosFanLayouts(fans)) { setSaving(false); setMessage("선풍기 엔티티 ID와 표시 순서를 확인해 주세요."); return; }
     const layouts = tables.filter((table) => table.isActive).map((table) => clampTableLayoutToCanvas(table, canvasSize.width, canvasSize.height));
     if (layouts.some((table) => {
       const size = posMainFixedTableSize(table);
@@ -100,7 +159,10 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
     })) {
       setSaving(false); setMessage("테이블과 의자 전체가 배치 가능 영역 안에 들어오도록 크기를 줄여 주세요."); return;
     }
-    const response = await fetch("/api/table-layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layouts }) });
+    if (fansLoaded && fans.some(fan => fan.isVisible && fanOverlaps(fan))) {
+      setSaving(false); setMessage("선풍기 아이콘은 테이블 또는 다른 선풍기와 겹치지 않게 배치해 주세요."); return;
+    }
+    const response = await fetch("/api/table-layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layouts, ...(fansLoaded ? { fans } : {}) }) });
     setSaving(false);
     if (!response.ok) { setMessage("저장에 실패했습니다."); return; }
     setTables((items) => items.map((item) => layouts.find((layout) => layout.tableId === item.tableId) ?? item));
@@ -139,12 +201,27 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
         <div className={embedded ? "min-w-0" : "contents"}>
           {embedded && <h3 className="mb-3 text-sm font-bold text-slate-700">테이블 배치</h3>}
           <div className={embedded ? "min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50" : "contents"} style={embedded ? { aspectRatio: `${canvasSize.width} / ${canvasSize.height}` } : undefined}>
-      <TableLayoutRenderer canvasRef={board} tables={tables.filter((table) => table.isActive)} renderTable={(table, fixedPosition) => <TableShape {...table} fixedPosition={fixedPosition} amountDue={0} editable={!readOnly} guestCount={0} onClick={() => setSelected(table.tableId)} onPointerDown={readOnly ? undefined : (event) => drag(event, table)} onResizePointerDown={readOnly ? undefined : (event) => resize(event, table)} posMainTable selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />} className="pos-layout-editor-canvas touch-none" debugName="layout-editor-scene" showSceneBoundary sceneBoundaryClassName="border-emerald-400/70" sceneStyle={{ backgroundColor: "#f8fafc", backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${LAYOUT_GRID_SIZE}px ${LAYOUT_GRID_SIZE}px` }}>
+      <TableLayoutRenderer canvasRef={board} tables={tables.filter((table) => table.isActive)} renderTable={(table, fixedPosition) => <TableShape {...table} fixedPosition={fixedPosition} amountDue={0} editable={!readOnly} guestCount={0} onClick={() => { setSelectedFanId(null); setSelected(table.tableId); }} onPointerDown={readOnly ? undefined : (event) => drag(event, table)} onResizePointerDown={readOnly ? undefined : (event) => resize(event, table)} posMainTable selected={selected === table.tableId} startedAt={null} tableNumber={table.tableNo} />} className="pos-layout-editor-canvas touch-none" debugName="layout-editor-scene" showSceneBoundary sceneBoundaryClassName="border-emerald-400/70" sceneStyle={{ backgroundColor: "#f8fafc", backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${LAYOUT_GRID_SIZE}px ${LAYOUT_GRID_SIZE}px` }}>
+        {fans.map(fan => <button key={fan.fanId} aria-label={`${fan.name} 배치 선택`} className={`absolute z-30 flex size-12 -translate-x-1/2 -translate-y-1/2 touch-none flex-col items-center justify-center rounded-full border-2 shadow-md ${selectedFanId === fan.fanId ? "border-blue-600 bg-blue-50" : fan.isVisible ? "border-emerald-500 bg-white" : "border-slate-300 bg-slate-100 opacity-70"}`} onClick={event => { event.stopPropagation(); setSelected(null); setSelectedFanId(fan.fanId); }} onPointerDown={event => dragFan(event, fan)} style={{ left: `${fan.positionX}%`, top: `${fan.positionY}%` }} type="button"><span aria-hidden="true" className="text-lg leading-none">✥</span><span className="max-w-11 truncate text-[8px] leading-none">{fan.name}</span></button>)}
       </TableLayoutRenderer>
           </div>
         </div>
       <aside className={embedded ? "min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-5" : "min-h-0 border-l border-slate-200 bg-white p-4"}>
         <fieldset className="contents" disabled={readOnly}>
+        <div className="mb-5 border-b border-slate-200 pb-4">
+          <div className="flex items-center justify-between"><p className="text-sm font-bold text-slate-800">선풍기 배치</p><span className="text-xs text-slate-500">표시 {fans.filter(fan => fan.isVisible).length}/6</span></div>
+          {!fansLoaded && <p className="mt-2 text-xs text-amber-700">선풍기 설정을 불러오는 중입니다.</p>}
+          {fanOverlap && <p className="mt-2 text-xs font-semibold text-red-600">테이블 또는 다른 선풍기와 겹치는 위치입니다.</p>}
+          <div className="mt-3 grid grid-cols-3 gap-2">{fans.map(fan => <button key={fan.fanId} className={`min-h-10 rounded-lg border px-2 text-xs font-semibold ${selectedFanId === fan.fanId ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 bg-white text-slate-700"}`} disabled={!fansLoaded} onClick={() => { setSelected(null); setSelectedFanId(fan.fanId); if (!fan.isVisible) { if (fanOverlaps(fan)) { setFanOverlap(true); return; } updateFan(fan.fanId, { isVisible: true }); } }} type="button">{fan.isVisible ? fan.name : `+ ${fan.name}`}</button>)}</div>
+          {selectedFanId !== null && (() => { const fan = fans.find(item => item.fanId === selectedFanId); if (!fan) return null; return <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-sm font-bold">{fan.name} 설정</p>
+            <label className="block text-xs font-semibold text-slate-600">표시 이름<input className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" maxLength={32} value={fan.name} onChange={event => updateFan(fan.fanId, { name: event.target.value })} /></label>
+            <label className="block text-xs font-semibold text-slate-600">Home Assistant 엔티티 ID<input className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" value={fan.entityId} onChange={event => updateFan(fan.fanId, { entityId: event.target.value })} /></label>
+            <label className="flex min-h-10 items-center gap-2 text-sm"><input checked={fan.isVisible} onChange={event => { if (event.target.checked && fanOverlaps(fan)) { setFanOverlap(true); return; } setFanOverlap(false); updateFan(fan.fanId, { isVisible: event.target.checked }); }} type="checkbox" />POS 화면에 표시</label>
+            <label className="block text-xs font-semibold text-slate-600">표시 순서<input className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 px-3 text-sm" type="number" min={1} max={6} value={fan.sortOrder} onChange={event => updateFan(fan.fanId, { sortOrder: Number(event.target.value) })} /></label>
+            <p className="text-[11px] text-slate-500">배치도에서 아이콘을 끌어 위치를 정하세요. 저장 전에 겹침 여부를 검사합니다.</p>
+          </div>; })()}
+        </div>
         <p className="text-lg font-extrabold text-slate-900">선택 테이블</p>
         {current ? <div className="mt-4 space-y-5"><h3 className="text-base font-bold text-slate-700">{current.tableNo}번 테이블</h3><section className="space-y-2"><p className="text-sm font-semibold">테이블 크기</p><label className="flex items-center gap-2 text-sm font-bold text-slate-700">가로<input aria-label="테이블 가로 크기(px)" className="min-h-12 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-right text-base font-normal" inputMode="numeric" min={currentSizeLimits.minWidth} max={currentSizeLimits.maxWidth} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.width : Math.round(currentBodySize?.width ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: value, height: sizeDraft?.tableId === current.tableId ? sizeDraft.height : String(Math.round(currentBodySize?.height ?? 0)) }); const width = Number(value); if (Number.isInteger(width) && width >= currentSizeLimits.minWidth && width <= currentSizeLimits.maxWidth) updateDisplayedSize(current, width, currentBodySize?.height ?? width); }} /><span className="text-slate-500">px</span></label><label className="flex items-center gap-2 text-sm font-bold text-slate-700">세로<input aria-label="테이블 세로 크기(px)" className="min-h-12 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 text-right text-base font-normal" inputMode="numeric" min={currentSizeLimits.minHeight} max={currentSizeLimits.maxHeight} type="number" value={sizeDraft?.tableId === current.tableId ? sizeDraft.height : Math.round(currentBodySize?.height ?? 0)} onChange={(event) => { const value = event.target.value; setSizeDraft({ tableId: current.tableId, width: sizeDraft?.tableId === current.tableId ? sizeDraft.width : String(Math.round(currentBodySize?.width ?? 0)), height: value }); const height = Number(value); if (Number.isInteger(height) && height >= currentSizeLimits.minHeight && height <= currentSizeLimits.maxHeight) updateDisplayedSize(current, currentBodySize?.width ?? height, height); }} /><span className="text-slate-500">px</span></label><p className="text-[11px] text-slate-500">가로 60–400px · 세로 60–300px</p></section><div><p className="mb-2 text-sm font-semibold">좌석수</p><div className="flex items-center gap-2"><button className="min-h-12 w-12 rounded-lg border border-slate-300 bg-white text-lg font-bold" onClick={() => update(current.tableId, { capacity: Math.max(0, current.capacity - 1) })}>−</button><span className="w-10 text-center text-xl font-bold">{current.capacity}</span><button className="min-h-12 w-12 rounded-lg border border-slate-300 bg-white text-lg font-bold" onClick={() => update(current.tableId, { capacity: current.capacity + 1 })}>+</button></div></div><button className="min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50" onClick={() => update(current.tableId, { rotation: (current.rotation + 90) % 360 })}>↻ 회전</button><button className="min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50" onClick={duplicate}>▣ 복제</button><button className="min-h-12 w-full rounded-lg border border-red-200 bg-white px-3 py-2 font-semibold text-red-600 hover:bg-red-50" onClick={deactivate}>비활성화</button></div> : <p className="mt-4 text-sm text-slate-500">배치판에서 테이블을 선택하세요.</p>}
         </fieldset>

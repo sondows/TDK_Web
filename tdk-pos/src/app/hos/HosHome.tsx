@@ -35,6 +35,34 @@ type Component = { menuComponentId: number; menuId: number; componentMenuId: num
 type Catalog = { menus: Menu[]; categories: Array<{ categoryId: number; name: string }>; modifiers: Modifier[]; components: Component[] };
 type DraftItem = { menuId: number; name: string; qty: number; options: Array<{ modifierOptionId: number; qty: number }>; components: Array<{ menuComponentId: number; qty: number }> };
 type PendingCancel = { orderItemId: number; keepQty: number };
+type CartPoint = { x: number; y: number };
+type CartFlight = CartPoint & { id: number; dx: number; dy: number };
+
+function FlyingCart({ flight, active, onComplete }: { flight: CartFlight; active: boolean; onComplete: (id: number) => void }) {
+  const iconRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!active) {
+      onComplete(flight.id);
+      return;
+    }
+    const icon = iconRef.current;
+    if (!icon) return;
+    const animation = icon.animate([
+      { transform: "translate(0, 0) scale(1)", opacity: 1, offset: 0 },
+      { transform: `translate(${flight.dx * 0.5}px, ${flight.dy * 0.5 - 36}px) scale(0.72)`, opacity: 0.78, offset: 0.55 },
+      { transform: `translate(${flight.dx}px, ${flight.dy}px) scale(0.2)`, opacity: 0, offset: 1 },
+    ], { duration: 500, easing: "cubic-bezier(0.22, 0.8, 0.25, 1)" });
+    animation.onfinish = () => onComplete(flight.id);
+    return () => animation.cancel();
+  }, [active, flight, onComplete]);
+
+  if (!active) return null;
+
+  return <span aria-hidden="true" className="pointer-events-none fixed z-[100] text-blue-600" ref={iconRef}
+    style={{ left: flight.x - 12, top: flight.y - 12, width: 24, height: 24 }}>
+    <svg className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
+  </span>;
+}
 
 const money = (amount: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(amount);
 function koreaToday() {
@@ -88,6 +116,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [pendingTableId, setPendingTableId] = useState<number | null>(null);
   const [cancelMode, setCancelMode] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
+  const [cartFlights, setCartFlights] = useState<CartFlight[]>([]);
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [choices, setChoices] = useState<Record<number, number>>({});
@@ -111,11 +140,15 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const logoutMenuRef = useRef<HTMLDivElement | null>(null);
   const logoutMenuHistoryRef = useRef(false);
   const menuTabsRef = useRef<HTMLDivElement | null>(null);
+  const cartSummaryRef = useRef<HTMLSpanElement | null>(null);
+  const cartPulseAnimationRef = useRef<Animation | null>(null);
+  const cartFlightIdRef = useRef(0);
   const menuListRef = useRef<HTMLDivElement | null>(null);
   const menuSectionRefs = useRef(new Map<number, HTMLElement>());
   const menuTabRefs = useRef(new Map<number | null, HTMLButtonElement>());
   const programmaticMenuScrollRef = useRef(false);
   const keepMenuOpenAfterOptionRef = useRef(false);
+  const optionFlightOriginRef = useRef<CartPoint | null>(null);
   const menuScrollReleaseTimerRef = useRef<number | null>(null);
   const closeLogoutMenu = useCallback(() => {
     if (!logoutMenuOpen) return;
@@ -401,7 +434,24 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     } catch (cause) { setError(cause instanceof Error ? cause.message : "메뉴를 불러오지 못했습니다."); }
   }
 
-  function chooseMenu(menu: Menu, keepMenuOpenAfterOption = false) {
+  const removeCartFlight = useCallback((id: number) => {
+    setCartFlights(current => current.filter(flight => flight.id !== id));
+  }, []);
+
+  function triggerCartFlight(origin: CartPoint | null) {
+    const target = cartSummaryRef.current;
+    if (!origin || !target || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rect = target.getBoundingClientRect();
+    const targetPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const id = ++cartFlightIdRef.current;
+    setCartFlights(current => [...current, { id, ...origin, dx: targetPoint.x - origin.x, dy: targetPoint.y - origin.y }]);
+    cartPulseAnimationRef.current?.cancel();
+    cartPulseAnimationRef.current = target.animate([
+      { transform: "scale(1)" }, { transform: "scale(1.08)", offset: 0.45 }, { transform: "scale(1)" },
+    ], { duration: 280, easing: "ease-out" });
+  }
+
+  function chooseMenu(menu: Menu, keepMenuOpenAfterOption = false, originElement?: HTMLElement) {
     if (!catalog) return;
     optionAddLockRef.current = false;
     const modifiers = catalog.modifiers.filter(item => item.menuId === menu.menuId);
@@ -412,10 +462,14 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       : choice.selected;
     if (defaultOption) defaults[defaultOption.modifierGroupId] = defaultOption.modifierOptionId;
     keepMenuOpenAfterOptionRef.current = keepMenuOpenAfterOption;
+    const originRect = originElement?.getBoundingClientRect();
+    optionFlightOriginRef.current = originRect
+      ? { x: originRect.left + originRect.width / 2, y: originRect.top + originRect.height / 2 }
+      : null;
     setSelectedMenu(menu); setQuantity(1); setChoices(defaults); setError("");
   }
 
-  function appendDraftItem(menu: Menu, qty: number, modifierOptionId: number | undefined, keepMenuOpen: boolean) {
+  function appendDraftItem(menu: Menu, qty: number, modifierOptionId: number | undefined, keepMenuOpen: boolean, origin: CartPoint | null = null) {
     if (!catalog) return;
     const selectedOptions = Number.isSafeInteger(modifierOptionId) ? [{ modifierOptionId: modifierOptionId!, qty: 1 }] : [];
     const components = catalog.components.filter(item => item.menuId === menu.menuId)
@@ -436,6 +490,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       } : item);
     });
     setPendingTableId(detail?.table.tableId ?? null);
+    triggerCartFlight(origin);
     setSelectedMenu(null);
     if (!keepMenuOpen) setScreen("detail");
     setError("");
@@ -448,15 +503,18 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     const modifiers = catalog.modifiers.filter(item => item.menuId === selectedMenu.menuId);
     const choice = getMenuChoice(modifiers);
     const choiceId = choice.selected ? choices[choice.selected.modifierGroupId] : undefined;
-    appendDraftItem(selectedMenu, quantity, choiceId, keepMenuOpenAfterOptionRef.current);
+    appendDraftItem(selectedMenu, quantity, choiceId, keepMenuOpenAfterOptionRef.current, optionFlightOriginRef.current);
+    optionFlightOriginRef.current = null;
   }
 
-  function quickAddMenu(menu: Menu) {
+  function quickAddMenu(menu: Menu, originElement: HTMLElement) {
     if (!catalog) return;
+    const originRect = originElement.getBoundingClientRect();
+    const origin = { x: originRect.left + originRect.width / 2, y: originRect.top + originRect.height / 2 };
     const modifiers = catalog.modifiers.filter(item => item.menuId === menu.menuId);
     const choice = getMenuChoice(modifiers);
     if (!choice.options.length) {
-      appendDraftItem(menu, 1, undefined, true);
+      appendDraftItem(menu, 1, undefined, true, origin);
       return;
     }
 
@@ -465,10 +523,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       : choice.options.find(option => option.choiceDefaultOptionId === option.modifierOptionId)
         ?? (choice.options.length === 1 ? choice.options[0] : undefined);
     if (!quickOption) {
-      chooseMenu(menu, true);
+      chooseMenu(menu, true, originElement);
       return;
     }
-    appendDraftItem(menu, 1, quickOption.modifierOptionId, true);
+    appendDraftItem(menu, 1, quickOption.modifierOptionId, true, origin);
   }
 
   function changeKeepQuantity(item: OrderItem & { orderStatus: string }, delta: number) {
@@ -732,6 +790,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
   }, []);
 
+  useEffect(() => () => cartPulseAnimationRef.current?.cancel(), []);
+
   return <main className={`flex flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900 ${screen === "menu" ? "h-dvh overflow-hidden" : "min-h-dvh"}`} ref={mainRef}>
     {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 pb-1 pt-[19px] text-slate-900">
       <div className="flex min-w-0 flex-col items-start leading-tight">
@@ -763,7 +823,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     </header> : <header className="sticky top-0 z-20 shrink-0 bg-white px-3 pt-[15px] text-slate-900">
       <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
         <button aria-label={"\uC8FC\uBB38\uB0B4\uC5ED\uC73C\uB85C \uB3CC\uC544\uAC00\uAE30"} className="flex min-h-11 min-w-0 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uBA54\uB274\uC120\uD0DD"}</span></button>
-        <span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{draft.length > 0 ? <>{"\uC7A5\uBC14\uAD6C\uB2C8"} {draft.length}/{draftQuantityTotal}</> : "\uC7A5\uBC14\uAD6C\uB2C8"}</span>
+        <span className="inline-block shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600" ref={cartSummaryRef}>{draft.length > 0 ? <>{"\uC7A5\uBC14\uAD6C\uB2C8"} {draft.length}/{draftQuantityTotal}</> : "\uC7A5\uBC14\uAD6C\uB2C8"}</span>
       </div>
     </header>}
     {error && <div className={`mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">{error}</div>}
@@ -934,8 +994,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
         }}>
           {section.menus.map(menu => <div className="flex min-h-14 w-full items-center border-b border-slate-100 last:border-b-0" key={menu.menuId}>
-            <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={() => chooseMenu(menu)} type="button"><span className="min-w-0 truncate whitespace-nowrap text-[19px] font-bold">{menu.name}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
-            <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={() => quickAddMenu(menu)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
+            <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={event => chooseMenu(menu, true, event.currentTarget)} type="button"><span className="flex min-w-0 flex-1 items-baseline gap-1 whitespace-nowrap"><span className="max-w-full shrink-0 truncate text-[19px] font-bold">{menu.name}</span>{section.name === "김치찌개" && <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-400" title="2.약간매운맛">2.약간매운맛</span>}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
+            <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={event => quickAddMenu(menu, event.currentTarget)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
           </div>)}
         </div>)}
         <div aria-hidden="true" className="h-[50vh]" />
@@ -943,7 +1003,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-slate-800 font-extrabold text-white" onClick={() => setScreen("detail")} type="button">주문내역으로 돌아가기</button></div>
     </section>}
 
-    {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => { optionAddLockRef.current = false; setSelectedMenu(null); }}>
+    {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => { optionAddLockRef.current = false; optionFlightOriginRef.current = null; setSelectedMenu(null); }}>
       <section aria-modal="true" className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
         <div className="flex min-w-0 items-center justify-between gap-3"><h2 className="min-w-0 truncate text-xl font-extrabold" title={selectedMenu.name}>{selectedMenu.name}</h2><p className="shrink-0 whitespace-nowrap text-lg font-semibold text-slate-600">{money(Number(selectedMenu.price))}</p></div>
         {(() => {
@@ -954,9 +1014,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           })}</div></fieldset>;
         })()}
         <div className="mt-5 flex min-h-[72px] items-center justify-center gap-6"><button className="size-[72px] shrink-0 rounded-xl bg-slate-100 text-4xl" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><strong className="min-w-[2ch] text-center text-[30px] tabular-nums">{quantity}</strong><button className="size-[72px] shrink-0 rounded-xl bg-slate-100 text-4xl" onClick={() => setQuantity(value => Math.min(1000, value + 1))} type="button">+</button></div>
-        <div className="mt-5 grid grid-cols-[7fr_3fr] gap-2"><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-blue-600 px-1 text-sm font-extrabold text-white" onClick={addDraft} type="button">장바구니에 담기</button><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-slate-100 px-1 text-sm font-bold text-slate-900" onClick={() => { optionAddLockRef.current = false; setSelectedMenu(null); }} type="button">취소</button></div>
+        <div className="mt-5 grid grid-cols-[7fr_3fr] gap-2"><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-blue-600 px-1 text-sm font-extrabold text-white" onClick={addDraft} type="button">장바구니에 담기</button><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-slate-100 px-1 text-sm font-bold text-slate-900" onClick={() => { optionAddLockRef.current = false; optionFlightOriginRef.current = null; setSelectedMenu(null); }} type="button">취소</button></div>
       </section>
     </div>}
+    {cartFlights.map(flight => <FlyingCart active={screen === "menu"} flight={flight} key={flight.id} onComplete={removeCartFlight} />)}
     {exitConfirmOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section aria-labelledby="hos-exit-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
         <h2 className="text-lg font-extrabold" id="hos-exit-title">종료하시겠습니까?</h2>
