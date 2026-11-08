@@ -1,0 +1,136 @@
+.dialog {
+  box-sizing: border-box;
+  width: min(925px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  border: 1px solid #cbd5da;
+  border-radius: 6px;
+  background: #fff;
+  color: #25343b;
+  box-shadow: 0 18px 48px rgb(22 37 45 / 22%);
+}
+
+.body {
+  min-height: 0;
+  padding: 24px;
+  overscroll-behavior: contain;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  column-gap: 36px;
+}
+
+.summaryLine {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf0f2;
+  padding: 6px 0;
+  color: #52636c;
+}
+
+.summaryLine strong {
+  color: #25343b;
+}
+
+.cashInput {
+  box-sizing: border-box;
+  width: min(210px, 60%);
+  height: 40px;
+  border: 1px solid #cbd5da;
+  border-radius: 4px;
+  background: #fff;
+  padding: 0 10px;
+  color: #25343b;
+  font: inherit;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cashInput:hover:not(:disabled) {
+  background: #f8fafb;
+}
+
+.cashInput:disabled {
+  opacity: 0.6;
+}
+
+.footer {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #e2e8eb;
+  padding: 16px 24px;
+  background: #fff;
+}
+
+.footer button {
+  min-width: 0;
+  min-height: 48px;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+.cancelButton,
+.singleButton {
+  border: 1px solid #cbd5da;
+  background: #fff;
+  color: #344e5a;
+}
+
+.cancelButton:hover:not(:disabled),
+.singleButton:hover:not(:disabled) {
+  background: #f2f5f6;
+}
+
+.closeButton {
+  background: #dc2626;
+  color: #fff;
+}
+
+.closeButton:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.confirmButton {
+  grid-column: 2;
+  background: #2563eb;
+  color: #fff;
+}
+
+.footer button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.singleButton {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 620px) {
+  .dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+  }
+
+  .body {
+    padding: 16px;
+  }
+
+  .summaryGrid {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .footer {
+    gap: 8px;
+    padding: 12px 16px;
+  }
+}

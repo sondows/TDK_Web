@@ -34,6 +34,9 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   const [verifiedToken, setVerifiedToken] = useState(false);
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisibility, setPasswordVisibility] = useState<{ phase: AuthPhase; visible: boolean }>({
+    phase: "CHECKING", visible: false,
+  });
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pin, setPin] = useState("");
@@ -403,16 +406,19 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       setLoginId(normalizedId); setPassword(""); setPin(""); setPinConfirm(""); setNotice("");
       setVerifiedToken(Boolean(trust.trusted));
       if (trust.trusted) {
+        setActiveKeyboard(null);
         setPhase(trust.pinSetupRequired ? "SETUP_PIN" : "LOGIN_PIN");
         return;
       }
       if (trust.passwordRegistrationRequired) {
+        setActiveKeyboard(null);
         setInitialPasswordRegistration(true);
         setRecoveryPassword(""); setRecoveryConfirm(""); setRecoveryError("");
         setRecoveryOpen(true);
         return;
       }
       if (trust.masterPasswordConfigured) {
+        setActiveKeyboard(null);
         setPhase("LOGIN_PASSWORD");
         return;
       }
@@ -427,6 +433,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       } : null;
       if (serial !== admIdRequestSerial.current) return;
       if (setup?.resetPasswordRequired || (setup?.available && setup.state === "MASTER_PASSWORD_REQUIRED")) {
+        setActiveKeyboard(null);
         setInitialPasswordRegistration(true);
         setRecoveryPassword(""); setRecoveryConfirm(""); setRecoveryError("");
         setRecoveryOpen(true);
@@ -524,6 +531,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       const result = await response.json() as ApiResult;
       if (!response.ok || !result.success) {
         if (result.code === "PIN_SETUP_REAUTH_REQUIRED") {
+          setActiveKeyboard(null);
           setPin(""); setPinConfirm(""); setPinReset(false); setPassword(""); setPhase("LOGIN_PASSWORD");
           setMessage("마스터 비밀번호로 다시 인증한 뒤 PIN을 설정해 주세요."); return;
         }
@@ -533,6 +541,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         if (phase === "SETUP_PIN") { setPin(""); setPinConfirm(""); }
         return;
       }
+      if (program === "POS") setActiveKeyboard(null);
       if (phase === "LOGIN_PASSWORD") {
         if (result.passwordRegistrationRequired) {
           setInitialPasswordRegistration(true);
@@ -649,7 +658,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
   const showPassword = phase === "LOGIN_PASSWORD" || phase === "SETUP_PASSWORD" ||
     phase === "BOOTSTRAP_SETUP" || phase === "CHANGE_TEMPORARY_PASSWORD";
   const disabled = busy || !loginId.trim() ||
-    (phase === "LOGIN_PASSWORD" && password.length < 10) ||
+    (phase === "LOGIN_PASSWORD" && (program === "POS" ? !password : password.length < 10)) ||
     (phase === "SETUP_PIN" && (pin.length !== 6 || pin !== pinConfirm || (pinReset && password.length < 10))) ||
     (phase === "BOOTSTRAP_SETUP" && (password.length < 10 || password !== confirmPassword)) ||
     (phase === "CHANGE_TEMPORARY_PASSWORD" && (password.length < 10 || password !== confirmPassword));
@@ -659,6 +668,9 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     phase === "SETUP_PIN" ? pinReset ? "PIN 변경" : "PIN 등록" :
       phase === "BOOTSTRAP_SETUP" ? "최고관리자 등록" :
         phase === "CHANGE_TEMPORARY_PASSWORD" ? "비밀번호 설정" : "인증";
+  const passwordVisible = passwordVisibility.phase === phase && passwordVisibility.visible;
+  const loginKeyboardOpen = program === "POS" && activeKeyboard !== null &&
+    keyboardTarget !== "recoveryPassword" && keyboardTarget !== "recoveryConfirm";
   return <>{status}<main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-slate-100 p-4">
     <section className="w-full max-w-[440px] rounded-2xl bg-white p-6 shadow-xl sm:p-8">
       <header className="mb-6 text-center"><h1 className="text-4xl font-extrabold text-blue-600">TDKON</h1>
@@ -677,18 +689,68 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
                   setPhase("LOGIN_ID"); }} type="button">뒤로가기 · ID 변경</button>}
             {phase === "RECOVERY_ID" && <p className="text-sm text-slate-600">복구할 최고관리자 ID를 확인해 주세요.</p>}
             {phase === "CHANGE_TEMPORARY_PASSWORD" && <p className="text-sm text-slate-600">임시 비밀번호를 확인했습니다. 본인이 사용할 새 마스터 비밀번호를 설정해 주세요.</p>}
-            {showId && <label className="block text-sm font-bold text-slate-700">ID
-              <input autoCapitalize="none" autoComplete="username" autoCorrect="off" className={inputStyle}
+            {showId && <div><label className="block text-sm font-bold text-slate-700" htmlFor="program-login-id">ID</label>
+              <span className="relative mt-2 block" data-pos-touch-input={program === "POS" && phase === "LOGIN_ID" ? "true" : undefined}>
+              <input autoCapitalize="none" autoComplete="username" autoCorrect="off"
+                className={`${inputStyle.replace("mt-2 ", "")} ${program === "POS" && phase === "LOGIN_ID" ? "pr-12" : ""}`}
+                id="program-login-id"
                 maxLength={32} onChange={event => { setLoginId(event.target.value); setPassword(""); setMessage(""); }}
-                onFocus={() => { if (program === "POS" && phase === "LOGIN_ID") openPosKeyboard("loginId", "id"); }}
-                onPointerDown={() => { if (program === "POS" && phase === "LOGIN_ID") openPosKeyboard("loginId", "id"); }}
-                data-pos-touch-input={program === "POS" && phase === "LOGIN_ID" ? "true" : undefined}
                 inputMode={program === "POS" && phase === "LOGIN_ID" ? "none" : undefined}
                 ref={idInput}
                 readOnly={phase !== "LOGIN_ID" && phase !== "RECOVERY_ID"}
                 disabled={busy}
-                required spellCheck={false} type="text" value={loginId} /></label>}
-            {showPassword && <label className="block text-sm font-bold text-slate-700">{phase === "LOGIN_PASSWORD" || phase === "SETUP_PASSWORD" ? "마스터 비밀번호" : "새 마스터 비밀번호"}
+                required spellCheck={false} type="text" value={loginId} />
+              {program === "POS" && phase === "LOGIN_ID" && <button aria-label="가상 키보드 열기/닫기"
+                aria-pressed={activeKeyboard === "id"}
+                className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                onPointerDown={event => event.preventDefault()}
+                onClick={() => {
+                  if (activeKeyboard === "id") setActiveKeyboard(null);
+                  else openPosKeyboard("loginId", "id");
+                }} type="button">
+                <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path strokeLinecap="round" d="M6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M8 15h8" />
+                </svg>
+              </button>}
+              </span></div>}
+            {showPassword && (program === "POS" && phase === "LOGIN_PASSWORD" ? <div>
+              <label className="block text-sm font-bold text-slate-700" htmlFor="program-master-password">마스터 비밀번호</label>
+              <span className="relative mt-2 block" data-pos-touch-input="true">
+                <input autoComplete="current-password" className={`${inputStyle.replace("mt-2 ", "")} pr-24`}
+                  id="program-master-password" maxLength={128} minLength={10}
+                  onBlur={() => setPasswordVisibility({ phase, visible: false })}
+                  onChange={event => setPassword(event.target.value)} inputMode="none"
+                  ref={passwordInput} required type={passwordVisible ? "text" : "password"} value={password} />
+                <span className="absolute inset-y-0 right-1 flex items-center">
+                  <button aria-label={passwordVisible ? "마스터 비밀번호 숨기기" : "마스터 비밀번호 보기"}
+                    aria-pressed={passwordVisible}
+                    className="flex h-10 w-10 items-center justify-center text-slate-500 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => setPasswordVisibility({ phase, visible: !passwordVisible })} type="button">
+                    {passwordVisible ? <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.9 5.2A10.8 10.8 0 0112 5c5 0 8.5 4.5 9.5 7a11 11 0 01-3.2 4.4M6.2 6.2A11.4 11.4 0 002.5 12c1 2.5 4.5 7 9.5 7 1.1 0 2.1-.2 3-.5" />
+                    </svg> : <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" />
+                      <circle cx="12" cy="12" r="2.5" />
+                    </svg>}
+                  </button>
+                  <button aria-label="마스터 비밀번호 가상 키보드 열기/닫기"
+                    aria-pressed={activeKeyboard === "master" && keyboardTarget === "password"}
+                    className="flex h-10 w-10 items-center justify-center text-slate-500 hover:text-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => {
+                      if (activeKeyboard === "master" && keyboardTarget === "password") setActiveKeyboard(null);
+                      else openPosKeyboard("password", "master");
+                    }} type="button">
+                    <svg aria-hidden="true" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path strokeLinecap="round" d="M6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M8 15h8" />
+                    </svg>
+                  </button>
+                </span>
+              </span>
+            </div> : <label className="block text-sm font-bold text-slate-700">{phase === "LOGIN_PASSWORD" || phase === "SETUP_PASSWORD" ? "마스터 비밀번호" : "새 마스터 비밀번호"}
               <input autoComplete={phase === "LOGIN_PASSWORD" ? "current-password" : "new-password"}
                 className={inputStyle} disabled={phase === "SETUP_PASSWORD"} maxLength={128} minLength={10}
                 onChange={event => setPassword(event.target.value)}
@@ -698,7 +760,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
                 inputMode={program === "POS" ? "none" : undefined}
                 ref={phase === "LOGIN_PASSWORD" ? passwordInput : undefined}
                 required={phase !== "SETUP_PASSWORD"}
-                type="password" value={password} /></label>}
+                type="password" value={password} /></label>)}
             {phase === "SETUP_PIN" && pinReset && <label className="block text-sm font-bold text-slate-700">마스터 비밀번호
               <input autoComplete="current-password" className={inputStyle} maxLength={128} minLength={10}
                 onChange={event => setPassword(event.target.value)}
@@ -734,7 +796,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
             <p aria-live="polite" className="min-h-6 text-center text-sm font-semibold text-red-600"
               role={message ? "alert" : undefined}>{message}</p>
             <button className="min-h-14 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50"
-              disabled={disabled}
+              disabled={disabled || loginKeyboardOpen}
               type="submit">{buttonText}</button>
             {phase === "LOGIN_ID" && (program === "ADM" || program === "KDS" || program === "POS" || program === "HOS") ?
               <p className="text-center text-xs text-slate-500">ID를 입력한 후 다음 버튼을 눌러주세요.</p> :
@@ -756,7 +818,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         onBackspace={() => { keyboardBackspace(); setMessage(""); setRecoveryError(""); }}
         onClear={() => { keyboardClear(); setMessage(""); setRecoveryError(""); }}
         onConfirm={() => loginForm.current?.requestSubmit()}
-        onClose={() => setActiveKeyboard(null)} />}
+        onClose={() => setActiveKeyboard(null)} actionLabel={buttonText} actionDisabled={busy} />}
     <dialog aria-labelledby="master-recovery-title"
       className="m-auto w-[min(420px,calc(100vw-2rem))] rounded-2xl bg-white p-6 text-slate-800 shadow-xl backdrop:bg-slate-900/60"
       onCancel={event => { if (busy) event.preventDefault(); else setRecoveryOpen(false); }}

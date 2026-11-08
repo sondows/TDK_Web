@@ -11,6 +11,8 @@ type Props = {
   onClear: () => void;
   onConfirm: () => void;
   onClose: () => void;
+  actionLabel?: string;
+  actionDisabled?: boolean;
 };
 
 const keyClass = "min-h-11 min-w-0 touch-manipulation rounded-lg border border-slate-300 bg-white px-1 text-sm font-semibold text-slate-800 shadow-sm active:bg-blue-100";
@@ -26,7 +28,8 @@ const symbolRows = [
   ["'", '"', ",", ".", "<", ">", "/", "?", "\\", "|"],
 ];
 
-export default function PosTouchKeyboard({ mode, onText, onBackspace, onClear, onConfirm, onClose }: Props) {
+export default function PosTouchKeyboard({ mode, onText, onBackspace, onClear, onConfirm, onClose,
+  actionLabel = "확인", actionDisabled = false }: Props) {
   const [shifted, setShifted] = useState(false);
   const [symbols, setSymbols] = useState(false);
   const keepInputFocused = (event: ReactPointerEvent<HTMLButtonElement>) => event.preventDefault();
@@ -43,8 +46,8 @@ export default function PosTouchKeyboard({ mode, onText, onBackspace, onClear, o
         <button className={`${keyClass} min-h-12 text-base`} key={value}
           onClick={() => value === "⌫" ? onBackspace() : value === "지움" ? onClear() : onText(value)}
           onPointerDown={keepInputFocused} type="button">{value}</button>)}
-      <button className="col-span-3 min-h-11 rounded-lg bg-blue-600 font-bold text-white active:bg-blue-700"
-        onClick={onConfirm} onPointerDown={keepInputFocused} type="button">확인</button>
+      <button className="col-span-3 min-h-11 rounded-lg bg-blue-600 font-bold text-white active:bg-blue-700 disabled:opacity-50"
+        disabled={actionDisabled} onClick={onConfirm} onPointerDown={keepInputFocused} type="button">{actionLabel}</button>
     </div>
   </section>;
 
@@ -60,12 +63,6 @@ export default function PosTouchKeyboard({ mode, onText, onBackspace, onClear, o
     className="mx-auto w-full max-w-[640px] overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-lg sm:p-3.5"
     data-pos-touch-keyboard>
     <div className="mx-auto min-w-[560px] space-y-1.5">
-      {mode === "master" && <div className="flex justify-end gap-1.5">
-        <button className={`${keyClass} min-h-9 min-w-20 text-xs ${!symbols ? "border-blue-500 bg-blue-50 text-blue-700" : ""}`}
-          onClick={() => setSymbols(false)} onPointerDown={keepInputFocused} type="button">영문</button>
-        <button className={`${keyClass} min-h-9 min-w-20 text-xs ${symbols ? "border-blue-500 bg-blue-50 text-blue-700" : ""}`}
-          onClick={() => setSymbols(true)} onPointerDown={keepInputFocused} type="button">기호</button>
-      </div>}
       <div className="grid grid-cols-10 gap-1">
         {numberRow.map(value => key(value))}
       </div>
@@ -86,8 +83,8 @@ export default function PosTouchKeyboard({ mode, onText, onBackspace, onClear, o
           onPointerDown={keepInputFocused} type="button">Space</button>
         <button className={`${keyClass} col-span-1 min-h-10 text-xs`} onClick={onClose}
           onPointerDown={keepInputFocused} type="button">닫기</button>
-        <button className="col-span-2 min-h-10 rounded-lg bg-blue-600 px-1 text-xs font-bold text-white active:bg-blue-700"
-          onClick={onConfirm} onPointerDown={keepInputFocused} type="button">확인</button>
+        <button className="col-span-2 min-h-10 rounded-lg bg-blue-600 px-1 text-xs font-bold text-white active:bg-blue-700 disabled:opacity-50"
+          disabled={actionDisabled} onClick={onConfirm} onPointerDown={keepInputFocused} type="button">{actionLabel}</button>
       </div>
     </div>
   </section>;

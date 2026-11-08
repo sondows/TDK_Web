@@ -5,7 +5,8 @@ import { cashOpeningFundTotal, type CashOpeningFund } from "@/lib/cash-opening-f
 import { confirmedClosing, validClosing } from "@/lib/business-closing-confirmation";
 import { createRequestId } from "@/lib/request-id";
 import OpeningFundModal from "./OpeningFundModal";
-import PosSubHeader from "./PosSubHeader";
+import AdminBackLink from "./admin/AdminBackLink";
+import styles from "./BusinessClosingDialog.module.css";
 
 const money = (value: number) => value.toLocaleString("ko-KR");
 const PENDING_CLOSING_KEY = "tdk-pos-pending-business-closing";
@@ -48,6 +49,8 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
   const requestKey = useRef<string | null>(null);
   const completionButton = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (completed) completionButton.current?.focus(); }, [completed]);
+  // Keep the settlement clock snapshot client-side to avoid an SSR clock mismatch.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setReferenceSettlementTime(formatReferenceSettlementTime(new Date())); }, []);
   function rememberRequest(date: string, key: string) {
     try { window.sessionStorage.setItem(PENDING_CLOSING_KEY, JSON.stringify({ date, key })); } catch { /* The ref still keeps this request key. */ }
@@ -114,11 +117,14 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
   }
   const line = (label: string, value: string) => <div className="flex items-center justify-between gap-3 py-1"><span>{label}</span><strong className="whitespace-nowrap text-right tabular-nums">{value}</strong></div>;
   const summaryLine = (label: string, value: number, count: number) =>
-    <div className="flex items-center justify-between gap-3 py-1"><span className="whitespace-nowrap">{label}</span><strong className="grid grid-cols-[auto_3.5rem] items-baseline gap-1 whitespace-nowrap tabular-nums"><span className="text-right">{money(value)}</span><span className="text-right">({count})</span></strong></div>;
-  return <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
-    <section aria-modal="true" className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[26rem] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role={completed ? "alertdialog" : "dialog"}>
-      <PosSubHeader backLabel="영업마감 닫기" disabled={busy} onBack={onClose} showBackButton={!completed} className={completed ? "!pl-6" : ""} title={completed ? "✓ 영업마감 완료" : preview?.blockers.length ? "영업마감 불가" : "영업마감"} />
-      <div className="overflow-y-auto p-6 text-sm text-slate-700">
+    <div className={styles.summaryLine}><span className="whitespace-nowrap">{label}</span><strong className="grid grid-cols-[auto_3.5rem] items-baseline gap-1 whitespace-nowrap tabular-nums"><span className="text-right">{money(value)}</span><span className="text-right">({count})</span></strong></div>;
+  return <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-2 sm:p-4">
+    <section aria-modal="true" className={`${styles.dialog} flex flex-col overflow-hidden`} role={completed ? "alertdialog" : "dialog"}>
+      <header className={`flex h-16 shrink-0 items-center gap-[15px] border-b border-[#e2e8eb] bg-white pr-5 text-[#25343b] ${completed ? "pl-6" : "pl-1"}`}>
+        {!completed && <span className="-mr-[13px] flex shrink-0"><AdminBackLink ariaLabel="영업마감 닫기" disabled={busy} iconSize={28} onNavigate={onClose} size={44} title="영업마감 닫기" tone="lightPlain" /></span>}
+        <h2 className="min-w-0 truncate text-[19px] font-bold">{completed ? "✓ 영업마감 완료" : preview?.blockers.length ? "영업마감 불가" : "영업마감"}</h2>
+      </header>
+      <div className={`${styles.body} overflow-y-auto text-sm text-slate-700`}>
         {completed ? <>
           <p className="font-semibold">영업마감이 정상적으로 완료되었습니다.</p>
           <div className="mt-5 space-y-2 rounded-xl border border-slate-200 p-4">
@@ -126,34 +132,37 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
             {line("총매출", money(completed.totalSales))}
             {line("판매건수", `(${completed.saleCount})`)}
           </div>
-          <div className="mt-6 flex justify-end"><button className="min-h-12 min-w-24 rounded-xl bg-blue-600 px-5 font-bold text-white" onClick={onClosed} ref={completionButton} type="button">확인</button></div>
         </> : <>
         {!loaded ? <p>마감 정보를 확인하는 중입니다.</p> : !preview ? <p>{error ? "영업 상태를 확인하지 못했습니다." : "진행 중인 영업이 없습니다."}</p> : <>
           <p className="text-base font-bold">정산일 {preview.businessDate}{referenceSettlementTime ? ` ${referenceSettlementTime.slice(11)}` : ""}</p>
           {preview.previousClosingCount > 0 && <p className="mt-1 text-slate-500">오늘의 이전 마감 ({preview.previousClosingCount})</p>}
           {preview.blockers.length ? <><p className="mt-4 font-bold text-red-700">마감 전 확인할 항목이 있습니다.</p><ul className="mt-3 space-y-2">{preview.blockers.map((row, index) => <li className="rounded-lg bg-red-50 p-2" key={`${row.sessionId}-${index}`}>{row.label} · {row.reason}</li>)}</ul></> : <>
-            <div className="mt-4">
+            <div className={`${styles.summaryGrid} mt-4`}>
               {summaryLine("총매출", preview.totalSales, preview.saleCount)}
               {summaryLine("할인", preview.discountAmount, preview.discountCount)}
-              <hr className="my-3" />
+              <hr className="col-span-full my-3" />
               {summaryLine("카드", preview.cardAmount, preview.cardCount)}
               {summaryLine("현금", preview.cashAmount, preview.cashCount)}
               {summaryLine("고객결제", preview.customerPaymentAmount, preview.customerPaymentCount)}
               {summaryLine("기타결제", preview.otherAmount, preview.otherCount)}
-              <hr className="my-3" />
+              <hr className="col-span-full my-3" />
               {summaryLine("매장판매", preview.dineAmount, preview.dineCount)}
               {summaryLine("포장판매", preview.takeoutAmount, preview.takeoutCount)}
               {summaryLine("취소/환불", preview.refundAmount, preview.cancellationCount)}
             </div>
             {preview.openingCashEnabled && <><hr className="my-3" />{line("영업 준비금", money(preview.openingCash ?? 0))}{line("현금 순변동", money(preview.cashReceived - preview.cashReturned + preview.cashLedgerMovement - preview.otherCashChange))}{line("예상 현금", money(preview.expectedCash ?? 0))}
-              <div className="mt-3 flex items-center justify-between gap-3 font-bold"><span>실제 현금</span><button aria-label="실제 현금 시재 입력" className="min-w-40 rounded-lg border border-slate-300 bg-white p-2 text-right tabular-nums hover:bg-slate-50" disabled={busy} onClick={() => setCashEntryOpen(true)} type="button">{money(actualFund === null ? 0 : cashOpeningFundTotal(actualFund))}</button></div>
+              <div className="mt-3 flex items-center justify-between gap-3 font-bold"><span>실제 현금</span><button aria-label="실제 현금 시재 입력" className={styles.cashInput} disabled={busy} onClick={() => setCashEntryOpen(true)} type="button">{money(actualFund === null ? 0 : cashOpeningFundTotal(actualFund))}</button></div>
               {actualFund !== null && line("오차", signed(cashOpeningFundTotal(actualFund) - (preview.expectedCash ?? 0)))}</>}
           </>}
         </>}
         {error && <p className="mt-3 text-red-600" role="alert">{error}</p>}
-        <div className="mt-6 grid grid-cols-2 gap-3"><button className="min-h-12 rounded-xl border border-slate-300" disabled={busy} onClick={onClose} type="button">{preview?.blockers.length ? "확인" : "취소"}</button>{preview && !preview.blockers.length && <button className="min-h-12 rounded-xl bg-red-600 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => void close()} type="button">{busy ? "마감 처리 중..." : "영업마감"}</button>}</div>
         </>}
       </div>
+      {completed ? <div className={styles.footer}><button className={styles.confirmButton} onClick={onClosed} ref={completionButton} type="button">확인</button></div> :
+        preview && !preview.blockers.length ? <div className={styles.footer}>
+          <button className={styles.cancelButton} disabled={busy} onClick={onClose} type="button">취소</button>
+          <button className={styles.closeButton} disabled={busy} onClick={() => void close()} type="button">{busy ? "마감 처리 중..." : "영업마감"}</button>
+        </div> : <div className={styles.footer}><button className={styles.singleButton} disabled={busy} onClick={onClose} type="button">{preview?.blockers.length ? "확인" : "취소"}</button></div>}
     </section>
     {cashEntryOpen && preview && <OpeningFundModal close={() => setCashEntryOpen(false)} expectedCash={preview.expectedCash} initialFund={actualFund} mode="businessClose" onApply={fund => { setActualFund(fund); setCashEntryOpen(false); setError(""); }} />}
   </div>;

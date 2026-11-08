@@ -231,6 +231,37 @@ body {
   user-select: none;
 }
 
+/* Shared POS popup surface, matched to the ADM customer trade dialog. */
+[data-pos-app] :is([role="dialog"], [role="alertdialog"]) {
+  box-sizing: border-box;
+  border: 1px solid #cbd5da;
+  background-color: #fff;
+  color: #25343b;
+  box-shadow: 0 18px 48px rgb(22 37 45 / 22%);
+}
+
+[data-pos-app] [data-pos-modal-header] {
+  display: flex;
+  height: 64px;
+  min-height: 64px;
+  align-items: center;
+  border-bottom: 1px solid #e2e8eb;
+  background: #fff;
+  color: #25343b;
+}
+
+[data-pos-app] [data-pos-modal-header] button[class*="text-white/75"] {
+  color: #52636c;
+}
+
+[data-pos-app] [data-pos-modal-header] button[class*="text-white/75"]:hover {
+  color: #25343b;
+}
+
+[data-pos-app] [data-pos-modal-header] strong[class~="text-white"] {
+  color: #25343b;
+}
+
 [role="dialog"] [role="listbox"] > button[role="option"] {
   width: 100%;
 }

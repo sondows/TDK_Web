@@ -157,7 +157,7 @@ export default function CustomerBalanceDialog({ customer, onClose }: {
     <dialog aria-labelledby="pos-customer-balance-title" className={`${adminStyles.customerTradeModal} ${styles.dialog}`} onCancel={event => { event.preventDefault(); onClose(); }} ref={dialogRef}>
       <header className={`${adminStyles.customerTradeHeader} ${styles.header}`}>
         <div className={adminStyles.customerTradeTitle}>
-          <button aria-label="잔액관리 닫기" className={styles.closeButton} onClick={onClose} type="button">×</button>
+          <button aria-label="잔액관리 닫기" className={styles.closeButton} onClick={onClose} type="button"><svg aria-hidden="true" fill="none" height="28" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 24 24" width="28"><path d="m15.5 18-6-6 6-6" /></svg></button>
           <h2 id="pos-customer-balance-title">거래관리</h2>
         </div>
         <span className={adminStyles.customerTradeCustomer}>{customerLabel}</span>
