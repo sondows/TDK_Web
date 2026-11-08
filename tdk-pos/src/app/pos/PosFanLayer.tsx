@@ -34,7 +34,7 @@ async function fetchFans(): Promise<FanResponse> {
 
 function FanGlyph({ state }: { state: Fan["state"] }) {
   const color = state === "on" ? "#16a34a" : state === "off" ? "#64748b" : "#d97706";
-  return <svg aria-hidden="true" className={state === "on" ? "size-7 motion-safe:animate-spin" : "size-7"} style={{ color, animationDuration: "2.6s" }} viewBox="0 0 32 32" fill="none">
+  return <svg aria-hidden="true" className={state === "on" ? "size-[45px] motion-safe:animate-spin" : "size-[45px]"} style={{ color, animationDuration: "2.6s" }} viewBox="0 0 32 32" fill="none">
     <circle cx="16" cy="16" r="2.4" fill="currentColor" />
     <path d="M16 13.1c-1.8-3.1-1.9-8.6.1-9.2 3.2-.9 5.2 5.8 2.4 10.1M18.5 17.4c3.6-.3 8.3 2.5 7.7 4.5-1 3.2-7.9 1.8-10.5-2M13.5 17.3c-1.8 3.1-6.4 5.7-7.8 4.2-2.2-2.5 2.7-7.5 7.7-7.4" fill="currentColor" opacity=".88" />
   </svg>;
@@ -124,7 +124,6 @@ export default function PosFanLayer() {
       const errorLabel = fan.error ? fanErrorMessage(fan.error) : "";
       return <button key={fan.fanId} aria-label={`${fan.name}, ${label}${isPending ? ", 처리 중" : ""}`} className={`pointer-events-auto absolute flex size-12 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-white bg-white/95 shadow-md ring-1 ring-slate-200 transition disabled:cursor-wait disabled:opacity-60 ${fan.state === "on" ? "shadow-green-900/20" : ""}`} disabled={isPending || fan.state === "unknown"} onClick={event => { event.preventDefault(); event.stopPropagation(); void toggle(fan); }} onPointerDown={event => event.stopPropagation()} style={{ left: `${fan.positionX}%`, top: `${fan.positionY}%` }} title={`${fan.name}: ${label}${errorLabel ? ` (${errorLabel})` : ""}`} type="button">
         <FanGlyph state={fan.state} />
-        <span className="max-w-12 truncate text-[9px] font-semibold leading-none text-slate-700">{isPending ? "대기" : fan.name}</span>
       </button>;
     })}
   </div>;

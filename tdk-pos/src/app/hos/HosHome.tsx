@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { clampHosRemainingQuantity, getHosCancellationQuantity } from "@/lib/hos-order-quantity";
@@ -58,9 +59,9 @@ function FlyingCart({ flight, active, onComplete }: { flight: CartFlight; active
 
   if (!active) return null;
 
-  return <span aria-hidden="true" className="pointer-events-none fixed z-[100] text-blue-600" ref={iconRef}
-    style={{ left: flight.x - 12, top: flight.y - 12, width: 24, height: 24 }}>
-    <svg className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
+  return <span aria-hidden="true" className="pointer-events-none fixed z-[9999] flex size-[30px] items-center justify-center rounded-full bg-white text-blue-600 shadow-md ring-1 ring-blue-100" ref={iconRef}
+    style={{ left: flight.x - 15, top: flight.y - 15 }}>
+    <svg className="size-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
   </span>;
 }
 
@@ -85,6 +86,8 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 const HOS_SESSION_EXPIRED_EVENT = "tdk-hos-session-expired";
+const HOS_TOAST_DURATION_KEY = "tdk-hos-toast-duration-seconds";
+const HOS_TOAST_DURATIONS = [1, 2, 3, 5, 10] as const;
 async function fetchHos(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init);
   if (response.status === 401 && typeof window !== "undefined") {
@@ -128,8 +131,15 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [logoutMenuOpen, setLogoutMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toastDuration, setToastDuration] = useState<number>(2);
+  const [toastDurationLoaded, setToastDurationLoaded] = useState(false);
+  const [successToast, setSuccessToast] = useState<{ message: string; position: "top" | "center" } | null>(null);
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
   const [exitMessage, setExitMessage] = useState("");
+  const clearDraftLockRef = useRef(false);
+  const fullCancelLockRef = useRef(false);
+  const successToastTimerRef = useRef<number | null>(null);
   const sendLock = useRef(false);
   const optionAddLockRef = useRef(false);
   const tableRequestRef = useRef<Promise<void> | null>(null);
@@ -146,10 +156,11 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const menuListRef = useRef<HTMLDivElement | null>(null);
   const menuSectionRefs = useRef(new Map<number, HTMLElement>());
   const menuTabRefs = useRef(new Map<number | null, HTMLButtonElement>());
+  const menuScrollAnimationRef = useRef<number | null>(null);
+  const menuScrollTargetRef = useRef<number | null>(null);
   const programmaticMenuScrollRef = useRef(false);
   const keepMenuOpenAfterOptionRef = useRef(false);
   const optionFlightOriginRef = useRef<CartPoint | null>(null);
-  const menuScrollReleaseTimerRef = useRef<number | null>(null);
   const closeLogoutMenu = useCallback(() => {
     if (!logoutMenuOpen) return;
     setLogoutMenuOpen(false);
@@ -225,6 +236,27 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [logoutMenuOpen, closeLogoutMenu]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const saved = Number(window.localStorage.getItem(HOS_TOAST_DURATION_KEY));
+        if (HOS_TOAST_DURATIONS.includes(saved as (typeof HOS_TOAST_DURATIONS)[number])) setToastDuration(saved);
+      } catch { /* Keep the default when browser storage is unavailable. */ }
+      setToastDurationLoaded(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!toastDurationLoaded) return;
+    try { window.localStorage.setItem(HOS_TOAST_DURATION_KEY, String(toastDuration)); }
+    catch { /* A storage failure must not affect HOS ordering. */ }
+  }, [toastDuration, toastDurationLoaded]);
+
+  useEffect(() => () => {
+    if (successToastTimerRef.current !== null) window.clearTimeout(successToastTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (screen !== "tables") return;
@@ -439,16 +471,26 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, []);
 
   function triggerCartFlight(origin: CartPoint | null) {
-    const target = cartSummaryRef.current;
-    if (!origin || !target || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const rect = target.getBoundingClientRect();
-    const targetPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    const id = ++cartFlightIdRef.current;
-    setCartFlights(current => [...current, { id, ...origin, dx: targetPoint.x - origin.x, dy: targetPoint.y - origin.y }]);
-    cartPulseAnimationRef.current?.cancel();
-    cartPulseAnimationRef.current = target.animate([
-      { transform: "scale(1)" }, { transform: "scale(1.08)", offset: 0.45 }, { transform: "scale(1)" },
-    ], { duration: 280, easing: "ease-out" });
+    if (!origin) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.requestAnimationFrame(() => {
+      const target = cartSummaryRef.current;
+      if (!target) return;
+
+      const rect = target.getBoundingClientRect();
+      const targetPoint = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      if (!reduceMotion) {
+        const id = ++cartFlightIdRef.current;
+        setCartFlights(current => [...current, { id, ...origin, dx: targetPoint.x - origin.x, dy: targetPoint.y - origin.y }]);
+      }
+
+      cartPulseAnimationRef.current?.cancel();
+      cartPulseAnimationRef.current = target.animate(reduceMotion ? [
+        { backgroundColor: "transparent" }, { backgroundColor: "rgb(219 234 254)" }, { backgroundColor: "transparent" },
+      ] : [
+        { transform: "scale(1)" }, { transform: "scale(1.12)", offset: 0.45 }, { transform: "scale(1)" },
+      ], { duration: reduceMotion ? 220 : 320, easing: "ease-out" });
+    });
   }
 
   function chooseMenu(menu: Menu, keepMenuOpenAfterOption = false, originElement?: HTMLElement) {
@@ -560,9 +602,39 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (nextQuantity <= 0 && draft.length === 1 && !cancellations.length) setPendingTableId(null);
   }
 
-  async function sendChanges() {
-    const cancellationRequests = cancellations.map(item => {
-      const orderItem = orderItems.find(candidate => candidate.orderItemId === item.orderItemId);
+  function showSuccessToast(message: string, position: "top" | "center" = "top") {
+    if (successToastTimerRef.current !== null) window.clearTimeout(successToastTimerRef.current);
+    setSuccessToast({ message, position });
+    successToastTimerRef.current = window.setTimeout(() => {
+      setSuccessToast(null);
+      successToastTimerRef.current = null;
+    }, toastDuration * 1000);
+  }
+
+  function clearDraftImmediately() {
+    const tableId = detail?.table.tableId;
+    const currentSignature = JSON.stringify(draft);
+    if (tableId == null || !draft.length || busy || sendLock.current || clearDraftLockRef.current) return;
+    clearDraftLockRef.current = true;
+    try {
+      if (detail?.table.tableId !== tableId || JSON.stringify(draft) !== currentSignature || busy || sendLock.current) return;
+      setDraft([]);
+      if (!cancellations.length) setPendingTableId(null);
+      setError("");
+      showSuccessToast("장바구니를 비웠습니다.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "장바구니를 비우지 못했습니다.");
+    } finally {
+      window.setTimeout(() => { clearDraftLockRef.current = false; }, 0);
+    }
+  }
+
+  async function sendChanges(options?: { cancellationOverrides?: PendingCancel[]; orderItemsOverride?: Array<OrderItem & { orderStatus: string }>;
+    currentSessionIdOverride?: number; keepDetailOpenAfterCancel?: boolean }) {
+    const cancellationRows = options?.cancellationOverrides ?? cancellations;
+    const cancellationSourceItems = options?.orderItemsOverride ?? orderItems;
+    const cancellationRequests = cancellationRows.map(item => {
+      const orderItem = cancellationSourceItems.find(candidate => candidate.orderItemId === item.orderItemId);
       return orderItem ? { orderItemId: item.orderItemId,
         qty: getHosCancellationQuantity(orderItem.effectiveQty, item.keepQty) } : null;
     }).filter((item): item is { orderItemId: number; qty: number } => item !== null && item.qty > 0);
@@ -573,7 +645,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       if (submittingCancellations) {
         const response = await fetchHos("/api/order-items/cancellations/batch", {
           method: "POST", headers: { "Content-Type": "application/json", "X-TDK-Program": "HOS" },
-          body: JSON.stringify({ currentSessionId: detail.session?.sessionId,
+          body: JSON.stringify({ currentSessionId: options?.currentSessionIdOverride ?? detail.session?.sessionId,
             reason: cancellationReason, detail: cancellationDetail.trim(),
             cancellations: cancellationRequests }),
         });
@@ -596,6 +668,32 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             options: item.options, components: item.components })) }),
         }));
       }
+      if (submittingCancellations && options?.keepDetailOpenAfterCancel) {
+        showSuccessToast("전체 주문을 취소했습니다.", "center");
+        setCancellations([]);
+        setCancelMode(false);
+        setPendingTableId(draft.length ? detail.table.tableId : null);
+        const tableId = detail.table.tableId;
+        const requestVersion = ++detailRequestVersionRef.current;
+        activeDetailTableIdRef.current = tableId;
+        try {
+          const latest = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
+          if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId && latest.table.tableId === tableId) {
+            setDetail(latest);
+            setScreen("detail");
+            setError("");
+          }
+        } catch {
+          if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId) {
+            setDetail(null);
+            activeDetailTableIdRef.current = null;
+            setScreen("tables");
+            await loadTables();
+            setError("취소는 완료됐지만 최신 주문내역을 불러오지 못했습니다. 테이블을 다시 열어 확인해 주세요.");
+          }
+        }
+        return;
+      }
       if (!submittingCancellations) setDraft([]);
       setCancellations([]); setPendingTableId(submittingCancellations && draft.length ? detail.table.tableId : null);
       detailRequestVersionRef.current += 1;
@@ -605,6 +703,45 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       await loadTables();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "변경 내용을 전송하지 못했습니다."); }
     finally { setBusy(false); sendLock.current = false; }
+  }
+
+  async function cancelAllExistingOrders() {
+    if (!detail || !cancelMode || !cancellableItems.length || busy || sendLock.current || fullCancelLockRef.current) return;
+    fullCancelLockRef.current = true;
+    setBusy(true);
+    setError("");
+    const tableId = detail.table.tableId;
+    try {
+      const latest = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
+      if (latest.table.tableId !== tableId || !latest.session?.sessionId || detail?.table.tableId !== tableId ||
+        activeDetailTableIdRef.current !== tableId) {
+        throw new Error("현재 테이블의 최신 주문을 확인할 수 없습니다. 화면을 새로 확인해 주세요.");
+      }
+      const latestOrderItems = latest.orders.flatMap(order => order.items
+        .filter(item => item.itemType !== "COMPONENT" && item.effectiveQty > 0)
+        .map(item => ({ ...item, orderStatus: order.status })));
+      const latestCancellableItems = latestOrderItems.filter(item => ["OPEN", "ACCEPTED"].includes(item.orderStatus)
+        && item.status !== "CANCELLED");
+      if (!latestCancellableItems.length) {
+        setDetail(latest);
+        setCancellations([]);
+        setCancelMode(false);
+        setPendingTableId(draft.length ? tableId : null);
+        setError("취소 가능한 기존 주문이 없습니다.");
+        return;
+      }
+      const allCancellations = latestCancellableItems.map(item => ({ orderItemId: item.orderItemId, keepQty: 0 }));
+      setDetail(latest);
+      setCancellations(allCancellations);
+      setPendingTableId(tableId);
+      await sendChanges({ cancellationOverrides: allCancellations, orderItemsOverride: latestOrderItems,
+        currentSessionIdOverride: latest.session.sessionId, keepDetailOpenAfterCancel: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "최신 주문을 확인하지 못해 전체취소를 진행하지 않았습니다.");
+    } finally {
+      fullCancelLockRef.current = false;
+      setBusy(false);
+    }
   }
 
   async function completeOrder() {
@@ -698,40 +835,64 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const menuSectionsForDisplay = [...nonEmptyMenuSections,
     ...(uncategorizedMenus.length ? [{ categoryId: -1, name: "", displayName: "", menus: uncategorizedMenus }] : [])];
 
-  function releaseProgrammaticMenuScroll(delay = 140) {
-    if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
-    menuScrollReleaseTimerRef.current = window.setTimeout(() => {
-      programmaticMenuScrollRef.current = false;
-      menuScrollReleaseTimerRef.current = null;
-    }, delay);
+  function cancelProgrammaticMenuScroll() {
+    if (menuScrollAnimationRef.current !== null) {
+      window.cancelAnimationFrame(menuScrollAnimationRef.current);
+      menuScrollAnimationRef.current = null;
+    }
+    menuScrollTargetRef.current = null;
+    programmaticMenuScrollRef.current = false;
   }
 
   function scrollToMenuCategory(categoryId: number | null) {
     setActiveCategoryId(categoryId);
     const list = menuListRef.current;
     if (!list) return;
+    if (menuScrollAnimationRef.current !== null && menuScrollTargetRef.current === categoryId) return;
+    const target = categoryId === null ? null : menuSectionRefs.current.get(categoryId);
+    if (categoryId !== null && !target) return;
+
+    cancelProgrammaticMenuScroll();
+    const maxScrollTop = Math.max(0, list.scrollHeight - list.clientHeight);
+    const requestedTop = target
+      ? list.scrollTop + target.getBoundingClientRect().top - list.getBoundingClientRect().top
+      : 0;
+    const destination = Math.min(maxScrollTop, Math.max(0, requestedTop));
+    const start = list.scrollTop;
+    const distance = destination - start;
+    if (Math.abs(distance) < 1 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      list.scrollTop = destination;
+      syncMenuCategoryFromScroll();
+      return;
+    }
+
     programmaticMenuScrollRef.current = true;
-    if (categoryId === null) {
-      list.scrollTo({ top: 0, behavior: "smooth" });
-      releaseProgrammaticMenuScroll(700);
-      return;
-    }
-    const target = menuSectionRefs.current.get(categoryId);
-    if (!target) {
-      releaseProgrammaticMenuScroll(250);
-      return;
-    }
-    const top = list.scrollTop + target.getBoundingClientRect().top - list.getBoundingClientRect().top;
-    list.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-    releaseProgrammaticMenuScroll(900);
+    menuScrollTargetRef.current = categoryId;
+    let startedAt: number | null = null;
+    const duration = Math.min(450, Math.max(120, Math.abs(distance) * 0.75));
+    const animateScroll = (now: number) => {
+      startedAt ??= now;
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = progress < 0.5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      list.scrollTop = start + distance * eased;
+      if (progress < 1) {
+        menuScrollAnimationRef.current = window.requestAnimationFrame(animateScroll);
+      } else {
+        list.scrollTop = destination;
+        menuScrollAnimationRef.current = null;
+        programmaticMenuScrollRef.current = false;
+        menuScrollTargetRef.current = null;
+        syncMenuCategoryFromScroll();
+      }
+    };
+    menuScrollAnimationRef.current = window.requestAnimationFrame(animateScroll);
   }
 
   function syncMenuCategoryFromScroll() {
     const list = menuListRef.current;
-    if (!list || programmaticMenuScrollRef.current) {
-      if (programmaticMenuScrollRef.current) releaseProgrammaticMenuScroll(140);
-      return;
-    }
+    if (!list || programmaticMenuScrollRef.current) return;
     if (list.scrollTop <= 1) {
       setActiveCategoryId(defaultMenuCategoryId);
       return;
@@ -755,6 +916,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (tabRect.left < tabsRect.left) tabs.scrollBy({ left: tabRect.left - tabsRect.left - 8, behavior: "smooth" });
     else if (tabRect.right > tabsRect.right) tabs.scrollBy({ left: tabRect.right - tabsRect.right + 8, behavior: "smooth" });
   }, [activeCategoryId, screen]);
+
+  useEffect(() => {
+    if (screen !== "menu") cancelProgrammaticMenuScroll();
+  }, [screen]);
 
   async function chooseHosCustomer(customer: HosCustomer | null) {
     if (!detail || !detail.session || busy) {
@@ -787,7 +952,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }
 
   useEffect(() => () => {
-    if (menuScrollReleaseTimerRef.current !== null) window.clearTimeout(menuScrollReleaseTimerRef.current);
+    if (menuScrollAnimationRef.current !== null) window.cancelAnimationFrame(menuScrollAnimationRef.current);
   }, []);
 
   useEffect(() => () => cartPulseAnimationRef.current?.cancel(), []);
@@ -801,13 +966,17 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       <div className="relative shrink-0" ref={logoutMenuRef}>
         <button aria-expanded={logoutMenuOpen} aria-haspopup="menu" aria-label="메뉴" className="flex min-h-11 min-w-11 items-center justify-center bg-transparent p-0 text-2xl leading-none text-slate-600" disabled={busy} onClick={() => logoutMenuOpen ? closeLogoutMenu() : setLogoutMenuOpen(true)} type="button">⋮</button>
         {logoutMenuOpen && <div className="absolute right-0 top-full z-30 mt-1 min-w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg" role="menu">
+          <button className="min-h-11 w-full px-4 text-left text-sm font-medium text-slate-700" onClick={() => { closeLogoutMenu(); setSettingsOpen(true); }} role="menuitem" type="button">설정</button>
           <button className="min-h-11 w-full px-4 text-left text-sm font-medium text-slate-700" onClick={() => { closeLogoutMenu(); void logout(); }} role="menuitem" type="button">로그아웃</button>
         </div>}
       </div>
     </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 pt-[15px] text-slate-900">
       <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
-        <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={returnToTables} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
-        {canManageCustomer && <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[55%] min-w-12 truncate bg-transparent px-2 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>}
+        <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-0 shrink items-center gap-1.5 bg-transparent pr-1 text-2xl font-bold text-slate-700" onClick={returnToTables} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
+        <div className="flex shrink-0 items-center gap-1">
+          {canManageCustomer && <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[34vw] min-w-8 truncate bg-transparent px-1 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>}
+          {draft.length > 0 && <button aria-label="장바구니 비우기" className="min-h-11 shrink-0 whitespace-nowrap bg-transparent px-1 text-[12px] font-semibold text-red-600 active:text-red-800 disabled:opacity-50" disabled={busy} onClick={clearDraftImmediately} type="button">장바구니 비우기</button>}
+        </div>
       </div>
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 py-1">
         <span className="text-[17px] font-normal text-slate-500">T.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
@@ -936,10 +1105,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         </>}
 
         <section aria-labelledby="cart-title">
-          <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
             <h2 className="text-[17px] font-bold text-slate-700" id="cart-title">장바구니</h2>
-            {draft.length > 0 && <span className="text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</span>}
           </div>
+          {draft.length > 0 && <div className="mb-2 text-right text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</div>}
           {draft.length ? <div className="divide-y divide-slate-100">
             {draft.map((item, index) => {
               const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
@@ -966,9 +1135,12 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         </section>
       </div>
       <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="grid grid-cols-[4fr_3fr_3fr] gap-2">
-        <button className="min-h-14 rounded-xl bg-blue-700 text-[17px] font-extrabold text-white disabled:opacity-50" disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
-        <button className="min-h-14 rounded-xl border border-red-500 bg-red-50 text-[17px] font-extrabold text-red-700" disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
+        <div className="grid grid-cols-[4fr_3fr_3fr] items-end gap-2">
+        <button className={`min-h-14 rounded-xl text-[17px] font-extrabold disabled:opacity-50 ${cancelMode ? "bg-[#EAF2FF] text-[#1855DF]" : "bg-blue-700 text-white"}`} disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
+        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">전송</button>
+        <div className="grid min-w-0 gap-2">
+        {cancelMode && cancellableItems.length > 0 && <button className="min-h-14 rounded-xl border border-red-200 bg-[#FFF0F0] text-[17px] font-extrabold text-[#DC2626] disabled:opacity-50" disabled={busy || !cancellableItems.length} onClick={() => void cancelAllExistingOrders()} type="button">전체취소</button>}
+        <button className={`min-h-14 rounded-xl border text-[17px] font-extrabold ${cancelMode ? "border-[#E60012] bg-[#E60012] text-white" : "border-red-500 bg-red-50 text-red-700"}`} disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
           if (cancelMode) {
             setCancelMode(false); setCancellations([]);
             if (!draft.length) setPendingTableId(null);
@@ -978,7 +1150,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           }
           setError("");
         }} type="button">취소</button>
-        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">전송</button>
+        </div>
         </div>
       </div>
     </section>}
@@ -989,7 +1161,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           if (element) menuTabRefs.current.set(item.categoryId, element); else menuTabRefs.current.delete(item.categoryId);
         }} type="button">{item.displayName}</button>)}
       </div>
-      <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain scroll-smooth px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onScroll={syncMenuCategoryFromScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch" }}>
+      <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onPointerDown={cancelProgrammaticMenuScroll} onScroll={syncMenuCategoryFromScroll} onTouchStart={cancelProgrammaticMenuScroll} onWheel={cancelProgrammaticMenuScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch" }}>
         {menuSectionsForDisplay.map(section => <div className="-mx-3 mb-[11.2px] border-y border-[#e5ebf0] bg-[#fbfcfe] px-3 shadow-[0_1px_3px_rgba(71,85,105,0.08)] last:mb-0" data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
           if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
         }}>
@@ -998,9 +1170,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={event => quickAddMenu(menu, event.currentTarget)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
           </div>)}
         </div>)}
-        <div aria-hidden="true" className="h-[50vh]" />
       </div>
-      <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-slate-800 font-extrabold text-white" onClick={() => setScreen("detail")} type="button">주문내역으로 돌아가기</button></div>
+      <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-[#1D5EFF] font-extrabold text-white transition-colors hover:bg-[#164edb] active:bg-[#1245c6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1D5EFF]" onClick={() => setScreen("detail")} type="button">장바구니로 돌아가기</button></div>
     </section>}
 
     {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => { optionAddLockRef.current = false; optionFlightOriginRef.current = null; setSelectedMenu(null); }}>
@@ -1017,7 +1188,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         <div className="mt-5 grid grid-cols-[7fr_3fr] gap-2"><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-blue-600 px-1 text-sm font-extrabold text-white" onClick={addDraft} type="button">장바구니에 담기</button><button className="min-h-12 min-w-0 whitespace-nowrap rounded-xl bg-slate-100 px-1 text-sm font-bold text-slate-900" onClick={() => { optionAddLockRef.current = false; optionFlightOriginRef.current = null; setSelectedMenu(null); }} type="button">취소</button></div>
       </section>
     </div>}
-    {cartFlights.map(flight => <FlyingCart active={screen === "menu"} flight={flight} key={flight.id} onComplete={removeCartFlight} />)}
+    {typeof document !== "undefined" && cartFlights.length > 0 && createPortal(
+      cartFlights.map(flight => <FlyingCart active={screen === "menu"} flight={flight} key={flight.id} onComplete={removeCartFlight} />),
+      document.body,
+    )}
     {exitConfirmOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <section aria-labelledby="hos-exit-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
         <h2 className="text-lg font-extrabold" id="hos-exit-title">종료하시겠습니까?</h2>
@@ -1028,6 +1202,23 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
           <button autoFocus className="min-h-12 rounded-xl bg-slate-100 font-bold text-slate-700" onClick={() => setExitConfirmOpen(false)} type="button">취소</button>
           <button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={busy} onClick={attemptAppExit} type="button">종료</button>
         </div>
+      </section>
+    </div>}
+    {successToast && <div aria-live="polite" className={`pointer-events-none fixed z-[90] flex px-4 ${successToast.position === "center" ? "inset-0 items-center justify-center" : "inset-x-0 top-[calc(env(safe-area-inset-top)+1rem)] justify-center"}`} role="status">
+      <div className="rounded-full bg-slate-800/95 px-4 py-2 text-sm font-semibold text-white shadow-lg">{successToast.message}</div>
+    </div>}
+    {settingsOpen && <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/45 p-4" onClick={() => setSettingsOpen(false)}>
+      <section aria-labelledby="hos-settings-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-extrabold text-slate-800" id="hos-settings-title">설정</h2>
+          <button aria-label="설정 닫기" className="min-h-11 min-w-11 rounded-lg text-xl text-slate-500" onClick={() => setSettingsOpen(false)} type="button">×</button>
+        </div>
+        <fieldset className="mt-3">
+          <legend className="mb-3 text-sm font-semibold text-slate-600">알림 메시지 표시 시간</legend>
+          <div className="grid grid-cols-5 gap-2">
+            {HOS_TOAST_DURATIONS.map(seconds => <button aria-pressed={toastDuration === seconds} className={`min-h-10 rounded-lg px-1 text-sm font-bold ${toastDuration === seconds ? "bg-blue-700 text-white" : "bg-slate-100 text-slate-700"}`} key={seconds} onClick={() => setToastDuration(seconds)} type="button">{seconds}초</button>)}
+          </div>
+        </fieldset>
       </section>
     </div>}
     {exitMessage && <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 p-4">

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import PinKeypad from "@/components/PinKeypad";
 import PinInput from "@/components/PinInput";
@@ -246,6 +246,30 @@ export default function OrderSummaryPanel({
   } | null>(null);
   const [spicyBusy, setSpicyBusy] = useState(false);
   const [spicyError, setSpicyError] = useState<{ key: string; message: string } | null>(null);
+  const [clearCartConfirmTarget, setClearCartConfirmTarget] = useState<{
+    selectionVersion: number; tableId: number; sessionId: number | null; cartSignature: string;
+  } | null>(null);
+  const clearCartConfirmLockRef = useRef(false);
+  const cartSignature = JSON.stringify(cart);
+  const requestClearCart = () => {
+    if (!selected || !cart.length || submitting) return;
+    clearCartConfirmLockRef.current = false;
+    setClearCartConfirmTarget({ selectionVersion, tableId: selected.tableId, sessionId: selected.sessionId, cartSignature });
+  };
+  const closeClearCartConfirm = () => {
+    clearCartConfirmLockRef.current = false;
+    setClearCartConfirmTarget(null);
+  };
+  const confirmClearCart = () => {
+    if (clearCartConfirmLockRef.current) return;
+    clearCartConfirmLockRef.current = true;
+    const target = clearCartConfirmTarget;
+    const targetStillMatches = Boolean(target && selected && !submitting && cart.length > 0 &&
+      target.selectionVersion === selectionVersion && target.tableId === selected.tableId &&
+      target.sessionId === selected.sessionId && target.cartSignature === cartSignature);
+    setClearCartConfirmTarget(null);
+    if (targetStillMatches) clearCart();
+  };
   const displayOrderDetails = orderDetails.map(order => ({ ...order, items: order.items.map(item => {
     const override = spicyOverrides[item.orderItemId];
     if (!override || !item.options.some(option => option.modifierOptionId === override.previousOptionId)) return item;
@@ -805,6 +829,10 @@ export default function OrderSummaryPanel({
             renderOrderContent("summary")
           ) : tab === "pending" ? (
             <div className="pos-order-content">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 py-2">
+                <h2 className="text-sm font-bold text-slate-700">장바구니</h2>
+                {cart.length > 0 && <button aria-label="장바구니 비우기" className="min-h-10 shrink-0 rounded-md px-2 text-[13px] font-semibold text-red-600 hover:text-red-700 active:text-red-800 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-red-600 disabled:opacity-50" disabled={submitting} onClick={requestClearCart} type="button">장바구니 비우기</button>}
+              </div>
               <div className="pos-order-items-scroll py-3">
                 {pendingRows.length ? (
                   pendingRows
@@ -896,7 +924,7 @@ export default function OrderSummaryPanel({
               <button
                 className="min-h-14 rounded-xl bg-slate-100 font-bold"
                 disabled={!cart.length || submitting}
-                onClick={clearCart}
+                onClick={requestClearCart}
                 type="button"
               >
                 취소
@@ -983,6 +1011,18 @@ export default function OrderSummaryPanel({
           onClose={() => setCustomerSelectOpen(false)}
           onSelect={customer => { selectCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
         />
+      )}
+      {clearCartConfirmTarget && clearCartConfirmTarget.selectionVersion === selectionVersion && (
+        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/50 p-4" onClick={closeClearCartConfirm}>
+          <section aria-labelledby="pos-clear-cart-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="alertdialog">
+            <h2 className="text-lg font-extrabold text-slate-800" id="pos-clear-cart-title">장바구니 비우기</h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-600">장바구니에 담긴 모든 메뉴를 삭제하시겠습니까?</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button className="min-h-12 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50" onClick={closeClearCartConfirm} type="button">취소</button>
+              <button className="min-h-12 rounded-xl bg-red-600 font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={!cart.length || submitting} onClick={confirmClearCart} type="button">비우기</button>
+            </div>
+          </section>
+        </div>
       )}
     </section>
   );
