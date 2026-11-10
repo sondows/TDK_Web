@@ -306,6 +306,16 @@ export function buildKdsTableCompletionTaskSnapshot<T extends {
   return [...selected.values()];
 }
 
+export const KDS_TABLE_DOUBLE_CLICK_WINDOW_MS = 300;
+export function isKdsTableDoubleClick(firstTargetKey: string, firstClickAtMs: number,
+  secondTargetKey: string, secondClickAtMs: number,
+  windowMs = KDS_TABLE_DOUBLE_CLICK_WINDOW_MS) {
+  const elapsed = secondClickAtMs - firstClickAtMs;
+  return firstTargetKey.length > 0 && firstTargetKey === secondTargetKey &&
+    Number.isFinite(firstClickAtMs) && Number.isFinite(secondClickAtMs) &&
+    Number.isInteger(windowMs) && windowMs >= 0 && elapsed >= 0 && elapsed <= windowMs;
+}
+
 export function getKdsTableButtonAction(
   tasks: KdsTableButtonTask[], now: number, localBatchStartId?: string | null,
   defaultStartUndoWindowMs = kdsStartUndoWindowMs(), inputButton: "MENU" | "STATUS" | "TABLE" = "TABLE",

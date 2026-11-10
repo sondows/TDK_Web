@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildKdsTableCompletionTaskSnapshot, canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel } from "./kds-model.ts";
+import { buildKdsTableCompletionTaskSnapshot, canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel, isKdsTableDoubleClick } from "./kds-model.ts";
 import { parseKdsMenuConfig } from "./kds-menu-config.ts";
 import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canRequestKdsTaskCompletionDuringStartWindow, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, resolveKdsIndividualButtonIntent, transitionKdsState } from "./kds-model.ts";
 
@@ -652,4 +652,14 @@ test("completed task elapsed seconds start at one and stop before the one-minute
 test("each completed task uses its own confirmed timestamp", () => {
   const now = 10_000_000;
   assert.deepEqual([10, 4, 0].map(minutes => kdsCompletedElapsedMinutes(now - minutes * 60_000, now)), [10, 4, 0]);
+});
+
+test("table button double click is accepted only for the same target inside the configured pair window", () => {
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:10", 399), true);
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:10", 400), true);
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:10", 401), false);
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:10", 99), false);
+  assert.equal(isKdsTableDoubleClick("table:10", Number.NaN, "table:10", 100), false);
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:11", 200), false);
+  assert.equal(isKdsTableDoubleClick("table:10", 100, "table:10", 200, -1), false);
 });

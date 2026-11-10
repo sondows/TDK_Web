@@ -1,6 +1,6 @@
 import { getCurrentKdsStaff } from "@/lib/kds-auth";
 import { isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, type KdsTaskStatus } from "@/lib/kds-model";
-import { cancelKdsTableCompletion, finalizeKdsTableCompletion, KdsActionError, requestKdsTableCompletion } from "@/lib/kds-server";
+import { cancelKdsTableCompletion, finalizeKdsTableCompletion, KdsActionError, requestKdsTableCompletion, requestKdsTableDoubleClickCompletion } from "@/lib/kds-server";
 import { getKdsCookingSettings } from "@/lib/kds-cooking-settings";
 import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 
@@ -24,11 +24,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
   };
   const validRequestRef = typeof body?.requestId === "string" && body.requestId.length <= 36 &&
     typeof body.requestedAtMs === "number" && Number.isSafeInteger(body.requestedAtMs) && body.requestedAtMs >= 0;
-  if (!Number.isSafeInteger(sessionId) || sessionId <= 0 || !body || !["REQUEST", "CANCEL", "FINALIZE"].includes(action) ||
+  if (!Number.isSafeInteger(sessionId) || sessionId <= 0 || !body || !["REQUEST", "DOUBLE_CLICK_REQUEST", "CANCEL", "FINALIZE"].includes(action) ||
     (action === "REQUEST" && (!Array.isArray(body.tasks) || !body.tasks.every(validTask) ||
       !isKdsSelectedPotTasks(body.selectedPotTasks) ||
       (body.postCookTimerMinutes !== undefined && !isKdsPostCookTimerMinutes(body.postCookTimerMinutes)))) ||
-    (action !== "REQUEST" && !validRequestRef)) {
+    (action === "DOUBLE_CLICK_REQUEST" && (!Array.isArray(body.tasks) || body.tasks.length === 0 || body.tasks.length > 1000 ||
+      !body.tasks.every(validTask))) ||
+    (action !== "REQUEST" && action !== "DOUBLE_CLICK_REQUEST" && !validRequestRef)) {
     return Response.json({ success: false, message: "테이블 조리 작업 요청을 확인해 주세요." }, { status: 400 });
   }
   try {
@@ -41,6 +43,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
       const result = await requestKdsTableCompletion(sessionId, body.tasks as ExpectedTask[],
         body.postCookTimerMinutes === undefined ? settings.defaultBoilTimeMinutes : body.postCookTimerMinutes as 3 | 5 | 10,
         countdownSeconds, body.selectedPotTasks === true);
+      return Response.json({ success: true, ...result, serverNowMs: Date.now() }, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (action === "DOUBLE_CLICK_REQUEST") {
+      const settings = await getKdsCookingSettings();
+      const countdownSeconds = await getKdsCompletionCountdownSeconds();
+      const result = await requestKdsTableDoubleClickCompletion(sessionId, body.tasks as ExpectedTask[],
+        settings.defaultBoilTimeMinutes, countdownSeconds);
       return Response.json({ success: true, ...result, serverNowMs: Date.now() }, { headers: { "Cache-Control": "no-store" } });
     }
     const result = action === "CANCEL"

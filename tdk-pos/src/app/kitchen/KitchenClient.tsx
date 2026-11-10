@@ -1,10 +1,10 @@
-﻿"use client";
+"use client";
 
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import type { KdsViewTask } from "@/lib/kds-server";
 import { activeKdsTableTasks, attachKdsOrderBundleAddons, countKdsTablesByStatus, groupKdsPotDisplayRows, groupKdsKitchenTasks, oldestKdsTableOrderedAtMs, preparingKdsPartyCards, sortKdsPartyCardsByLatestOrder, sortKdsPartyMembers, sortKdsTableGroups } from "@/lib/kds-party-grouping";
-import { buildKdsTableCompletionTaskSnapshot, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsOrderBundleSettings, kdsStartUndoWindowMs, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, resolveKdsIndividualButtonIntent, type KdsCookingSettings, type KdsIndividualButton, type KdsIndividualButtonIntent, type KdsOrderBundleSettings } from "@/lib/kds-model";
+import { buildKdsTableCompletionTaskSnapshot, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, formatKdsTaskDisplay, getKdsTableButtonAction, honorQueuedKdsTableCompletionCancel, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsOrderBundleSettings, isKdsTableDoubleClick, KDS_TABLE_DOUBLE_CLICK_WINDOW_MS, kdsStartUndoWindowMs, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsCompletionCountdownMs, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, remainingKdsCompletionSeconds, remainingKdsStartUndoSeconds, resolveKdsIndividualButtonIntent, type KdsCookingSettings, type KdsIndividualButton, type KdsIndividualButtonIntent, type KdsOrderBundleSettings } from "@/lib/kds-model";
 import { playPosClickSound, preloadPosClickSound, unlockPosClickSound } from "@/lib/pos-sound";
 import { latestKdsSpicyAlert, type KdsSpicyAlert } from "@/lib/kds-spicy-alert";
 import { kdsTaskElapsedLabel as labelFor, kdsTaskStatusLabel as statusFor } from "@/lib/kds-task-display";
@@ -16,6 +16,8 @@ type TaskStartOperation = { action: "MENU" | "STATUS"; clickedAtMs: number; clic
 type QueuedCompletionAfterStart = { intent: "DIRECT" | "STATUS"; completionInputButton?: KdsIndividualButton; taskIds: number[] };
 type TableStartOperation = { clickedAtMs: number; clickedAtMonoMs: number; startUndoWindowMs: number; taskIds: number[]; inputButton: KdsIndividualButton | "TABLE"; completeRequested: boolean; undoRequested: boolean; choiceAfterStartRequested: boolean; queuedUndoDelayMs?: number };
 type TableCompletionRequestOperation = { taskIds: number[]; cancelRequested: boolean };
+type TableDoubleClickRequest = { requestId: string; requestedAtMs: number; taskIds: number[] };
+type TableDoubleClickOperation = { phase: "REQUESTING" | "PENDING" | "CANCELLING"; requests: Map<number, TableDoubleClickRequest>; cancelRequested: boolean };
 type CountdownFlashSchedule = { key: string; timers: number[] };
 const CARD_PALETTES = [
   { card: { backgroundColor: "#EEF5FF", borderColor: "#C9DBFF" }, cooking: { backgroundColor: "#2563EB", borderColor: "#1D4ED8" } },
@@ -88,6 +90,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const tableCompletionFinalizeInFlight = useRef(new Set<string>());
   const tableCompletionCancelIntents = useRef(new Map<string, number>());
   const tableCompletionRequestOperations = useRef(new Map<number, TableCompletionRequestOperation>());
+  const tableButtonClickTimers = useRef(new Map<string, { timer: number; clickedAtMs: number }>());
+  const tableDoubleClickOperations = useRef(new Map<string, TableDoubleClickOperation>());
   const knownIds = useRef<Set<number> | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const clearBoilTimeChoice = useCallback(() => {
@@ -121,6 +125,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       completionRequestedAtMs: null,
       completionRequestId: null,
       completionRequestScope: null,
+      completionRequestCommand: null,
       completionCountdownSeconds: null,
       pendingPostCookTimerMinutes: null,
     } satisfies Partial<KdsViewTask>;
@@ -866,6 +871,14 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       tableCompletionFinalizeInFlight.current.delete(key);
       setPendingTableCompletionFinalizeIds(current => { const next = new Set(current); next.delete(sessionId); return next; });
       activeMutations.current--;
+      if (!tableCompletionTimers.current.has(key)) {
+        for (const [operationKey, operation] of tableDoubleClickOperations.current) {
+          if (operation.requests.get(sessionId)?.requestId === requestId) {
+            operation.requests.delete(sessionId);
+            if (!operation.requests.size) tableDoubleClickOperations.current.delete(operationKey);
+          }
+        }
+      }
     }
   }, [refresh, router]);
 
@@ -1005,8 +1018,11 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
 
   const handleTableButton = useCallback(async (table: { sessionId: number; tasks: KdsViewTask[] }, selectedPotTasks = false, postCookTimerMinutes?: number, inputButton: KdsIndividualButton | "TABLE" = "TABLE") => {
     const actionKey = selectedPotTasks ? -table.tasks[0].taskId : table.sessionId;
+    if (inputButton === "TABLE" && table.tasks.some(task => task.completionRequestCommand === "TABLE_DOUBLE_CLICK" &&
+      task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null)) return;
     const pendingCompletionRequest = tableCompletionRequestOperations.current.get(table.sessionId);
     if (pendingCompletionRequest) {
+      if (inputButton === "TABLE") return;
       if (!pendingCompletionRequest.cancelRequested) {
         pendingCompletionRequest.cancelRequested = true;
         projectTasks(pendingCompletionRequest.taskIds, () => ({ completionRequestedAtMs: null,
@@ -1239,6 +1255,189 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     completionCountdownSeconds, cookingSettings.defaultBoilTimeMinutes, pendingStartTableIds, pendingTableSessionIds,
     projectTasks, refresh, router, serverNow, startBoilTimeChoice, startWaitingTableTasks]);
 
+  const cancelTableDoubleClick = useCallback(async (operationKey: string, operation: TableDoubleClickOperation) => {
+    if (operation.phase === "REQUESTING") { operation.cancelRequested = true; return; }
+    if (operation.phase === "CANCELLING") return;
+    operation.phase = "CANCELLING";
+    const entries = [...operation.requests.entries()];
+    if (!entries.length) {
+      tableDoubleClickOperations.current.delete(operationKey);
+      await refresh();
+      return;
+    }
+    setPendingTableSessionIds(current => new Set([...current, ...entries.map(([sessionId]) => sessionId)]));
+    try {
+      const outcomes = await Promise.allSettled(entries.map(async ([sessionId, request]) => {
+        const timerKey = `${sessionId}:${request.requestId}`;
+        tableCompletionCancelIntents.current.set(timerKey, performance.now() + 10_000);
+        const timer = tableCompletionTimers.current.get(timerKey);
+        if (timer !== undefined) window.clearTimeout(timer);
+        tableCompletionTimers.current.delete(timerKey);
+        const response = await fetch(`/api/kitchen/tables/${sessionId}/complete`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "CANCEL", requestId: request.requestId, requestedAtMs: request.requestedAtMs }),
+        });
+        if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
+        const result = await response.json() as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean; alreadyCompleted?: boolean };
+        if (!response.ok || !result.success) throw new Error(result.message ?? "테이블 전체완료 취소에 실패했습니다.");
+        if (result.cancelled === true) {
+          clearLocalTableCompletion(sessionId, request.requestId, request.taskIds);
+          return { expired: false };
+        }
+        tableCompletionCancelIntents.current.delete(timerKey);
+        if (result.alreadyCompleted === true) return { expired: false };
+        if (result.expired) return { expired: true };
+        throw new Error("테이블 전체완료 요청 상태를 확인할 수 없습니다. 화면을 갱신해 주세요.");
+      }));
+      outcomes.forEach((outcome, index) => {
+        if (outcome.status === "fulfilled" && !outcome.value.expired) operation.requests.delete(entries[index][0]);
+      });
+      const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+      if (failure) throw failure.reason instanceof Error ? failure.reason : new Error("테이블 전체완료 취소에 실패했습니다.");
+      if (!operation.requests.size) {
+        tableDoubleClickOperations.current.delete(operationKey);
+      } else operation.phase = "PENDING";
+      await refresh();
+    } catch (reason) {
+      operation.phase = "PENDING";
+      await refresh();
+      setError(reason instanceof Error ? reason.message : "테이블 전체완료 취소에 실패했습니다.");
+    } finally {
+      setPendingTableSessionIds(current => {
+        const next = new Set(current);
+        for (const [sessionId] of entries) next.delete(sessionId);
+        return next;
+      });
+    }
+  }, [clearLocalTableCompletion, refresh, router]);
+
+  const requestTableDoubleClickCompletion = useCallback(async (operationKey: string,
+    sessionTables: Array<{ sessionId: number; tasks: KdsViewTask[] }>) => {
+    const existing = tableDoubleClickOperations.current.get(operationKey);
+    if (existing) {
+      if (existing.phase === "REQUESTING") existing.cancelRequested = true;
+      else void cancelTableDoubleClick(operationKey, existing);
+      return;
+    }
+    const persistedRequests = new Map<number, TableDoubleClickRequest>();
+    for (const table of sessionTables) {
+      const pending = table.tasks.find(task => task.completionRequestCommand === "TABLE_DOUBLE_CLICK" &&
+        task.completionRequestScope === "TABLE" && task.completionRequestId && task.completionRequestedAtMs !== null);
+      if (!pending?.completionRequestId || pending.completionRequestedAtMs === null) continue;
+      const taskIds = table.tasks.filter(task => task.completionRequestId === pending.completionRequestId)
+        .map(task => task.taskId);
+      persistedRequests.set(table.sessionId, { requestId: pending.completionRequestId,
+        requestedAtMs: pending.completionRequestedAtMs, taskIds });
+    }
+    if (persistedRequests.size) {
+      const operation: TableDoubleClickOperation = { phase: "PENDING", requests: persistedRequests, cancelRequested: false };
+      tableDoubleClickOperations.current.set(operationKey, operation);
+      await cancelTableDoubleClick(operationKey, operation);
+      return;
+    }
+    const eligibleTables = sessionTables.map(table => ({ ...table, expected: table.tasks.filter(task =>
+      !task.cancelled && (task.status === "WAITING" || task.status === "COOKING")) }))
+      .filter(table => table.expected.length > 0);
+    if (!eligibleTables.length) return;
+    const operation: TableDoubleClickOperation = { phase: "REQUESTING", requests: new Map(), cancelRequested: false };
+    tableDoubleClickOperations.current.set(operationKey, operation);
+    const allIds = eligibleTables.flatMap(table => table.expected.map(task => task.taskId));
+    const optimisticAt = Date.now() + clockOffset;
+    setNow(Date.now());
+    setPendingTableSessionIds(current => new Set([...current, ...eligibleTables.map(table => table.sessionId)]));
+    setPendingTableCompletionRequestIds(current => new Set([...current, ...eligibleTables.map(table => table.sessionId)]));
+    activeMutations.current++;
+    projectTasks(allIds, task => ({ status: "COOKING", previousStatus: task.status === "WAITING" ? "WAITING" : task.previousStatus,
+      startedAtMs: task.status === "WAITING" ? optimisticAt : task.startedAtMs,
+      changedAtMs: task.status === "WAITING" ? optimisticAt : task.changedAtMs,
+      startSource: task.status === "WAITING" ? "TABLE" : task.startSource,
+      completionRequestedAtMs: optimisticAt, completionRequestId: null, completionRequestScope: "TABLE",
+      completionRequestCommand: "TABLE_DOUBLE_CLICK", completionCountdownSeconds }));
+    setError("");
+    try {
+      const outcomes = await Promise.allSettled(eligibleTables.map(async table => {
+        const response = await fetch(`/api/kitchen/tables/${table.sessionId}/complete`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "DOUBLE_CLICK_REQUEST", tasks: table.expected.map(task => ({
+            taskId: task.taskId, status: task.status, changedAtMs: task.changedAtMs,
+          })) }),
+        });
+        if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
+        const result = await response.json() as { success?: boolean; message?: string; requestId?: string;
+          requestedAtMs?: number; taskIds?: number[]; startedAtMs?: number; completionCountdownSeconds?: number;
+          serverNowMs?: number; expectedTaskIds?: number[]; actualTaskIds?: number[] };
+        if (!response.ok || !result.success || !result.requestId || typeof result.requestedAtMs !== "number" ||
+          !Array.isArray(result.taskIds) || typeof result.startedAtMs !== "number") {
+          const detail = Array.isArray(result.expectedTaskIds) && Array.isArray(result.actualTaskIds)
+            ? ` (화면 작업 ID: ${result.expectedTaskIds.join(", ")} / 서버 작업 ID: ${result.actualTaskIds.join(", ")})` : "";
+          throw new Error(`${result.message ?? "테이블 더블클릭 완료 요청을 시작하지 못했습니다."}${detail}`);
+        }
+        const request = { requestId: result.requestId, requestedAtMs: result.requestedAtMs, taskIds: result.taskIds };
+        operation.requests.set(table.sessionId, request);
+        setClockOffset(typeof result.serverNowMs === "number" ? result.serverNowMs - Date.now() : result.requestedAtMs - Date.now());
+        setTasks(current => current.map(task => {
+          if (task.sessionId !== table.sessionId || !result.taskIds!.includes(task.taskId)) return task;
+          const wasWaiting = table.expected.find(item => item.taskId === task.taskId)?.status === "WAITING";
+          return { ...task, status: "COOKING", previousStatus: wasWaiting ? "WAITING" : task.previousStatus,
+            startedAtMs: wasWaiting ? result.startedAtMs! : task.startedAtMs,
+            changedAtMs: wasWaiting ? result.startedAtMs! : task.changedAtMs,
+            completionRequestedAtMs: result.requestedAtMs!, completionRequestId: result.requestId!,
+            completionRequestScope: "TABLE", completionRequestCommand: "TABLE_DOUBLE_CLICK",
+            completionCountdownSeconds: result.completionCountdownSeconds ?? completionCountdownSeconds };
+        }));
+      }));
+      const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+      operation.phase = "PENDING";
+      clearProjection(allIds);
+      if (failure) {
+        await cancelTableDoubleClick(operationKey, operation);
+        throw failure.reason instanceof Error ? failure.reason : new Error("테이블 더블클릭 완료 요청에 실패했습니다.");
+      }
+      if (operation.cancelRequested) await cancelTableDoubleClick(operationKey, operation);
+      else await refresh();
+    } catch (reason) {
+      if (tableDoubleClickOperations.current.get(operationKey) === operation && !operation.requests.size) {
+        tableDoubleClickOperations.current.delete(operationKey);
+      }
+      clearProjection(allIds);
+      await refresh();
+      setError(reason instanceof Error ? reason.message : "테이블 더블클릭 완료 요청에 실패했습니다.");
+    } finally {
+      setPendingTableSessionIds(current => { const next = new Set(current); for (const table of eligibleTables) next.delete(table.sessionId); return next; });
+      setPendingTableCompletionRequestIds(current => { const next = new Set(current); for (const table of eligibleTables) next.delete(table.sessionId); return next; });
+      activeMutations.current--;
+    }
+  }, [cancelTableDoubleClick, clearProjection, clockOffset, completionCountdownSeconds, projectTasks, refresh, router]);
+
+  const dispatchTableButtonClick = useCallback((physicalTableKey: string,
+    sessionTables: Array<{ sessionId: number; tasks: KdsViewTask[] }>) => {
+    const pendingClick = tableButtonClickTimers.current.get(physicalTableKey);
+    const clickedAtMs = performance.now();
+    if (pendingClick) {
+      window.clearTimeout(pendingClick.timer);
+      tableButtonClickTimers.current.delete(physicalTableKey);
+      if (isKdsTableDoubleClick(physicalTableKey, pendingClick.clickedAtMs, physicalTableKey, clickedAtMs)) {
+        void requestTableDoubleClickCompletion(physicalTableKey, sessionTables);
+        return;
+      }
+      for (const table of sessionTables) void handleTableButton(table);
+    }
+    const timer = window.setTimeout(() => {
+      tableButtonClickTimers.current.delete(physicalTableKey);
+      // A single click never cancels a table-wide double-click completion.
+      if (tableDoubleClickOperations.current.has(physicalTableKey) || sessionTables.some(table =>
+        table.tasks.some(task => task.completionRequestCommand === "TABLE_DOUBLE_CLICK" &&
+          task.completionRequestScope === "TABLE" && task.completionRequestedAtMs !== null))) return;
+      for (const table of sessionTables) void handleTableButton(table);
+    }, KDS_TABLE_DOUBLE_CLICK_WINDOW_MS);
+    tableButtonClickTimers.current.set(physicalTableKey, { timer, clickedAtMs });
+  }, [handleTableButton, requestTableDoubleClickCompletion]);
+
+  useEffect(() => () => {
+    for (const pending of tableButtonClickTimers.current.values()) window.clearTimeout(pending.timer);
+    tableButtonClickTimers.current.clear();
+  }, []);
+
   const cancelPotCompletion = useCallback(async (task: KdsViewTask) => {
     if (!task.completionRequestId || task.completionRequestedAtMs === null ||
       task.completionRequestScope !== "TABLE" || pendingTableSessionIds.has(task.sessionId)) return;
@@ -1363,7 +1562,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
             const tableOrderedAtMs = oldestKdsTableOrderedAtMs(table.tasks, section === "preparing");
             const tableAge = elapsedMinutes(tableOrderedAtMs, serverNow);
             return <div className={`kds-task-row grid gap-2 p-2 ${tableIndex > 0 ? "border-t border-slate-300/70" : ""} ${firstTask.sessionKind === "DINE_IN" ? "grid-cols-[6.3rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[7rem_minmax(0,1fr)_7rem]" : "grid-cols-[5.75rem_minmax(0,1fr)_6.3rem] sm:grid-cols-[5.75rem_minmax(0,1fr)_7rem]"}`} data-session-kind={firstTask.sessionKind} key={table.sessionId}>
-          {isFirstPhysicalTableSession ? <button aria-label={firstTask.sessionKind === "DINE_IN" ? `${firstTask.label}번 테이블, 주문 ${tableAge}분 전` : `${firstTask.label} 포장 주문`} className="flex h-full min-h-16 w-full flex-col items-center justify-center rounded-lg border border-slate-300 bg-white/75 px-1 text-center disabled:cursor-wait" disabled={section === "completed" || firstTask.sessionKind !== "DINE_IN" || physicalTableSessions.some(session => pendingTableSessionIds.has(session.sessionId) && !pendingStartTableIds.has(session.sessionId) && !pendingTableCompletionRequestIds.has(session.sessionId))} onClick={() => { for (const session of physicalTableSessions) void handleTableButton(session); }} style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} type="button"><strong className={`${firstTask.sessionKind === "DINE_IN" ? "whitespace-nowrap text-2xl sm:text-3xl" : "break-all text-sm sm:text-base"} font-black leading-tight`}>{firstTask.label}</strong>{firstTask.sessionKind === "DINE_IN" && <span className="mt-1 text-xs font-semibold tabular-nums text-slate-600">{tableAge}분전</span>}</button> : <div aria-hidden="true" className="min-h-16" style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} />}
+          {isFirstPhysicalTableSession ? <button aria-label={firstTask.sessionKind === "DINE_IN" ? `${firstTask.label}번 테이블, 주문 ${tableAge}분 전` : `${firstTask.label} 포장 주문`} className="flex h-full min-h-16 w-full flex-col items-center justify-center rounded-lg border border-slate-300 bg-white/75 px-1 text-center disabled:cursor-wait" disabled={section === "completed" || firstTask.sessionKind !== "DINE_IN" || physicalTableSessions.some(session => pendingTableSessionIds.has(session.sessionId) && !pendingStartTableIds.has(session.sessionId) && !pendingTableCompletionRequestIds.has(session.sessionId))} onClick={() => dispatchTableButtonClick(`table:${firstTask.tableId ?? table.sessionId}`, physicalTableSessions)} style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} type="button"><strong className={`${firstTask.sessionKind === "DINE_IN" ? "whitespace-nowrap text-2xl sm:text-3xl" : "break-all text-sm sm:text-base"} font-black leading-tight`}>{firstTask.label}</strong>{firstTask.sessionKind === "DINE_IN" && <span className="mt-1 text-xs font-semibold tabular-nums text-slate-600">{tableAge}분전</span>}</button> : <div aria-hidden="true" className="min-h-16" style={{ gridColumn: 1, gridRow: `1 / span ${displayRows.length}` }} />}
           {displayRows.map((row, index) => {
             const task = row[0];
             const groupedPot = row.length > 1;

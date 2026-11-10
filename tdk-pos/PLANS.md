@@ -1893,6 +1893,17 @@
 
 Constraints: no production DB/log/NAS/deployment access, no schema changes, no forced-success handling, no UI redesign. Preserve table button semantics, boil-time defaults, countdown duration, task snapshot checks, and atomic completion.
 
+## TDKKDS table-button double-click full completion
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace table-button render/grouping and existing start/completion/cancel snapshots | `KitchenClient.tsx`, `kds-server.ts`, table APIs | PASS |
+| 2 | Add distinct touch/mouse double-click dispatch and an atomic per-session server request that starts waiting tasks, requests completion, and stores exact restoration snapshots | KDS client/server/routes | TODO |
+| 3 | Add cancellation/finalization and regression fixtures for WAITING/COOKING mixtures, POT/SOLO, grouping, and duplicate input | KDS tests | TODO |
+| 4 | Run full KDS tests, TypeScript, targeted ESLint, and production build; report browser/live limits | Project validation | TODO |
+
+Constraints: preserve single-click table behavior and individual controls, task/group/version checks, configured countdown, and existing POT/add-on atomicity. Do not alter schema, production DB, or NAS. No backup or Git branch required.
+
 ### Completion stale-state follow-up
 
 - Step 1: PASS. Table FINALIZE read and returned task completion atomically; prior client logic did not await a canonical refresh after success and returned on `REQUEST_NOT_FOUND` without refreshing. A stale screen could then take the CANCEL path; if the server already committed, it returned the repeated/processed message, and that error path's refresh was what finally moved the rows. The reported live instance cannot be classified without its API response/log/DB snapshot.
