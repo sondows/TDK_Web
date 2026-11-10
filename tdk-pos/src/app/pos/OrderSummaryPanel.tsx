@@ -132,6 +132,7 @@ const detailOrangeTheme = {
   selected: "border-[#FED7AA] bg-[#FFF9F4] text-[#C2410C]",
 };
 const cancelActionButtonClass = "bg-[#B91C1C] text-white hover:bg-[#991B1B] active:bg-[#991B1B] disabled:bg-[#FECACA] disabled:text-[#B91C1C]";
+const cancelModeExecuteButtonClass = "bg-[#B91C1C] text-white transition-colors hover:bg-[#B91C1C] active:bg-[#B91C1C] disabled:cursor-not-allowed disabled:bg-[#B91C1C] disabled:text-white disabled:opacity-100";
 const cancelModeEntryButtonClass = "border border-[#FECACA] bg-[#FFF1F2] text-[#DC2626] transition-colors hover:bg-[#FFE4E6] active:bg-[#FECDD3] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#DC2626] disabled:cursor-not-allowed disabled:opacity-50";
 const tabs: [Tab, string][] = [
   ["pending", "주문예정"],
@@ -307,10 +308,24 @@ export default function OrderSummaryPanel({
   const isFreeComponent = (item: DetailItem) => item.itemType === "COMPONENT" && item.parentOrderItemId !== null && Number(item.unitPrice) === 0 && item.cancelledQty === 0;
   const cancelables = editableItems.filter(item => item.effectiveQty > 0 && !isFreeComponent(item));
   const freeComponents = editableItems.filter(isFreeComponent);
-  const draft = (i: DetailItem) =>
-    c.draft[i.orderItemId] ?? { checked: false, keep: 1, touched: false };
+  const draft = (i: DetailItem) => {
+    const current = c.draft[i.orderItemId] ?? {
+      checked: false,
+      keep: i.effectiveQty,
+      touched: false,
+    };
+    return {
+      ...current,
+      keep: isFreeComponent(i)
+        ? Math.min(i.qty, Math.max(0, current.keep))
+        : Math.min(i.effectiveQty, Math.max(0, current.keep)),
+    };
+  };
   const chosen = cancelables
-    .map((i) => ({ i, d: draft(i), qty: draft(i).keep }))
+    .map((i) => {
+      const d = draft(i);
+      return { i, d, qty: i.effectiveQty - d.keep };
+    })
     .filter((x) => x.d.checked && x.qty > 0);
   const componentChanges = freeComponents
     .map(i => ({ i, quantity: draft(i).keep }))
@@ -439,7 +454,7 @@ export default function OrderSummaryPanel({
       draft: Object.fromEntries(
         editableItems.map((i) => [
           i.orderItemId,
-          { checked: false, keep: isFreeComponent(i) ? i.effectiveQty : 1, touched: false },
+          { checked: false, keep: i.effectiveQty, touched: false },
         ]),
       ),
     }));
@@ -458,7 +473,7 @@ export default function OrderSummaryPanel({
     edit(
       i,
       current.checked
-        ? { checked: false, keep: 1, touched: false }
+        ? { checked: false, keep: i.effectiveQty, touched: false }
         : { checked: true, keep: i.effectiveQty, touched: true },
     );
   };
@@ -563,6 +578,7 @@ export default function OrderSummaryPanel({
             (i.parentOrderItemId === null || o.items.some(parent => parent.orderItemId === i.parentOrderItemId && parent.status !== "CANCELLED")) &&
             (editableComponent || i.effectiveQty > 0),
           selectedForCancellation = selectable && d.checked,
+          hasCancellationPlanned = selectedForCancellation && !editableComponent && d.keep < i.effectiveQty,
           fullyCancelled = i.status === "CANCELLED" || o.status === "CANCELLED" || (i.effectiveQty === 0 && i.cancelledQty > 0),
           effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
         return (
@@ -577,7 +593,7 @@ export default function OrderSummaryPanel({
               ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5"
               : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"}`}>
               <span
-                className={`truncate font-medium ${selectedForCancellation ? (editableComponent ? "text-orange-800" : "text-orange-800 line-through") : fullyCancelled ? "text-slate-500 line-through" : ""}`}
+                className={`truncate font-medium ${hasCancellationPlanned ? "text-orange-800 line-through" : selectedForCancellation ? "text-orange-800" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
               >
                 {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
                 {i.itemName}{i.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
@@ -588,13 +604,14 @@ export default function OrderSummaryPanel({
                 {money(i.itemType === "SERVICE" ? 0 : Number(i.unitPrice))}
               </span>
               {selectedForCancellation ? (
-                <span className="grid grid-cols-[40px_minmax(2ch,1fr)_40px] items-center gap-2 text-center">
+                <span className="flex min-w-0 flex-col items-center text-center">
+                  <span className="grid w-full grid-cols-[40px_minmax(2ch,1fr)_40px] items-center gap-2 text-center">
                   <button
-                    disabled={d.keep <= (editableComponent ? 0 : 1)}
+                    disabled={d.keep <= 0}
                     onClick={(e) => {
                       e.stopPropagation();
                       edit(i, {
-                        keep: Math.max(editableComponent ? 0 : 1, d.keep - 1),
+                        keep: Math.max(0, d.keep - 1),
                         checked: true,
                         touched: true,
                       });
@@ -620,6 +637,8 @@ export default function OrderSummaryPanel({
                   >
                     +
                   </button>
+                  </span>
+                  {!editableComponent && d.keep < i.effectiveQty && <small className="mt-0.5 whitespace-nowrap text-[11px] font-semibold leading-tight text-red-600">{i.effectiveQty - d.keep}개 취소예정</small>}
                 </span>
               ) : (
                 <span
@@ -863,7 +882,7 @@ export default function OrderSummaryPanel({
           (c.mode ? (
             <div className="shrink-0 pb-2.5 pt-3">
               <p className={`mb-2 text-center text-sm font-medium ${detailOrangeTheme.deepText}`}>
-                취소할 메뉴를 선택하고 유지 수량을 조절하세요.
+                취소할 메뉴를 선택하고 취소 수량을 조절하세요.
               </p>
               {c.error && (
                 <p className="mb-2 text-center text-sm text-red-600">
@@ -880,7 +899,7 @@ export default function OrderSummaryPanel({
                   취소
                 </button>
                 <button
-                  className={`min-h-14 rounded-xl font-bold ${cancelActionButtonClass}`}
+                  className={`min-h-14 rounded-xl font-bold ${cancelModeExecuteButtonClass}`}
                   disabled={(!chosen.length && !componentChanges.length) || c.busy}
                   onClick={() => {
                     onBlockingUiChange(true);
@@ -1006,11 +1025,16 @@ export default function OrderSummaryPanel({
           </div>
         </section>
       </div>}
-      {customerSelectOpen && selected?.sessionId && (
+      {customerSelectOpen && (
         <CustomerSelectDialog
           selected={selectedCustomer}
+          selectionEnabled={customerScopeKey !== null}
           onClose={() => setCustomerSelectOpen(false)}
-          onSelect={customer => { selectCustomer(customer); if (customer) setCustomerSelectOpen(false); }}
+          onSelect={customer => {
+            if (customerScopeKey === null) return;
+            selectCustomer(customer);
+            if (customer) setCustomerSelectOpen(false);
+          }}
         />
       )}
       {cartClearedToastId !== null && <div aria-live="polite" className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center px-4" role="status">

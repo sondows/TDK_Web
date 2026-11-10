@@ -410,6 +410,9 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         setPhase(trust.pinSetupRequired ? "SETUP_PIN" : "LOGIN_PIN");
         return;
       }
+      if (trust.invalidated) {
+        setNotice("이 브라우저의 저장된 기기 인증이 현재 ID에 유효하지 않습니다. 마스터 비밀번호 인증이 필요합니다.");
+      }
       if (trust.passwordRegistrationRequired) {
         setActiveKeyboard(null);
         setInitialPasswordRegistration(true);

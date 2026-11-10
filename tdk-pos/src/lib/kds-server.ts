@@ -1,4 +1,4 @@
-import "server-only";
+﻿import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
@@ -7,7 +7,9 @@ import { attachKdsOrderBundleAddons, buildKdsOrderBundleKeys, buildKdsTableOrder
 import {
   buildKdsTaskDrafts, findKdsRecentMenuGroup, isKdsMenuEligible, kdsCookOptionSignature, needsNewCookingGroup, remainingKdsQuantity, transitionKdsState, transitionKdsLinkedAddonState,
   isKdsPostCookTimerMinutes, matchesKdsTableStartBatch, type KdsPostCookTimerMinutes, type KdsMember, type KdsMenuKind, type KdsState, type KdsStateSnapshot, type KdsTaskStatus,
-  canAcceptKdsQueuedUndo, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, isKdsCompletionCountdownSeconds, kdsCompletionCountdownMs, KDS_WINDOW_MS,
+  canAcceptKdsQueuedUndo, canRequestKdsTaskCompletionDuringStartWindow, DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS,
+  DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, isKdsCompletionCountdownSeconds, isKdsStartUndoWindowMs,
+  kdsCompletionCountdownMs, kdsStartUndoWindowMs, kdsTableCompletionFinalizeAtMs, KDS_WINDOW_MS,
   canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canRecoverKdsTableCompletionCancellation,
 } from "@/lib/kds-model";
 
@@ -254,6 +256,7 @@ export type KdsViewTask = {
   startedAtMs: number | null; completedAtMs: number | null; changedAtMs: number | null;
   previousStatus: KdsTaskStatus | null; bulkStartId: string | null;
   startSource: "MENU" | "STATUS" | "TABLE" | null;
+  startUndoWindowMs: number | null;
   cancelled: boolean; partiallyCancelled: boolean;
   orderNote: string | null;
   displayOnlyAsAddon?: boolean;
@@ -266,14 +269,16 @@ export type KdsViewTask = {
 type KdsPreviousState = KdsStateSnapshot & {
   bulkStartId?: string;
   startSource?: "MENU" | "STATUS" | "TABLE";
+  startUndoWindowMs?: number;
   completedTableRequest?: {
     requestId: string; sessionId: number; requestedAtMs: number; confirmedAtMs: number;
-    expectedChangedAtMs: number | null;
+    expectedChangedAtMs: number | null; expectedTaskIds?: number[];
   };
   completedTaskRequest?: { ownerTaskId: number; requestedAtMs: number };
   completionRequest?: {
     requestedAtMs: number; postCookTimerMinutes: number | null; completionCountdownSeconds?: number; requestId?: string;
     scope?: "TASK" | "TABLE"; sessionId?: number; ownerTaskId?: number; expectedStatus?: KdsTaskStatus; expectedChangedAtMs?: number | null;
+    expectedTaskIds?: number[];
   };
 };
 
@@ -419,6 +424,7 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
       previousStatus: previousState?.status ?? null,
       bulkStartId: previousState?.bulkStartId ?? null,
       startSource: previousState?.startSource ?? null,
+      startUndoWindowMs: isKdsStartUndoWindowMs(previousState?.startUndoWindowMs) ? previousState.startUndoWindowMs : null,
       cancelled,
       partiallyCancelled: !cancelled && members.some(member => eligibleMember(member) && ((cancelledById.get(member.itemId) ?? 0) > 0 || itemById.get(member.itemId)?.status === "CANCELLED")),
       items: displayItems,
@@ -428,7 +434,7 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
 }
 
 export class KdsActionError extends Error {
-  constructor(message: string, readonly statusCode = 409) { super(message); }
+  constructor(message: string, readonly statusCode = 409, readonly details?: Record<string, unknown>) { super(message); }
 }
 
 type LockedTask = RowDataPacket & Pick<TaskRow,
@@ -440,7 +446,9 @@ export async function updateKdsTask(
   expected: { status: KdsTaskStatus; changedAtMs: number | null },
   postCookTimerMinutes?: KdsPostCookTimerMinutes,
   queuedUndoDelayMs?: number,
+  startUndoWindowMs = kdsStartUndoWindowMs(),
 ) {
+  if (!isKdsStartUndoWindowMs(startUndoWindowMs)) throw new KdsActionError("조리 시작 취소 시간이 올바르지 않습니다.", 400);
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -513,15 +521,17 @@ export async function updateKdsTask(
     };
     // The second tap may occur inside three seconds while the first POST is still in flight.
     // Permit only a short transport grace for that queued tap; the normal undo window is unchanged.
+    const storedStartUndoWindowMs = isKdsStartUndoWindowMs(parseKdsPreviousState(row.previousState)?.startUndoWindowMs)
+      ? parseKdsPreviousState(row.previousState)!.startUndoWindowMs! : startUndoWindowMs;
     const queuedUndo = (action === "MENU" || action === "STATUS") &&
       state.status === "COOKING" && state.previousState?.status === "WAITING" &&
-      canAcceptKdsQueuedUndo(queuedUndoDelayMs, state.changedAtMs, now);
+      canAcceptKdsQueuedUndo(queuedUndoDelayMs, state.changedAtMs, now, storedStartUndoWindowMs);
     if (pendingCompletion(state.previousState)) {
       throw new KdsActionError("테이블 완료 카운트다운 중에는 상태를 변경할 수 없습니다.");
     }
     if ((action === "MENU" || action === "STATUS") && state.status === "COOKING" &&
       state.previousState?.status === "WAITING" && state.changedAtMs !== null && now >= state.changedAtMs &&
-      (now - state.changedAtMs <= KDS_WINDOW_MS || queuedUndo)) {
+      (now - state.changedAtMs <= storedStartUndoWindowMs || queuedUndo)) {
       const startedFrom = parseKdsPreviousState(row.previousState)?.startSource;
       if (startedFrom === "TABLE" || (action === "MENU" && startedFrom !== "MENU") ||
         (action === "STATUS" && startedFrom && startedFrom !== "STATUS")) {
@@ -562,10 +572,12 @@ export async function updateKdsTask(
       newGroup = { groupId: null, startedAtMs: now };
     }
     const transitionAt = Math.max(menuStartAtMs ?? now, (state.changedAtMs ?? 0) + 1);
-    const next = transitionKdsState(state, action === "STATUS" ? "MENU" : action, transitionAt, newGroup, queuedUndo);
+    const next = transitionKdsState(state, action === "STATUS" ? "MENU" : action, transitionAt, newGroup,
+      queuedUndo, storedStartUndoWindowMs);
     if (!next) throw new KdsActionError("현재 상태에서는 해당 조작을 할 수 없습니다. 화면을 갱신해 주세요.");
     const persistedPreviousState = next.status === "COOKING" && row.status === "WAITING" && next.previousState
-      ? { ...next.previousState, startSource: action === "STATUS" ? "STATUS" as const : "MENU" as const }
+      ? { ...next.previousState, startSource: action === "STATUS" ? "STATUS" as const : "MENU" as const,
+          startUndoWindowMs }
       : next.previousState;
     await connection.execute(`
       UPDATE kds_tasks SET status=?,cooking_group_id=?,cooking_started_at_ms=?,
@@ -584,7 +596,7 @@ export async function updateKdsTask(
         addonNext = transitionKdsLinkedAddonState(addonState, "START", transitionAt);
       } else if (next.status === "WAITING" && state.status === "COOKING" && addon.status === "COOKING" &&
         addon.changedAtMs === state.changedAtMs && addonState.previousState?.status === "WAITING" && !pendingCompletion(addonState.previousState)) {
-        addonNext = transitionKdsLinkedAddonState(addonState, "UNDO_START", transitionAt);
+        addonNext = transitionKdsLinkedAddonState(addonState, "UNDO_START", transitionAt, storedStartUndoWindowMs);
       } else if (next.status === "COOKING" && state.status === "DONE" && addon.status === "DONE" &&
         addon.changedAtMs === state.changedAtMs && addonState.previousState?.status === "COOKING") {
         addonNext = transitionKdsLinkedAddonState(addonState, "UNDO_COMPLETE", transitionAt);
@@ -593,7 +605,7 @@ export async function updateKdsTask(
       }
       if (!addonNext || addonNext.status === addon.status) continue;
       const addonPrevious = addonNext.status === "COOKING" && addon.status === "WAITING" && addonNext.previousState
-        ? { ...addonNext.previousState, startSource: "MENU" as const } : addonNext.previousState;
+        ? { ...addonNext.previousState, startSource: "MENU" as const, startUndoWindowMs } : addonNext.previousState;
       const addonEligibility = addonNext.status === "DONE" ? await taskCookingEligibility(connection, addon.memberItems) : null;
       if (addonEligibility?.timerEligible && !isKdsPostCookTimerMinutes(postCookTimerMinutes)) {
         throw new KdsActionError("A cooking timer is required for the linked add-on.", 409);
@@ -608,7 +620,8 @@ export async function updateKdsTask(
       if (addonResult.affectedRows !== 1) throw new KdsActionError("Linked add-on changed before state synchronization completed.", 409);
     }
     await connection.commit();
-    return { status: next.status, changedAtMs: next.changedAtMs, startedAtMs: next.cookingStartedAtMs };
+    return { status: next.status, changedAtMs: next.changedAtMs, startedAtMs: next.cookingStartedAtMs,
+      startUndoWindowMs: next.status === "COOKING" && row.status === "WAITING" ? startUndoWindowMs : null };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -674,6 +687,7 @@ export async function requestKdsTaskCompletion(
   expected: { status: KdsTaskStatus; changedAtMs: number | null },
   postCookTimerMinutes?: KdsPostCookTimerMinutes,
   completionCountdownSeconds = DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS,
+  completionInputButton?: "MENU" | "STATUS",
 ) {
   if (!isKdsCompletionCountdownSeconds(completionCountdownSeconds)) throw new KdsActionError("완료 카운트다운은 1~30초 값이어야 합니다.", 400);
   const connection = await pool.getConnection();
@@ -686,7 +700,12 @@ export async function requestKdsTaskCompletion(
     if (row.status !== "COOKING") throw new KdsActionError("조리중인 메뉴만 완료 요청할 수 있습니다.");
     const now = Date.now();
     const state = completionState(row);
-    if (state.previousState?.status === "WAITING" && state.changedAtMs !== null && now >= state.changedAtMs && now - state.changedAtMs <= KDS_WINDOW_MS) {
+    const storedPreviousState = parseKdsPreviousState(row.previousState);
+    const startUndoWindowMs = isKdsStartUndoWindowMs(storedPreviousState?.startUndoWindowMs)
+      ? storedPreviousState.startUndoWindowMs : kdsStartUndoWindowMs(completionCountdownSeconds);
+    if (state.previousState?.status === "WAITING" && state.changedAtMs !== null && now >= state.changedAtMs &&
+      now - state.changedAtMs <= startUndoWindowMs &&
+      !canRequestKdsTaskCompletionDuringStartWindow(storedPreviousState?.startSource ?? null, completionInputButton)) {
       throw new KdsActionError("조리 시작 취소 가능 시간에는 완료 요청을 시작할 수 없습니다.");
     }
     const previous = parseKdsPreviousState(row.previousState) ?? {
@@ -1074,7 +1093,10 @@ export async function requestKdsTableCompletion(
       const displayedTaskIds = displayGroup?.flatMap(task => [task.taskId, ...(task.displayAddonTaskIds ?? [])]) ?? [];
       if (!firstPot || selected.length !== expected.length || !displayGroup ||
         !matchesKdsTableStartBatch(selectedIds, displayedTaskIds)) {
-        throw new KdsActionError("같은 냄비 조리 작업 목록이 변경되었습니다. 화면을 새로고침해 주세요.");
+        throw new KdsActionError("같은 냄비 조리 작업 목록이 변경되었습니다. 화면을 새로고침해 주세요.", 409, {
+          expectedTaskIds: [...expectedById.keys()].sort((a, b) => a - b),
+          actualTaskIds: displayedTaskIds.slice().sort((a, b) => a - b),
+        });
       }
       activeRows.splice(0, activeRows.length, ...selected);
     }
@@ -1092,6 +1114,7 @@ export async function requestKdsTableCompletion(
     }
     const requestedAtMs = Date.now();
     const requestId = randomUUID();
+    const expectedTaskIds = activeRows.map(({ row }) => Number(row.taskId)).sort((a, b) => a - b);
     for (const { row, timerEligible } of activeRows) {
       const previous = parseKdsPreviousState(row.previousState) ?? {
         status: row.status, cookingGroupId: number(row.cookingGroupId),
@@ -1101,6 +1124,7 @@ export async function requestKdsTableCompletion(
         scope: "TABLE", requestId, sessionId, requestedAtMs,
         completionCountdownSeconds,
         expectedStatus: row.status, expectedChangedAtMs: number(row.changedAtMs),
+        expectedTaskIds,
         postCookTimerMinutes: timerEligible ? defaultPostCookTimerMinutes : null,
       };
       await connection.execute("UPDATE kds_tasks SET previous_state=? WHERE task_id=? AND status=? AND changed_at_ms <=> ?",
@@ -1132,6 +1156,7 @@ async function cancelKdsTableCompletionOnce(sessionId: number, requestId: string
       FROM kds_tasks k INNER JOIN orders o ON o.order_id=k.order_id
       WHERE o.session_id=? ORDER BY k.task_id FOR UPDATE`, [sessionId]);
     const matching = rows.flatMap(row => {
+      if (row.status === "DONE") return [];
       const previous = parseKdsPreviousState(row.previousState);
       const request = pendingCompletion(previous);
       return request?.scope === "TABLE" && request.requestId === requestId &&
@@ -1150,6 +1175,25 @@ async function cancelKdsTableCompletionOnce(sessionId: number, requestId: string
           canRecoverKdsTableCompletionCancellation(completedRequest.confirmedAtMs, now)
           ? [{ row, previous: previous!, completedRequest }] : [];
       });
+      if (!recentlyCompleted.length) {
+        const completed = rows.flatMap(row => {
+          if (row.status !== "DONE") return [];
+          const previous = parseKdsPreviousState(row.previousState);
+          const marker = previous?.completedTableRequest;
+          return marker?.requestId === requestId && marker.sessionId === sessionId &&
+            marker.requestedAtMs === requestedAtMs && previous?.status === "COOKING"
+            ? [{ taskId: Number(row.taskId), marker }] : [];
+        }).sort((a, b) => a.taskId - b.taskId);
+        const actualTaskIds = completed.map(item => item.taskId);
+        const snapshots = completed.map(item => item.marker.expectedTaskIds).filter((ids): ids is number[] => Array.isArray(ids));
+        const expectedTaskIds = snapshots[0]?.slice().sort((a, b) => a - b) ?? actualTaskIds;
+        const snapshotsAgree = snapshots.every(ids => matchesKdsTableStartBatch(expectedTaskIds, ids));
+        if (completed.length > 0 && snapshotsAgree && matchesKdsTableStartBatch(expectedTaskIds, actualTaskIds)) {
+          await connection.commit();
+          return { cancelled: false, alreadyCompleted: true, outcome: "ALREADY_COMPLETED" as const,
+            taskCount: actualTaskIds.length, expectedTaskIds, actualTaskIds };
+        }
+      }
       if (!recentlyCompleted.length) throw new KdsActionError("테이블 완료 요청이 이미 처리되었거나 취소되었습니다.");
       if (sessions[0].status !== "OPEN") throw new KdsActionError("종료된 테이블 주문은 조리 상태로 복구할 수 없습니다.");
       for (const { row, previous, completedRequest } of recentlyCompleted) {
@@ -1224,22 +1268,65 @@ export async function finalizeKdsTableCompletion(sessionId: number, requestId: s
     await connection.beginTransaction();
     const [sessions] = await connection.query<Array<RowDataPacket & { status: string }>>(
       "SELECT status FROM table_sessions WHERE session_id=? FOR UPDATE", [sessionId]);
-    if (sessions[0]?.status !== "OPEN") { await connection.commit(); return 0; }
+    if (sessions[0]?.status !== "OPEN") {
+      await connection.commit();
+      return { completed: 0, outcome: "SESSION_NOT_OPEN" as const, expectedTaskIds: [], actualTaskIds: [], serverNowMs: Date.now() };
+    }
     const [rows] = await connection.query<CompletionLockedTask[]>(`
       SELECT k.task_id AS taskId,k.member_items AS memberItems,k.status,k.cooking_group_id AS cookingGroupId,
         k.cooking_started_at_ms AS cookingStartedAtMs,k.cooking_completed_at_ms AS cookingCompletedAtMs,
         k.previous_state AS previousState,k.changed_at_ms AS changedAtMs
       FROM kds_tasks k INNER JOIN orders o ON o.order_id=k.order_id
-      WHERE o.session_id=? AND k.status<>'DONE' ORDER BY k.task_id FOR UPDATE`, [sessionId]);
+      WHERE o.session_id=? ORDER BY k.task_id FOR UPDATE`, [sessionId]);
     const matching = rows.flatMap(row => {
+      if (row.status === "DONE") return [];
       const previous = parseKdsPreviousState(row.previousState);
       const request = pendingCompletion(previous);
       return request?.scope === "TABLE" && request.requestId === requestId && request.sessionId === sessionId &&
         request.requestedAtMs === requestedAtMs ? [{ row, previous, request }] : [];
     });
-    if (!matching.length || (!immediate && !canFinalizeKdsTableCompletion(
-      requestedAtMs, Date.now(), matching[0]?.request.completionCountdownSeconds,
-    ))) { await connection.commit(); return 0; }
+    const actualTaskIds = matching.map(({ row }) => Number(row.taskId)).sort((a, b) => a - b);
+    const storedSnapshots = matching.map(({ request }) => request.expectedTaskIds).filter((ids): ids is number[] => Array.isArray(ids));
+    const expectedTaskIds = storedSnapshots[0]?.slice().sort((a, b) => a - b) ?? actualTaskIds;
+    const snapshotsAgree = storedSnapshots.every(ids => matchesKdsTableStartBatch(expectedTaskIds, ids));
+    if (!matching.length) {
+      const completed = rows.flatMap(row => {
+        if (row.status !== "DONE") return [];
+        const marker = parseKdsPreviousState(row.previousState)?.completedTableRequest;
+        return marker?.requestId === requestId && marker.sessionId === sessionId && marker.requestedAtMs === requestedAtMs
+          ? [{ taskId: Number(row.taskId), marker }] : [];
+      }).sort((a, b) => a.taskId - b.taskId);
+      const actualCompletedIds = completed.map(item => item.taskId);
+      const completedSnapshots = completed.map(item => item.marker.expectedTaskIds).filter((ids): ids is number[] => Array.isArray(ids));
+      const completedExpectedIds = completedSnapshots[0]?.slice().sort((a, b) => a - b) ?? actualCompletedIds;
+      const completedSnapshotsAgree = completedSnapshots.every(ids => matchesKdsTableStartBatch(completedExpectedIds, ids));
+      if (completed.length > 0 && completedSnapshotsAgree &&
+        matchesKdsTableStartBatch(completedExpectedIds, actualCompletedIds)) {
+        await connection.commit();
+        return { completed: actualCompletedIds.length, outcome: "ALREADY_COMPLETED" as const,
+          alreadyCompleted: true, expectedTaskIds: completedExpectedIds, actualTaskIds: actualCompletedIds, serverNowMs: Date.now() };
+      }
+      await connection.commit();
+      return { completed: 0, outcome: "REQUEST_NOT_FOUND" as const, expectedTaskIds, actualTaskIds, serverNowMs: Date.now() };
+    }
+    if (!snapshotsAgree || !matchesKdsTableStartBatch(expectedTaskIds, actualTaskIds)) {
+      // A request snapshot is immutable. Cancel only its still-pending members and keep
+      // the transaction/version checks intact; never complete a partial group.
+      for (const { row, previous } of matching) {
+        if (previous) delete previous.completionRequest;
+        await connection.execute("UPDATE kds_tasks SET previous_state=? WHERE task_id=? AND status=?",
+          [JSON.stringify(previous), row.taskId, row.status]);
+      }
+      await connection.commit();
+      return { completed: 0, outcome: "TASK_SET_CHANGED" as const, expectedTaskIds, actualTaskIds, serverNowMs: Date.now() };
+    }
+    const serverNowMs = Date.now();
+    const finalizeAtMs = kdsTableCompletionFinalizeAtMs(requestedAtMs, matching[0].request.completionCountdownSeconds);
+    if (!immediate && !canFinalizeKdsTableCompletion(requestedAtMs, serverNowMs, matching[0].request.completionCountdownSeconds)) {
+      await connection.commit();
+      return { completed: 0, outcome: "COUNTDOWN_PENDING" as const, expectedTaskIds, actualTaskIds,
+        finalizeAtMs, serverNowMs };
+    }
     let changedGroup = false;
     for (const { row, request } of matching) {
       const unchanged = row.status === request.expectedStatus && number(row.changedAtMs) === request.expectedChangedAtMs;
@@ -1253,7 +1340,7 @@ export async function finalizeKdsTableCompletion(sessionId: number, requestId: s
           [JSON.stringify(previous), row.taskId, row.status]);
       }
       await connection.commit();
-      return 0;
+      return { completed: 0, outcome: "TASK_STATE_CHANGED" as const, expectedTaskIds, actualTaskIds, serverNowMs: Date.now() };
     }
     let completed = 0;
     const completedAtMs = Date.now();
@@ -1268,6 +1355,7 @@ export async function finalizeKdsTableCompletion(sessionId: number, requestId: s
         completedTableRequest: {
           requestId: request.requestId!, sessionId, requestedAtMs: request.requestedAtMs,
           confirmedAtMs: completedAtMs, expectedChangedAtMs: request.expectedChangedAtMs ?? null,
+          expectedTaskIds,
         },
       };
       delete originalState.completionRequest;
@@ -1281,7 +1369,7 @@ export async function finalizeKdsTableCompletion(sessionId: number, requestId: s
       completed += 1;
     }
     await connection.commit();
-    return completed;
+    return { completed, outcome: "COMPLETED" as const, expectedTaskIds, actualTaskIds, serverNowMs: completedAtMs };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -1385,7 +1473,11 @@ async function lockOpenDiningSession(connection: PoolConnection, sessionId: numb
   }
 }
 
-export async function startKdsTable(sessionId: number, requestedTaskIds?: number[]) {
+export async function startKdsTable(
+  sessionId: number, requestedTaskIds?: number[], startUndoWindowMs = kdsStartUndoWindowMs(),
+  startSource: "MENU" | "STATUS" | "TABLE" = "TABLE",
+) {
+  if (!isKdsStartUndoWindowMs(startUndoWindowMs)) throw new KdsActionError("조리 시작 취소 시간이 올바르지 않습니다.", 400);
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -1427,7 +1519,8 @@ export async function startKdsTable(sessionId: number, requestedTaskIds?: number
         previousState: row.previousState ? JSON.parse(row.previousState) as KdsStateSnapshot : null,
         changedAtMs: number(row.changedAtMs),
       };
-      const previousState = { ...stateSnapshotForKds(state), bulkStartId: batchStartId, startSource: "TABLE" as const };
+      const previousState = { ...stateSnapshotForKds(state), bulkStartId: batchStartId,
+        startSource, startUndoWindowMs };
       await connection.execute(`
         UPDATE kds_tasks SET status='COOKING',cooking_group_id=?,cooking_started_at_ms=?,
           cooking_completed_at_ms=NULL,previous_state=?,changed_at_ms=?,
@@ -1435,7 +1528,8 @@ export async function startKdsTable(sessionId: number, requestedTaskIds?: number
       [null, startedAtMs, JSON.stringify(previousState), startedAtMs, row.taskId]);
     }
     await connection.commit();
-     return { batchStartId, taskCount: selectedRows.length, taskIds: selectedRows.map(row => Number(row.taskId)), startedAtMs };
+     return { batchStartId, taskCount: selectedRows.length, taskIds: selectedRows.map(row => Number(row.taskId)),
+       startedAtMs, startUndoWindowMs };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -1444,7 +1538,11 @@ export async function startKdsTable(sessionId: number, requestedTaskIds?: number
   }
 }
 
-export async function undoKdsTableStart(sessionId: number, batchStartId: string, expectedTaskIds: number[], queuedUndoDelayMs?: number) {
+export async function undoKdsTableStart(
+  sessionId: number, batchStartId: string, expectedTaskIds: number[], queuedUndoDelayMs?: number,
+  fallbackStartUndoWindowMs = kdsStartUndoWindowMs(),
+) {
+  if (!isKdsStartUndoWindowMs(fallbackStartUndoWindowMs)) throw new KdsActionError("조리 시작 취소 시간이 올바르지 않습니다.", 400);
   const connection = await pool.getConnection();
   try {
     const uniqueExpectedTaskIds = [...new Set(expectedTaskIds)];
@@ -1471,24 +1569,26 @@ export async function undoKdsTableStart(sessionId: number, batchStartId: string,
     const now = Date.now();
     const validatedRows = batchRows.map(row => {
       const previous = row.previousState
-        ? JSON.parse(row.previousState) as KdsStateSnapshot & { bulkStartId?: string }
+        ? JSON.parse(row.previousState) as KdsStateSnapshot & { bulkStartId?: string; startUndoWindowMs?: number }
         : null;
       const changedAtMs = number(row.changedAtMs);
-      const queuedUndo = canAcceptKdsQueuedUndo(queuedUndoDelayMs, changedAtMs, now);
+      const undoWindowMs = isKdsStartUndoWindowMs(previous?.startUndoWindowMs)
+        ? previous.startUndoWindowMs : fallbackStartUndoWindowMs;
+      const queuedUndo = canAcceptKdsQueuedUndo(queuedUndoDelayMs, changedAtMs, now, undoWindowMs);
       if (previous?.bulkStartId !== batchStartId || previous.status !== "WAITING" || changedAtMs === null ||
-        now < changedAtMs || (now - changedAtMs > KDS_WINDOW_MS && !queuedUndo) ||
+        now < changedAtMs || (now - changedAtMs > undoWindowMs && !queuedUndo) ||
         !(JSON.parse(row.memberItems) as KdsMember[]).some(member => member.kind !== "COMPONENT" && activeItemIds.has(member.itemId))) {
         throw new KdsActionError("테이블 전체 조리 시작 취소 가능 시간이 지났거나 주문 상태가 변경되었습니다.");
       }
-      return { row, previous, changedAtMs, queuedUndo };
+      return { row, previous, changedAtMs, queuedUndo, undoWindowMs };
     });
-    for (const { row, previous, changedAtMs, queuedUndo } of validatedRows) {
+    for (const { row, previous, changedAtMs, queuedUndo, undoWindowMs } of validatedRows) {
       const state: KdsState = {
         status: row.status, cookingGroupId: number(row.cookingGroupId),
         cookingStartedAtMs: number(row.cookingStartedAtMs), cookingCompletedAtMs: number(row.cookingCompletedAtMs),
         previousState: previous, changedAtMs,
       };
-      const next = transitionKdsState(state, "MENU", now, undefined, queuedUndo);
+      const next = transitionKdsState(state, "MENU", now, undefined, queuedUndo, undoWindowMs);
       if (!next) throw new KdsActionError("테이블 조리 시작 그룹을 모두 복구할 수 없습니다.");
       await connection.execute(`
         UPDATE kds_tasks SET status=?,cooking_group_id=?,cooking_started_at_ms=?,

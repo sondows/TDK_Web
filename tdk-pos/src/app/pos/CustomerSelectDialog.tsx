@@ -29,10 +29,11 @@ const formatPhone = (value: string | null) => {
   return digits.length === 11 ? `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}` : value;
 };
 
-export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
+export default function CustomerSelectDialog({ selected, onSelect, onClose, selectionEnabled = true }: {
   selected: Pick<SelectedCustomer, "customerId" | "name"> | null;
   onSelect: (customer: SelectedCustomer | null) => void;
   onClose: () => void;
+  selectionEnabled?: boolean;
 }) {
   const [rows, setRows] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +117,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose }: {
                 setBalanceCustomer(customer);
                 return;
               }
-              onSelect(selected?.customerId === customer.customerId ? null : customer);
+              if (selectionEnabled) onSelect(selected?.customerId === customer.customerId ? null : customer);
             }}
             role="option"
             type="button"

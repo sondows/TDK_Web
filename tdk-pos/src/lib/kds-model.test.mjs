@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel } from "./kds-model.ts";
+import { buildKdsTableCompletionTaskSnapshot, canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel } from "./kds-model.ts";
 import { parseKdsMenuConfig } from "./kds-menu-config.ts";
-import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, transitionKdsState } from "./kds-model.ts";
+import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canRequestKdsTaskCompletionDuringStartWindow, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, resolveKdsIndividualButtonIntent, transitionKdsState } from "./kds-model.ts";
 
 const item = (itemId, kdsKind, overrides = {}) => ({
   itemId, parentItemId: null, menuId: itemId, itemType: "NORMAL",
@@ -99,19 +99,23 @@ test("separate KDS tasks remain separate even when names and table match", () =>
   assert.equal(two.qty, 1);
 });
 
-test("menu button allows start and its three-second undo, but not later cooking taps", () => {
+test("menu button allows start and its configured undo, but not later cooking taps", () => {
   assert.equal(canUseKdsMenuAction("WAITING", null, null, 10000), true);
   assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 13000, "MENU"), true);
-  assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 13001), false);
+  assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 15000), false);
+  assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 15001), false);
   assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 11000), false);
   assert.equal(canUseKdsMenuAction("COOKING", "DONE", 10000, 11000), false);
   assert.equal(canUseKdsMenuAction("DONE", "COOKING", 10000, 11000), false);
   assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 11000, "MENU"), true);
+  assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 15000, "MENU"), true);
+  assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 15001, "MENU"), false);
   assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 11000, "STATUS"), false);
   assert.equal(canUseKdsMenuAction("COOKING", "WAITING", 10000, 11000, "TABLE"), false);
   assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 11000, "STATUS"), true);
   assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 13000, "STATUS"), true);
-  assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 13001, "STATUS"), false);
+  assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 15000, "STATUS"), true);
+  assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 15001, "STATUS"), false);
   assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 11000, "MENU"), false);
   assert.equal(canUndoKdsStatusStart("COOKING", "WAITING", 10000, 11000, "TABLE"), false);
 });
@@ -234,13 +238,13 @@ test("start undo resets the original start time and a later start records a fres
   assert.equal(restarted.cookingGroupId, 9);
 });
 
-test("a queued second tap can undo after a delayed start response without changing the ordinary three-second rule", () => {
+test("a queued second tap can undo after a delayed start response within the configured completion duration", () => {
   const started = transitionKdsState(waiting, "MENU", 10000, { groupId: 7, startedAtMs: 10000 });
-  assert.equal(transitionKdsState(started, "MENU", 14000), null);
-  assert.equal(canAcceptKdsQueuedUndo(1000, 10000, 14000), true);
-  assert.equal(canAcceptKdsQueuedUndo(3001, 10000, 14000), false);
-  assert.equal(canAcceptKdsQueuedUndo(1000, 10000, 17001), false);
-  const undone = transitionKdsState(started, "MENU", 14000, undefined, true);
+  assert.equal(transitionKdsState(started, "MENU", 16000), null);
+  assert.equal(canAcceptKdsQueuedUndo(1000, 10000, 16000), true);
+  assert.equal(canAcceptKdsQueuedUndo(5001, 10000, 16000), false);
+  assert.equal(canAcceptKdsQueuedUndo(1000, 10000, 19001), false);
+  const undone = transitionKdsState(started, "MENU", 16000, undefined, true);
   assert.equal(undone?.status, "WAITING");
   assert.equal(undone?.cookingStartedAtMs, null);
 });
@@ -314,7 +318,7 @@ test("grouped menu starts share elapsed time but keep separate undo timestamps",
   const third = transitionKdsState(waiting, "MENU", 14000, { groupId: 7, startedAtMs: 10000 });
   assert.deepEqual([first.cookingStartedAtMs, second.cookingStartedAtMs, third.cookingStartedAtMs], [10000, 10000, 10000]);
   assert.deepEqual([first.changedAtMs, second.changedAtMs, third.changedAtMs], [10000, 12000, 14000]);
-  assert.equal(transitionKdsState(first, "MENU", 13001), null);
+  assert.equal(transitionKdsState(first, "MENU", 15001), null);
   const undone = transitionKdsState(second, "MENU", 14500);
   assert.equal(undone.status, "WAITING");
   assert.equal(undone.cookingStartedAtMs, null);
@@ -322,12 +326,12 @@ test("grouped menu starts share elapsed time but keep separate undo timestamps",
   assert.equal(third.status, "COOKING");
 });
 
-test("start undo countdown follows the stored start time and each permitted button path", () => {
+test("start undo countdown uses the configured completion duration, independent from display countdowns", () => {
   for (const source of ["MENU", "STATUS", "TABLE"]) {
-    const seconds = [0, 999, 1000, 1999, 2000, 2999, 3000, 3001]
+    const seconds = [0, 999, 1000, 1999, 2000, 2999, 3000, 4999, 5000, 5001]
       .map(elapsed => remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 10000 + elapsed, source,
         source === "TABLE" ? "batch-1" : null));
-    assert.deepEqual(seconds, [3, 3, 2, 2, 1, 1, 1, null]);
+    assert.deepEqual(seconds, [5, 5, 4, 4, 3, 3, 2, 1, 1, null]);
   }
   assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 9999, "MENU"), null);
   assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 11000, "TABLE"), null);
@@ -335,19 +339,73 @@ test("start undo countdown follows the stored start time and each permitted butt
 });
 
 test("optimistic table starts show the undo countdown before the server returns a batch id", () => {
-  assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 10000, "TABLE", null, true), 3);
-  assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 11000, "TABLE", null, true), 2);
+  assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 10000, "TABLE", null, true), 5);
+  assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 11000, "TABLE", null, true), 4);
   assert.equal(remainingKdsStartUndoSeconds("COOKING", "WAITING", 10000, 10000, "TABLE", null), null);
 });
 
 test("start undo countdown follows the initiating device's monotonic click time", () => {
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 5000), 3);
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 6000), 2);
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 7000), 1);
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 8000), 1);
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 8001), null);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 5000), 5);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 6000), 4);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 9000), 1);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 10000), 1);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 10001), null);
   // Wall-clock/server offset changes do not affect this elapsed click time.
-  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 6500), 2);
+  assert.equal(remainingKdsStartUndoSecondsFromClick(5000, 6500), 4);
+});
+
+test("individual menu/status input shares the configured start undo and status completion policy", () => {
+  for (const startedBy of ["MENU", "STATUS"]) {
+    const otherButton = startedBy === "MENU" ? "STATUS" : "MENU";
+    const base = { status: "COOKING", previousStatus: "WAITING", startSource: startedBy };
+    assert.equal(resolveKdsIndividualButtonIntent({ ...base, button: startedBy, elapsedSinceStartMs: 0 }), "UNDO_START");
+    assert.equal(resolveKdsIndividualButtonIntent({ ...base, button: otherButton, elapsedSinceStartMs: 1500 }),
+      otherButton === "STATUS" ? "REQUEST_COMPLETE" : "NO_OP");
+    assert.equal(resolveKdsIndividualButtonIntent({ ...base, button: otherButton, elapsedSinceStartMs: 4999 }),
+      otherButton === "STATUS" ? "REQUEST_COMPLETE" : "NO_OP");
+    assert.equal(resolveKdsIndividualButtonIntent({ ...base, button: startedBy, elapsedSinceStartMs: 5000 }), "UNDO_START");
+    assert.equal(resolveKdsIndividualButtonIntent({ ...base, button: otherButton, elapsedSinceStartMs: 5001 }),
+      otherButton === "MENU" ? "NO_OP" : "REQUEST_COMPLETE");
+  }
+  assert.equal(resolveKdsIndividualButtonIntent({ status: "WAITING", previousStatus: null, button: "MENU" }), "START");
+  assert.equal(resolveKdsIndividualButtonIntent({ status: "WAITING", previousStatus: null, button: "STATUS" }), "START");
+});
+
+test("individual button resolver preserves queued intents while a start request is pending", () => {
+  const pending = { status: "COOKING", previousStatus: "WAITING", startRequestPending: true };
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "MENU", pendingStartElapsedMs: 4999, button: "MENU" }), "QUEUE_UNDO_START");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "STATUS", pendingStartElapsedMs: 5000, button: "STATUS" }), "QUEUE_UNDO_START");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "MENU", pendingStartElapsedMs: 1000, button: "STATUS" }), "QUEUE_COMPLETE_AFTER_START");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "STATUS", pendingStartElapsedMs: 1000, button: "MENU" }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "STATUS", pendingStartElapsedMs: 5001, button: "STATUS" }), "QUEUE_STATUS_AFTER_START");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "MENU", pendingStartElapsedMs: 5001, button: "MENU" }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...pending, pendingStartButton: "MENU", pendingStartElapsedMs: 1000, button: "STATUS", requestInFlight: true }), "QUEUE_COMPLETE_AFTER_START");
+});
+
+test("only the opposite individual button may request completion inside the start-undo window", () => {
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("MENU", "STATUS"), true);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("STATUS", "MENU"), false);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("MENU", "MENU"), false);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("STATUS", "STATUS"), false);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("TABLE", "STATUS"), false);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow(null, "STATUS"), false);
+  assert.equal(canRequestKdsTaskCompletionDuringStartWindow("MENU", undefined), false);
+});
+
+test("individual button resolver keeps completion, post-cook, and in-flight policies distinct", () => {
+  const cooking = { status: "COOKING", previousStatus: "WAITING", startSource: "TABLE", elapsedSinceStartMs: 5000 };
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "MENU" }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS" }), "REQUEST_COMPLETE");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", postCookTimerEligible: true }), "OPEN_POST_COOK_CHOICE");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", postCookChoiceActive: true }), "RESOLVE_POST_COOK_CHOICE");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", completionRequested: true }), "CANCEL_COMPLETE");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "MENU", completionRequested: true }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", completionRequestPending: true }), "CANCEL_COMPLETE");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", requestInFlight: true }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", tableCompletionPending: true }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", completionFinalizePending: true }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", cancelled: true }), "NO_OP");
+  assert.equal(resolveKdsIndividualButtonIntent({ ...cooking, button: "STATUS", status: "DONE" }), "NO_OP");
 });
 
 test("server countdown resumes from stored request time and expires at five seconds", () => {
@@ -404,6 +462,50 @@ test("table button starts waiting rows and requests completion for cooking rows"
     { taskId: 42, status: "COOKING", changedAtMs: 100, completionRequestScope: "TASK", completionRequestedAtMs: 900 },
     { taskId: 43, status: "WAITING", changedAtMs: 200 },
   ], 1000), { action: "CANCEL_TASK_COMPLETIONS", taskIds: [42] });
+});
+
+test("table completion snapshot uses all raw cooking task rows, not display-group membership", () => {
+  const sessionTasks = [
+    { taskId: 31, sessionId: 9, status: "COOKING", kind: "POT", postCookTimerEligible: true },
+    { taskId: 32, sessionId: 9, status: "COOKING", kind: "POT", postCookTimerEligible: true, displayOnlyAsAddon: true },
+    { taskId: 33, sessionId: 9, status: "COOKING", kind: "SOLO" },
+    { taskId: 34, sessionId: 9, status: "WAITING", kind: "SOLO" },
+    { taskId: 35, sessionId: 10, status: "COOKING", kind: "SOLO" },
+    { taskId: 36, sessionId: 9, status: "COOKING", kind: "SOLO", cancelled: true },
+  ];
+  const displayRow = [{ ...sessionTasks[0], displayAddonTaskIds: [32, 35] }];
+
+  assert.deepEqual(buildKdsTableCompletionTaskSnapshot(9, displayRow, sessionTasks, true)
+    .map(task => task.taskId).sort((a, b) => a - b), [31, 32, 33]);
+  assert.deepEqual(buildKdsTableCompletionTaskSnapshot(9, displayRow, sessionTasks, false)
+    .map(task => task.taskId).sort((a, b) => a - b), [31, 32]);
+});
+
+test("grouped pot menu/status controls follow their own input policy and the configured undo window", () => {
+  const base = { status: "COOKING", previousStatus: "WAITING", changedAtMs: 1000,
+    startUndoWindowMs: 5000, bulkStartId: "batch-1", postCookTimerEligible: true };
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "MENU" }], 5999, null, 5000, "MENU"),
+    { action: "UNDO_START" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "MENU" }], 5999, null, 5000, "STATUS"),
+    { action: "OPEN_POST_COOK_CHOICE" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "STATUS" }], 5999, null, 5000, "STATUS"),
+    { action: "UNDO_START" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "STATUS" }], 5999, null, 5000, "MENU"),
+    { action: "NOOP" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "MENU" }], 6001, null, 5000, "MENU"),
+    { action: "NOOP" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "MENU" }], 6001, null, 5000, "STATUS"),
+    { action: "OPEN_POST_COOK_CHOICE" });
+  assert.deepEqual(getKdsTableButtonAction([{ ...base, startSource: "MENU" }], 6001, null, 5000, "STATUS", true),
+    { action: "REQUEST_COMPLETION" });
+});
+
+test("table-button second tap advances a fresh batch to one completion request", () => {
+  const freshStart = [{ status: "COOKING", previousStatus: "WAITING", startSource: "TABLE",
+    changedAtMs: 1000, startUndoWindowMs: 5000, bulkStartId: "batch" }];
+  assert.deepEqual(getKdsTableButtonAction(freshStart, 5999), { action: "REQUEST_COMPLETION" });
+  assert.deepEqual(getKdsTableButtonAction(freshStart, 6001), { action: "REQUEST_COMPLETION" });
+  assert.deepEqual(getKdsTableButtonAction([{ status: "DONE", changedAtMs: 1000 }], 5999), { action: "NOOP" });
 });
 
 test("table completion countdown cancellation takes priority over the start undo window", () => {
@@ -483,7 +585,7 @@ test("table button cancels its table-wide completion countdown at every visible 
   }
 });
 
-test("a task completion cancel takes priority over the 3-second start undo path", () => {
+test("a task completion cancel takes priority over the configured start undo path", () => {
   const taskRequest = { taskId: 42, status: "COOKING", changedAtMs: 8000, bulkStartId: "batch-1",
     completionRequestScope: "TASK", completionRequestedAtMs: 9000 };
   assert.deepEqual(getKdsTableButtonAction([taskRequest], 9500, "batch-1"), {

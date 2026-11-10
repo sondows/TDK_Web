@@ -1840,3 +1840,63 @@
 - Source trace: /api/kitchen runs order sync, reads bundle settings, then lists tasks; KitchenClient attaches eligible add-on items before party grouping, filters the linked SOLO table row, and renders the POT row. Server task updates and completion request/cancel/finalize paths resolve linked SOLO tasks and update them transactionally while retaining task/order/item/session IDs.
 - Cannot verify orders/settings/classification for tables 2, 10, or 11: read-only SELECT DATABASE() against the configured development DB failed with EACCES; no DB writes or operations DB/NAS access were attempted. Actual KDS browser rendering also remains unverified. No actual-case root cause is asserted.
 - TypeScript passes. Related ESLint: 0 errors, 2 warnings (existing hook dependency and unused parameter warnings). Production build passes; it reports two existing dynamic filesystem tracing warnings in menu-image-storage.ts.
+
+## TDKKDS 3개 버튼 통합 재정리 및 전체 구현
+
+| 단계 | 작업 목표 | 수정 대상 | 완료 기준 | 현재 상태 |
+| --- | --- | --- | --- | --- |
+| 1 | 메뉴·상태·테이블 버튼의 설정값 기반 전이/되돌리기 정책 정리 | `kds-model.ts`, `KitchenClient.tsx` | 3개 입력이 설정된 되돌리기 창과 완료 경로를 공통 판정하며 그룹 정책을 보존 | IN_PROGRESS |
+| 2 | 서버의 시작 undo window snapshot, 원자성 및 테이블 빠른 2회 완료 경로 정리 | KDS task/table API, `kds-server.ts` | DB 상태가 최종 기준이고 버전·권한·그룹 검증 유지, 설정된 전체 완료 카운트다운 유지 | TODO |
+| 3 | 명세 회귀 자동 테스트 보강 및 실행 | KDS model/server 관련 테스트 | 버튼·찌개/단품·테이블·그룹·경합 및 복구 시나리오 테스트 통과 | TODO |
+| 4 | TypeScript, 변경 대상 ESLint, KDS 테스트 전체, production build | 프로젝트 검증 명령 | 실행 결과와 미검증 브라우저 항목 기록 | TODO |
+
+정책 적용 메모:
+- 조리 시작 undo 시간은 조리완료 카운트다운 설정을 시작 시점에 snapshot해 사용한다. 메뉴 그룹 합류 시간 등 별도 3초 규칙은 변경하지 않는다.
+- 테이블 버튼 빠른 재입력은 undo가 아니라 한 번의 완료 요청으로 합친다. 완료된 작업은 제외하고 기존 테이블 완료 API의 검증을 재사용한다.
+- 국물 메뉴의 기존 3개 시간 선택 및 미선택 시 기본 시간 자동 선택 동작은 유지한다. 선택 단계 타이머와 서버 완료 확정 타이머는 별도다.
+- 사용자 지시대로 DB schema, 운영 데이터, 운영 NAS, Git branch 및 백업은 변경/생성하지 않는다.
+
+## TDKKDS three-button integration follow-up (2026-11-10)
+
+- Step 1/2/3/4: PASS. Start undo uses the completion-countdown setting captured with the server start snapshot; the center menu button only starts or undoes its own recent start; grouped pot menu/status controls follow their initiating-button rules; table-button rapid second taps normalize to one completion request. Pot status selection and table-default boil-time paths remain distinct from the full server completion countdown.
+- Final KDS automated suite: PASS 141/141 (`node --experimental-strip-types --test` over `src/lib/kds*.test.mjs`). TypeScript: PASS (`tsc --noEmit`, also run as part of production build). Related ESLint: PASS, zero errors/warnings.
+- Production Build: PASS. Existing Turbopack dynamic filesystem tracing warnings remain in `src/lib/menu-image-storage.ts` (two notices; unrelated to KDS).
+- No DB/schema changes, production DB access, NAS deployment, backup, or Git branch creation. Actual browser/device touch validation was not performed.
+
+## TDKKDS completion countdown false configuration error (2026-11-10)
+
+- Step 1 (trace the UI error through request/finalize API and task snapshots): PASS. The client fallback treated every `completed: 0` as a composition change; server returns zero for an early countdown, missing request, state/version drift, and actual task-set mismatch.
+- Step 2 (persist and validate the server-side expected task ID set without relaxing checks): PASS. Table completion request snapshots the sorted server task IDs in each pending request; finalize compares that set to the still-pending server IDs inside the same transaction. Status/version/eligibility validation remains in place.
+- Step 3 (distinguish countdown-not-ready from request/config/state mismatch and safely reschedule): PASS. API now reports typed outcomes; only an explicit COUNTDOWN_PENDING schedules a fresh read at the server-provided deadline. Actual membership mismatch is canceled atomically and reports expected/actual IDs; no completion is forced.
+- Step 4 (add regression fixtures for pot + add-on completion, cancellation, early finalize, and changed IDs): PASS. Full KDS suite 145/145; tests include `[31,32]` matching at request/finalize, early finalize with identical IDs, and mismatch `[31,32]` vs `[31]` with no partial completion.
+- Step 5 (KDS tests, TypeScript, targeted ESLint, production build; report browser/production limits): PASS. `tsc --noEmit`, targeted ESLint (0 warnings), and `next build` passed. Build retains the existing two `menu-image-storage.ts` dynamic filesystem tracing warnings.
+- No production DB/log/host access was used, so the exact live request ID set, running app build, and whether the incident was an actual membership drift versus an early/other zero outcome remain unverified. No browser, production DB, NAS, or deployment validation was performed.
+- Scope: KDS source/tests only. Do not access or modify production DB/NAS; no deployment.
+
+## TDKKDS table-button completion and task snapshot alignment (2026-11-10)
+
+- Step 1 (trace the table button, POST request, server snapshot, countdown, and finalize path): PASS. The reported message is emitted only from `finalizeKdsTableCompletion` outcome `TASK_SET_CHANGED`, when the immutable request snapshot differs from the still-pending server task IDs. The server uses an atomic transaction and still enforces task status/version, eligibility, and the configured countdown.
+- Step 2 (align the table-wide client request with server session scope): PASS. Whole-session completion now snapshots raw `COOKING`, non-cancelled task rows for that exact `sessionId`; it no longer reconstructs the table request set from presentation grouping or attached add-on display metadata. Selected-pot actions retain their explicit display-group membership and same-session add-on validation.
+- Step 3 (cover display grouping and atomic completion): PASS. Added checks for whole-session snapshot membership versus display-only grouping and an end-to-end mocked server request/finalize for two POT rows, a linked ADDON row, and a SOLO row. Boil time is saved only on timer-eligible POT rows; all requested eligible session rows finalize in one transaction.
+- Step 4 (regression checks): PASS. Full KDS automated suite 147/147; `npm.cmd exec tsc -- --noEmit` PASS; targeted ESLint PASS; production build PASS. Existing two dynamic filesystem tracing warnings in `src/lib/menu-image-storage.ts` remain unrelated.
+- Live incident limitation: no production logs, database, NAS, running client/server build, or browser access was used. Thus the exact live expected/actual task IDs and whether they drifted during the countdown cannot be confirmed from this workspace; report this as unverified rather than claiming a production reproduction.
+- No schema/database changes, production deployment, NAS access, backup, or Git branch creation.
+
+## TDKKDS table completion stale kitchen state (2026-11-10)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace table completion request, finalization, duplicate/cancel response, polling, and kitchen/store projection | `KitchenClient.tsx`, completion route, `kds-server.ts` | IN_PROGRESS |
+| 2 | Reconcile authoritative server state after successful, already-processed, or missing completion responses | KDS table completion flow only | TODO |
+| 3 | Preserve atomic task/version/snapshot checks and add regressions for competing finalizers, delayed/lost responses, polling, and actual cancellation | KDS tests and minimal server/client helpers | TODO |
+| 4 | Run KDS suite, TypeScript, targeted ESLint, and production build; report unavailable live/browser checks | Project validation | TODO |
+
+Constraints: no production DB/log/NAS/deployment access, no schema changes, no forced-success handling, no UI redesign. Preserve table button semantics, boil-time defaults, countdown duration, task snapshot checks, and atomic completion.
+
+### Completion stale-state follow-up
+
+- Step 1: PASS. Table FINALIZE read and returned task completion atomically; prior client logic did not await a canonical refresh after success and returned on `REQUEST_NOT_FOUND` without refreshing. A stale screen could then take the CANCEL path; if the server already committed, it returned the repeated/processed message, and that error path's refresh was what finally moved the rows. The reported live instance cannot be classified without its API response/log/DB snapshot.
+- Step 2: PASS. FINALIZE now records the original expected task ID set in each completed marker. Repeated FINALIZE returns `ALREADY_COMPLETED` only if the exact marked task set is still DONE. Client awaits `/api/kitchen` after success, already-completed, missing-request, and ambiguous network/error outcomes; it suppresses a failure only when the refreshed server confirms every captured request task is DONE. CANCEL after the rollback window returns `alreadyCompleted` only from the server's matching completion markers; the existing short rollback window remains intact.
+- Step 3: PASS. Added route/server fixtures for duplicate single-task and grouped POT/add-on finalization, post-completion cancel, lost/duplicate request semantics, and cancellation/missing request preservation. Full KDS suite: 150/150.
+- Step 4: PASS. TypeScript, targeted ESLint, and Production Build passed. Build retains the two existing dynamic filesystem tracing warnings in `src/lib/menu-image-storage.ts`.
+- Actual API+DB integration and live table 10 were not run: no development DB connection was available and production DB/log/NAS access was not used. Browser/device behavior remains unverified. No DB/schema changes or deployment.

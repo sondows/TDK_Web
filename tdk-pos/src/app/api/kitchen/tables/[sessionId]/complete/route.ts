@@ -45,10 +45,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
     }
     const result = action === "CANCEL"
       ? await cancelKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number)
-      : { completed: await finalizeKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number, body.immediate === true) };
+      : await finalizeKdsTableCompletion(sessionId, body.requestId as string, body.requestedAtMs as number, body.immediate === true);
     return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof KdsActionError) return Response.json({ success: false, message: error.message }, { status: error.statusCode });
+    if (error instanceof KdsActionError) return Response.json({ success: false, message: error.message, ...error.details }, { status: error.statusCode });
     console.error("KDS table completion action failed", { action, sessionId, requestId: body?.requestId, requestedAtMs: body?.requestedAtMs, error });
     return Response.json({ success: false, message: "테이블 전체 완료를 처리하지 못했습니다." }, { status: 500 });
   }

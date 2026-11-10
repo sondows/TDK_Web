@@ -1,5 +1,5 @@
 import { getCurrentKdsStaff } from "@/lib/kds-auth";
-import { isKdsPostCookTimerMinutes } from "@/lib/kds-model";
+import { isKdsPostCookTimerMinutes, kdsStartUndoWindowMs, MAX_KDS_COMPLETION_COUNTDOWN_SECONDS } from "@/lib/kds-model";
 import { cancelKdsTaskCompletion, finalizeKdsTaskCompletion, KdsActionError, requestKdsTaskCompletion, updateKdsTask } from "@/lib/kds-server";
 import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 
@@ -8,7 +8,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
     return Response.json({ success: false, message: "KDS 로그인이 필요합니다." }, { status: 401 });
   }
   const taskId = Number((await params).taskId);
-  const body = await request.json().catch(() => null) as { action?: unknown; expectedStatus?: unknown; expectedChangedAtMs?: unknown; postCookTimerMinutes?: unknown; expectedRequestAtMs?: unknown; immediate?: unknown; queuedUndoDelayMs?: unknown } | null;
+  const body = await request.json().catch(() => null) as { action?: unknown; expectedStatus?: unknown; expectedChangedAtMs?: unknown; postCookTimerMinutes?: unknown; completionInputButton?: unknown; expectedRequestAtMs?: unknown; immediate?: unknown; queuedUndoDelayMs?: unknown } | null;
   const actions = ["MENU", "STATUS", "TIME", "ACK", "REQUEST_COMPLETION", "CANCEL_COMPLETION", "FINALIZE_COMPLETION"];
   if (!Number.isSafeInteger(taskId) || taskId <= 0 || !body || !actions.includes(String(body.action)) ||
     !["WAITING", "COOKING", "DONE"].includes(String(body.expectedStatus)) ||
@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
   }
   if (body.postCookTimerMinutes !== undefined && !isKdsPostCookTimerMinutes(body.postCookTimerMinutes)) return Response.json({ success: false, message: "외부 끓임 시간은 1~60분 범위에서 선택해 주세요." }, { status: 400 });
   if (body.queuedUndoDelayMs !== undefined && (!Number.isInteger(body.queuedUndoDelayMs) ||
-    (body.queuedUndoDelayMs as number) < 0 || (body.queuedUndoDelayMs as number) > 3000)) {
+    (body.queuedUndoDelayMs as number) < 0 || (body.queuedUndoDelayMs as number) > MAX_KDS_COMPLETION_COUNTDOWN_SECONDS * 1000)) {
     return Response.json({ success: false, message: "조리 시작 취소 시각을 확인할 수 없습니다." }, { status: 400 });
   }
   if (["CANCEL_COMPLETION", "FINALIZE_COMPLETION"].includes(String(body.action)) &&
@@ -31,7 +31,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
     };
     if (body.action === "REQUEST_COMPLETION") {
       const countdownSeconds = await getKdsCompletionCountdownSeconds();
-      const result = await requestKdsTaskCompletion(taskId, expected, body.postCookTimerMinutes as number | undefined, countdownSeconds);
+      if (body.completionInputButton !== undefined && !["MENU", "STATUS"].includes(String(body.completionInputButton))) {
+        return Response.json({ success: false, message: "완료 요청 입력 종류가 올바르지 않습니다." }, { status: 400 });
+      }
+      const result = await requestKdsTaskCompletion(taskId, expected, body.postCookTimerMinutes as number | undefined,
+        countdownSeconds, body.completionInputButton as "MENU" | "STATUS" | undefined);
       return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "CANCEL_COMPLETION") {
@@ -44,8 +48,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
     }
     if (body.action === "TIME" && expected.status !== "DONE") return Response.json({ success: false, message: "완료 요청을 통해 처리해야 합니다." }, { status: 400 });
     const dbStartedAt = performance.now();
+    const startUndoWindowMs = kdsStartUndoWindowMs(await getKdsCompletionCountdownSeconds());
     const updated = await updateKdsTask(taskId, body.action as "MENU" | "STATUS" | "TIME" | "ACK", expected,
-      undefined, body.queuedUndoDelayMs as number | undefined);
+      undefined, body.queuedUndoDelayMs as number | undefined, startUndoWindowMs);
     return Response.json({ success: true, ...updated }, { headers: { "Cache-Control": "no-store",
       "Server-Timing": `kds-db;dur=${(performance.now() - dbStartedAt).toFixed(1)}` } });
   } catch (error) {
