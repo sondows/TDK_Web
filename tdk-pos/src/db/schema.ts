@@ -11,6 +11,7 @@ import {
   date,
   decimal,
   text,
+  longtext,
   index,
   primaryKey,
   uniqueIndex,
@@ -417,6 +418,7 @@ export const menuCategories = mysqlTable("menu_categories", {
   posName: varchar("pos_name", { length: 100 }).notNull(),
   sortOrder: int("sort_order").notNull().default(0),
   isActive: tinyint("is_active").notNull().default(1),
+  tabColor: varchar("tab_color", { length: 7 }),
 });
 
 /** A dated business can contain several independently closed intervals. */
@@ -535,6 +537,95 @@ export const menuImages = mysqlTable("menu_images", {
   isActive: tinyint("is_active").notNull().default(1),
   createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_menu_images_menu_type").on(table.menuId, table.imageType, table.isActive)]);
+
+/** Anonymous QR visit capability; only a one-way token hash is persisted. */
+export const qrVisitSessions = mysqlTable("qr_visit_sessions", {
+  visitorId: bigint("visitor_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastSeenAt: datetime("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: datetime("expires_at").notNull(),
+  revokedAt: datetime("revoked_at"),
+}, (table) => [
+  uniqueIndex("uq_qr_visit_token_hash").on(table.tokenHash),
+  index("idx_qr_visit_expires").on(table.expiresAt),
+]);
+
+/** A pending QR order is never an order row and cannot reach KDS until staff confirms it. */
+export const qrWaitOrders = mysqlTable("qr_wait_orders", {
+  waitOrderId: bigint("wait_order_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  visitorId: bigint("visitor_id", { mode: "number", unsigned: true }).notNull()
+    .references(() => qrVisitSessions.visitorId),
+  clientRequestId: varchar("client_request_id", { length: 36 }).notNull(),
+  publicReference: varchar("public_reference", { length: 16 }).notNull(),
+  accessTokenHash: varchar("access_token_hash", { length: 64 }).notNull(),
+  status: mysqlEnum("status", ["PENDING", "ASSIGNED", "CONFIRMED", "CANCELLED", "EXPIRED"]).notNull().default("PENDING"),
+  version: int("version", { unsigned: true }).notNull().default(1),
+  estimatedTotal: decimal("estimated_total", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  assignedSessionId: bigint("assigned_session_id", { mode: "number", unsigned: true }).references(() => tableSessions.sessionId),
+  assignedByStaffId: bigint("assigned_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  acceptedOrderId: bigint("accepted_order_id", { mode: "number", unsigned: true }).references(() => orders.orderId),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: datetime("expires_at").notNull(),
+  confirmedAt: datetime("confirmed_at"),
+  cancelledAt: datetime("cancelled_at"),
+}, (table) => [
+  uniqueIndex("uq_qr_wait_visitor_request").on(table.visitorId, table.clientRequestId),
+  uniqueIndex("uq_qr_wait_client_request").on(table.clientRequestId),
+  uniqueIndex("uq_qr_wait_public_reference").on(table.publicReference),
+  uniqueIndex("uq_qr_wait_access_token_hash").on(table.accessTokenHash),
+  uniqueIndex("uq_qr_wait_accepted_order").on(table.acceptedOrderId),
+  index("idx_qr_wait_status_created").on(table.status, table.createdAt),
+  index("idx_qr_wait_visitor_created").on(table.visitorId, table.createdAt),
+  index("idx_qr_wait_expires").on(table.expiresAt),
+]);
+
+export const qrWaitOrderItems = mysqlTable("qr_wait_order_items", {
+  waitOrderItemId: bigint("wait_order_item_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  waitOrderId: bigint("wait_order_id", { mode: "number", unsigned: true }).notNull()
+    .references(() => qrWaitOrders.waitOrderId, { onDelete: "cascade" }),
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull(),
+  itemName: varchar("item_name", { length: 200 }).notNull(),
+  quantity: int("quantity", { unsigned: true }).notNull(),
+  optionIdsJson: text("option_ids_json").notNull(),
+  estimatedUnitPrice: decimal("estimated_unit_price", { precision: 14, scale: 2 }).notNull(),
+  estimatedLineTotal: decimal("estimated_line_total", { precision: 14, scale: 2 }).notNull(),
+  sortOrder: int("sort_order").notNull().default(0),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("idx_qr_wait_order_item_order").on(table.waitOrderId, table.sortOrder, table.waitOrderItemId),
+  index("idx_qr_wait_order_item_menu").on(table.menuId),
+]);
+
+/** Anonymous menu-interest events are separate from accepted orders and sales. */
+export const qrVisitEvents = mysqlTable("qr_visit_events", {
+  visitEventId: bigint("visit_event_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  visitorId: bigint("visitor_id", { mode: "number", unsigned: true }).notNull()
+    .references(() => qrVisitSessions.visitorId, { onDelete: "cascade" }),
+  waitOrderId: bigint("wait_order_id", { mode: "number", unsigned: true }).references(() => qrWaitOrders.waitOrderId, { onDelete: "set null" }),
+  orderId: bigint("order_id", { mode: "number", unsigned: true }).references(() => orders.orderId, { onDelete: "set null" }),
+  clientEventId: varchar("client_event_id", { length: 36 }).notNull(),
+  source: mysqlEnum("source", ["FRONT", "WAITING", "TABLE"]).notNull(),
+  eventType: mysqlEnum("event_type", ["VISIT", "MENU_VIEW", "ADD", "INCREASE", "DECREASE", "REMOVE", "CONVERT_WAIT", "CONVERT_TABLE", "ORDER_CONFIRMED", "WAIT_CANCELLED"]).notNull(),
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }),
+  optionIdsJson: text("option_ids_json").notNull(),
+  quantityBefore: int("quantity_before", { unsigned: true }).notNull(),
+  quantityDelta: int("quantity_delta").notNull(),
+  quantityAfter: int("quantity_after", { unsigned: true }).notNull(),
+  estimatedUnitPrice: decimal("estimated_unit_price", { precision: 14, scale: 2 }),
+  estimatedLineTotal: decimal("estimated_line_total", { precision: 14, scale: 2 }),
+  occurredAt: datetime("occurred_at").notNull(),
+  receivedAt: datetime("received_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("uq_qr_visit_event_visitor_client_id").on(table.visitorId, table.clientEventId),
+  index("idx_qr_visit_event_visitor_time").on(table.visitorId, table.occurredAt),
+  index("idx_qr_visit_event_menu_time").on(table.menuId, table.occurredAt),
+  index("idx_qr_visit_event_source_time").on(table.source, table.occurredAt),
+  index("idx_qr_visit_event_type_time").on(table.eventType, table.occurredAt),
+  index("idx_qr_visit_event_wait_order").on(table.waitOrderId),
+  index("idx_qr_visit_event_order").on(table.orderId),
+]);
 
 export const modifierGroups = mysqlTable("modifier_groups", {
   modifierGroupId: bigint("modifier_group_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
@@ -953,3 +1044,13 @@ export const orderItemOptions = mysqlTable("order_item_options", {
   unitPrice: decimal("unit_price", { precision: 14, scale: 2 }).notNull().default("0.00"),
   totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
 }, (table) => [index("fk_order_item_options_item").on(table.orderItemId), index("fk_order_item_options_option").on(table.modifierOptionId)]);
+
+export const qrNotices = mysqlTable("qr_notices", {
+  noticeId: bigint("notice_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  translationsJson: longtext("translations_json").notNull(),
+  isActive: tinyint("is_active").notNull().default(1),
+  sortOrder: int("sort_order").notNull().default(0),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }),
+}, (table) => [index("idx_qr_notices_active_order").on(table.isActive, table.sortOrder, table.noticeId)]);

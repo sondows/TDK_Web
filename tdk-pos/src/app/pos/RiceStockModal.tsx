@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
+import { getPosDayRange } from "@/lib/pos-time";
 import PosSubHeader from "./PosSubHeader";
 import { POS_HEADER_ACTION_CLASS_NAME } from "./pos-header-action";
 
@@ -25,11 +26,42 @@ export default function RiceStockModal({ close, onAdjusted }: { close: () => voi
     return result;
   }, []);
 
+  const loadHistory = useCallback(async () => {
+    const response = await fetch("/api/pos/rice-stock?historyOnly=1", { cache: "no-store" });
+    const result = await response.json() as { success?: boolean; message?: string; history?: Movement[]; nextBefore?: number | null };
+    if (!response.ok || !result.success || !result.history) throw new Error(result.message ?? "오늘 재고 조정 내역을 불러오지 못했습니다.");
+    return { history: result.history, nextBefore: result.nextBefore ?? null };
+  }, []);
+
   useEffect(() => {
     let active = true;
     void load().then(result => { if (active) setSnapshot(result); }).catch(error => { if (active) setMessage(error instanceof Error ? error.message : "공기밥 수량을 불러오지 못했습니다."); });
     return () => { active = false; };
   }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    let timer = 0;
+    const refreshAtSeoulMidnight = () => {
+      const { end } = getPosDayRange(new Date());
+      const midnight = Date.parse(`${end.replace(" ", "T")}+09:00`);
+      timer = window.setTimeout(() => {
+        if (active) {
+          historyEpoch.current += 1;
+          loadingMore.current = false;
+          setSnapshot(current => current ? { ...current, history: [], nextBefore: null } : current);
+          void loadHistory().then(result => {
+            if (active) setSnapshot(current => current ? { ...current, ...result } : current);
+          }).catch(error => {
+            if (active) setMessage(error instanceof Error ? error.message : "오늘 재고 조정 내역을 불러오지 못했습니다.");
+          });
+          refreshAtSeoulMidnight();
+        }
+      }, Math.max(0, midnight - Date.now()));
+    };
+    refreshAtSeoulMidnight();
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [loadHistory]);
 
   const onHistoryScroll = (event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
@@ -77,7 +109,7 @@ export default function RiceStockModal({ close, onAdjusted }: { close: () => voi
             {snapshot?.history.map(row => <div className="grid grid-cols-[60px_repeat(3,minmax(0,1fr))] border-b border-slate-100 py-2.5 text-center text-base text-slate-800" key={row.id} title={row.time}>
               <span>{row.time.slice(11)}</span><span>{row.balanceAfter === null ? "-" : formatQty(row.balanceAfter - row.change)}</span><strong className={row.change > 0 ? "text-blue-700" : "text-red-600"}>{row.change > 0 ? "+" : ""}{formatQty(row.change)}</strong><strong>{row.balanceAfter === null ? "-" : formatQty(row.balanceAfter)}</strong>
             </div>)}
-            {snapshot && snapshot.history.length === 0 && <p className="py-12 text-center text-sm text-slate-500">변경 이력이 없습니다.</p>}
+            {snapshot && snapshot.history.length === 0 && <p className="py-12 text-center text-sm text-slate-500">오늘 재고 조정 내역이 없습니다.</p>}
           </div>
         </div>
         <div className="flex h-[min(418px,calc(90dvh-8.5rem))] min-h-0 min-w-0 gap-2.5 p-4">

@@ -4,6 +4,7 @@ import { inventoryItems, inventoryTransactions, staff } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { adjustRiceStock, ensureRiceBusinessDay, RICE_DAY_RESET_REMARK, RICE_ITEM_CODE, RICE_MANUAL_ADJUSTMENT_REMARKS } from "@/lib/rice-stock";
+import { getPosDayRange } from "@/lib/pos-time";
 
 const actions = new Set(["ADD", "SUBTRACT", "SET", "ADD_ONE", "SUBTRACT_ONE"]);
 type RiceAction = "ADD" | "SUBTRACT" | "SET" | "ADD_ONE" | "SUBTRACT_ONE";
@@ -21,26 +22,37 @@ export async function GET(request: Request) {
   const staffId = await authorizedStaffId();
   if (!staffId) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   try {
-    const rawBefore = new URL(request.url).searchParams.get("before");
+    const searchParams = new URL(request.url).searchParams;
+    const rawBefore = searchParams.get("before");
+    const historyOnly = searchParams.get("historyOnly") === "1";
     const before = rawBefore === null ? null : Number(rawBefore);
     if (before !== null && (!Number.isSafeInteger(before) || before <= 0)) return Response.json({ success: false, message: "이력 요청이 올바르지 않습니다." }, { status: 400 });
-    const [item] = await db.select({ id: inventoryItems.inventoryItemId, currentQty: inventoryItems.currentQty })
+    const [item] = await db.select({ id: inventoryItems.inventoryItemId })
       .from(inventoryItems).where(and(eq(inventoryItems.itemCode, RICE_ITEM_CODE), eq(inventoryItems.isActive, 1))).limit(1);
     if (!item) return Response.json({ success: false, message: "공기밥 재고 항목이 설정되지 않았습니다." }, { status: 409 });
-    const currentQty = await db.transaction(tx => ensureRiceBusinessDay(tx));
-    if (new URL(request.url).searchParams.get("summary") === "1") {
+    if (searchParams.get("summary") === "1") {
+      const currentQty = await db.transaction(tx => ensureRiceBusinessDay(tx));
       return Response.json({ success: true, currentQty }, { headers: { "Cache-Control": "no-store" } });
     }
-    const [history, [totals]] = await Promise.all([
-      db.select({ id: inventoryTransactions.inventoryTransactionId, time: sql<string>`DATE_FORMAT(${inventoryTransactions.transactionAt}, '%Y-%m-%d %H:%i')`, change: inventoryTransactions.qtyChange, balanceAfter: inventoryTransactions.balanceAfter })
+    const { start, end } = getPosDayRange();
+    const historyQuery = db.select({ id: inventoryTransactions.inventoryTransactionId, time: sql<string>`DATE_FORMAT(CONVERT_TZ(${inventoryTransactions.transactionAt}, @@session.time_zone, '+09:00'), '%Y-%m-%d %H:%i')`, change: inventoryTransactions.qtyChange, balanceAfter: inventoryTransactions.balanceAfter })
         .from(inventoryTransactions).where(and(
           eq(inventoryTransactions.inventoryItemId, item.id),
           eq(inventoryTransactions.transactionType, "ADJUSTMENT"),
           isNull(inventoryTransactions.orderItemId),
           inArray(inventoryTransactions.remark, [...RICE_MANUAL_ADJUSTMENT_REMARKS]),
+          sql`${inventoryTransactions.transactionAt} >= CONVERT_TZ(${start}, '+09:00', @@session.time_zone)`,
+          sql`${inventoryTransactions.transactionAt} < CONVERT_TZ(${end}, '+09:00', @@session.time_zone)`,
           ...(before === null ? [] : [lt(inventoryTransactions.inventoryTransactionId, before)]),
         ))
-        .orderBy(desc(inventoryTransactions.inventoryTransactionId)).limit(101),
+        .orderBy(desc(inventoryTransactions.inventoryTransactionId)).limit(101);
+    if (historyOnly) {
+      const history = await historyQuery;
+      return Response.json({ success: true, history: history.slice(0, 100), nextBefore: history.length > 100 ? history[99].id : null }, { headers: { "Cache-Control": "no-store" } });
+    }
+    const currentQty = await db.transaction(tx => ensureRiceBusinessDay(tx));
+    const [history, [totals]] = await Promise.all([
+      historyQuery,
       db.select({ added: sql<string>`COALESCE(SUM(CASE WHEN ${inventoryTransactions.qtyChange} > 0 THEN ${inventoryTransactions.qtyChange} ELSE 0 END), 0)`, subtracted: sql<string>`COALESCE(SUM(CASE WHEN ${inventoryTransactions.qtyChange} < 0 THEN -${inventoryTransactions.qtyChange} ELSE 0 END), 0)` })
         .from(inventoryTransactions)
         .where(and(eq(inventoryTransactions.inventoryItemId, item.id), sql`${inventoryTransactions.transactionAt} >= CURDATE()`, sql`${inventoryTransactions.transactionAt} < CURDATE() + INTERVAL 1 DAY`, sql`COALESCE(${inventoryTransactions.remark}, '') <> ${RICE_DAY_RESET_REMARK}`)),

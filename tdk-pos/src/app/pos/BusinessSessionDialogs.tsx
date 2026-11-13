@@ -116,11 +116,13 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
     finally { closingRequest.current = false; setBusy(false); }
   }
   const line = (label: string, value: string) => <div className="flex items-center justify-between gap-3 py-1"><span>{label}</span><strong className="whitespace-nowrap text-right tabular-nums">{value}</strong></div>;
-  const summaryLine = (label: string, value: number, count: number) =>
-    <div className={styles.summaryLine}><span className="whitespace-nowrap">{label}</span><strong className="grid grid-cols-[auto_3.5rem] items-baseline gap-1 whitespace-nowrap tabular-nums"><span className="text-right">{money(value)}</span><span className="text-right">({count})</span></strong></div>;
+  const summaryCard = (label: string, value: number, count?: number, primary = false) =>
+    <div className={`${styles.summaryCard} ${primary ? styles.primaryCard : ""}`} key={label}>
+      <span>{label}</span><strong>{money(value)}{count === undefined ? null : <small>{count}건</small>}</strong>
+    </div>;
   return <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-2 sm:p-4">
-    <section aria-modal="true" className={`${styles.dialog} flex flex-col overflow-hidden`} role={completed ? "alertdialog" : "dialog"}>
-      <header className={`flex h-16 shrink-0 items-center gap-[15px] border-b border-[#e2e8eb] bg-white pr-5 text-[#25343b] ${completed ? "pl-6" : "pl-1"}`}>
+    <section aria-modal="true" className={`${styles.dialog} ${completed ? styles.completedDialog : ""} flex flex-col overflow-hidden`} role={completed ? "alertdialog" : "dialog"}>
+      <header className={`flex h-16 shrink-0 items-center gap-[15px] border-b border-[#e2e8eb] pr-5 text-[#25343b] ${completed ? `${styles.completedHeader} pl-6` : "bg-white pl-1"}`}>
         {!completed && <span className="-mr-[13px] flex shrink-0"><AdminBackLink ariaLabel="영업마감 닫기" disabled={busy} iconSize={28} onNavigate={onClose} size={44} title="영업마감 닫기" tone="lightPlain" /></span>}
         <h2 className="min-w-0 truncate text-[19px] font-bold">{completed ? "✓ 영업마감 완료" : preview?.blockers.length ? "영업마감 불가" : "영업마감"}</h2>
       </header>
@@ -138,27 +140,36 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
           {preview.previousClosingCount > 0 && <p className="mt-1 text-slate-500">오늘의 이전 마감 ({preview.previousClosingCount})</p>}
           {preview.blockers.length ? <><p className="mt-4 font-bold text-red-700">마감 전 확인할 항목이 있습니다.</p><ul className="mt-3 space-y-2">{preview.blockers.map((row, index) => <li className="rounded-lg bg-red-50 p-2" key={`${row.sessionId}-${index}`}>{row.label} · {row.reason}</li>)}</ul></> : <>
             <div className={`${styles.summaryGrid} mt-4`}>
-              {summaryLine("총매출", preview.totalSales, preview.saleCount)}
-              {summaryLine("할인", preview.discountAmount, preview.discountCount)}
-              <hr className="col-span-full my-3" />
-              {summaryLine("카드", preview.cardAmount, preview.cardCount)}
-              {summaryLine("현금", preview.cashAmount, preview.cashCount)}
-              {summaryLine("고객결제", preview.customerPaymentAmount, preview.customerPaymentCount)}
-              {summaryLine("기타결제", preview.otherAmount, preview.otherCount)}
-              <hr className="col-span-full my-3" />
-              {summaryLine("매장판매", preview.dineAmount, preview.dineCount)}
-              {summaryLine("포장판매", preview.takeoutAmount, preview.takeoutCount)}
-              {summaryLine("취소/환불", preview.refundAmount, preview.cancellationCount)}
+              {summaryCard("총매출", preview.totalSales, preview.saleCount, true)}
+              {summaryCard("할인", preview.discountAmount, preview.discountCount, true)}
             </div>
-            {preview.openingCashEnabled && <><hr className="my-3" />{line("영업 준비금", money(preview.openingCash ?? 0))}{line("현금 순변동", money(preview.cashReceived - preview.cashReturned + preview.cashLedgerMovement - preview.otherCashChange))}{line("예상 현금", money(preview.expectedCash ?? 0))}
-              <div className="mt-3 flex items-center justify-between gap-3 font-bold"><span>실제 현금</span><button aria-label="실제 현금 시재 입력" className={styles.cashInput} disabled={busy} onClick={() => setCashEntryOpen(true)} type="button">{money(actualFund === null ? 0 : cashOpeningFundTotal(actualFund))}</button></div>
-              {actualFund !== null && line("오차", signed(cashOpeningFundTotal(actualFund) - (preview.expectedCash ?? 0)))}</>}
+            <hr className={`${styles.groupDivider} mt-4`} />
+            <div className={`${styles.summaryGrid} ${styles.detailGrid} mt-4`}>
+              {summaryCard("카드", preview.cardAmount, preview.cardCount)}
+              {summaryCard("매장판매", preview.dineAmount, preview.dineCount)}
+              {summaryCard("현금", preview.cashAmount, preview.cashCount)}
+              {summaryCard("포장판매", preview.takeoutAmount, preview.takeoutCount)}
+              {summaryCard("고객결제", preview.customerPaymentAmount, preview.customerPaymentCount)}
+              {summaryCard("취소/환불", preview.refundAmount, preview.cancellationCount)}
+              {summaryCard("기타결제", preview.otherAmount, preview.otherCount)}
+              {summaryCard("영업준비금", preview.openingCash ?? 0)}
+            </div>
+            {preview.openingCashEnabled && <><hr className={`${styles.groupDivider} mt-4`} /><div className={`${styles.summaryGrid} ${styles.cashGrid} mt-4`}>
+              {summaryCard("현금 순변동", preview.cashReceived - preview.cashReturned + preview.cashLedgerMovement - preview.otherCashChange)}
+              {summaryCard("예상 현금", preview.expectedCash ?? 0)}
+              <div className={`${styles.summaryCard} ${styles.actualCashCard}`}>
+                <span>실제 현금</span>
+                {actualFund !== null && <small className={styles.cardFootnote}>오차 {signed(cashOpeningFundTotal(actualFund) - (preview.expectedCash ?? 0))}</small>}
+                <strong className={styles.actualCashAmount}>{money(actualFund === null ? 0 : cashOpeningFundTotal(actualFund))}</strong>
+                <button aria-label="현금시재등록" className={styles.cashRegisterButton} disabled={busy} onClick={() => setCashEntryOpen(true)} type="button">현금시재등록</button>
+              </div>
+            </div></>}
           </>}
         </>}
         {error && <p className="mt-3 text-red-600" role="alert">{error}</p>}
         </>}
       </div>
-      {completed ? <div className={styles.footer}><button className={styles.confirmButton} onClick={onClosed} ref={completionButton} type="button">확인</button></div> :
+      {completed ? <div className={`${styles.footer} ${styles.completedFooter}`}><button className={styles.confirmButton} onClick={onClosed} ref={completionButton} type="button">확인</button></div> :
         preview && !preview.blockers.length ? <div className={styles.footer}>
           <button className={styles.cancelButton} disabled={busy} onClick={onClose} type="button">취소</button>
           <button className={styles.closeButton} disabled={busy} onClick={() => void close()} type="button">{busy ? "마감 처리 중..." : "영업마감"}</button>

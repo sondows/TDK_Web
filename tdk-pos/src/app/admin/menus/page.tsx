@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { menuCategories, menuComponents, menuImages, menus } from "@/db/schema";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
+import { canManageMenu } from "@/lib/permissions";
 import { loadMenuChoiceConfigs } from "@/lib/menu-choice-options";
 import MenuManagementClient from "@/app/pos/admin/menus/MenuManagementClient";
 import AdminWorkspaceShell from "../AdminWorkspaceShell";
@@ -12,6 +13,7 @@ import styles from "../admin.module.css";
 export default async function AdminMenuManagementPage() {
   const centerMember = await getCurrentAdminStaff();
   if (!centerMember) redirect("/tdkadm/login");
+  if (!canManageMenu(centerMember.role)) redirect("/tdkadm");
   const componentMenu = alias(menus, "component_menu");
   const [categories, menuRows, componentMenuRows, componentRows, choiceConfigs] = await Promise.all([
     db.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder }).from(menuCategories).where(eq(menuCategories.isActive, 1)).orderBy(menuCategories.sortOrder, menuCategories.categoryId),

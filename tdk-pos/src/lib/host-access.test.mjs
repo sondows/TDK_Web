@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   externalAliasTarget, externalCanonicalPath, hostnameFromHeader, isAliasRewriteTarget, isExternalAdminHost, isExternalAliasTargetAllowed,
-  hasVerifiedExternalHttpsIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalHosPath, isExternalPosPath, isKnownInternalHost,
+  hasVerifiedExternalHttpsIngress, hasVerifiedLocalDevelopmentIngress, isExternalAdminPathAllowed, isExternalKdsPath, isExternalHosPath, isExternalPosPath, isKnownInternalHost,
+  isQrDevelopmentHost, isQrDevelopmentPathAllowed,
   internalCanonicalPath,
 } from "./host-access.ts";
 
@@ -18,6 +19,22 @@ test("the public hostname is recognized separately from LAN hosts", () => {
   assert.equal(isKnownInternalHost("192.168.0.83:3000"), true);
   assert.equal(isKnownInternalHost("192.168.0.83.evil.example"), false);
   assert.equal(isKnownInternalHost("198.51.100.10"), false);
+});
+
+test("the DDNS host is allowed only for QR development routes and the exact forwarded host", () => {
+  assert.equal(isQrDevelopmentHost("tdkimchi.iptime.org:8090", "development"), true);
+  assert.equal(isQrDevelopmentHost("tdkimchi.iptime.org", "development"), false);
+  assert.equal(isQrDevelopmentHost("evil-tdkimchi.iptime.org:8090", "development"), false);
+  assert.equal(isQrDevelopmentHost("tdkimchi.iptime.org:8090", "production"), false);
+  assert.equal(isQrDevelopmentPathAllowed("/qr", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/qr/wait", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/wait-orders/123", "PATCH"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/menu-images/4/qr-image.webp", "GET"), true);
+  for (const path of ["/tdkpos", "/pos", "/tdkadm", "/admin", "/tdkkds", "/kitchen", "/hos", "/api/auth/login", "/api/pos/qr-wait-orders", "/api/db-test"]) {
+    assert.equal(isQrDevelopmentPathAllowed(path, "GET"), false, path);
+  }
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/wait-orders/123", "PUT"), false);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/../pos", "GET"), false);
 });
 
 test("public aliases map to their actual application routes", () => {
@@ -75,6 +92,8 @@ test("external POS requires verified HTTPS ingress while KDS keeps its existing 
   assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "1" })), true);
   assert.equal(hasVerifiedExternalHttpsIngress(new Headers({ "x-tdk-verified-https": "0" })), false);
   assert.equal(hasVerifiedExternalHttpsIngress(new Headers()), false);
+  assert.equal(hasVerifiedLocalDevelopmentIngress(new Headers({ "x-tdk-local-dev": "1" })), true);
+  assert.equal(hasVerifiedLocalDevelopmentIngress(new Headers({ "x-tdk-local-dev": "0" })), false);
 });
 
 test("POS and KDS paths are blocked on the public Host, including old and API routes", () => {

@@ -76,6 +76,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
   const taskCompletionTimers = useRef(new Map<number, number>());
   const taskCompletionFinalizeInFlight = useRef(new Set<number>());
   const refreshRequestId = useRef(0);
+  const refreshInFlight = useRef(false);
   const tableActionInFlight = useRef(new Set<number>());
   const tableStartBatches = useRef(new Map<number, { batchStartId: string; taskIds: number[]; startedAtMs: number; startUndoWindowMs: number }>());
   const taskStartOperations = useRef(new Map<number, TaskStartOperation>());
@@ -164,6 +165,8 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
     oscillator.stop(context.currentTime + 0.16);
   }, []);
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return false;
+    refreshInFlight.current = true;
     const requestId = ++refreshRequestId.current;
     try {
       const response = await fetch("/api/kitchen", { cache: "no-store" });
@@ -203,6 +206,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       return false;
     } finally {
       if (requestId === refreshRequestId.current) setLoading(false);
+      refreshInFlight.current = false;
     }
   }, [playNotice, router, soundEnabled]);
   useEffect(() => {

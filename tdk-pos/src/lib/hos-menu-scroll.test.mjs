@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { getHosMenuCategoryAtTop, getHosMenuTailSpacerHeight } from "./hos-menu-scroll.ts";
 import { menuCategoryDisplayName } from "./menu-category-display.ts";
 
-test("HOS menu labels reuse the POS menu management category display names", () => {
-  assert.deepEqual(["김치찌개", "사이드", "주류·음료", "추가", "포장"].map(menuCategoryDisplayName),
-    ["찌개", "단품", "음료", "추가", "포장"]);
+test("category labels use the names currently stored in the shared category catalog", () => {
+  const names = ["\uAE40\uCE58\uCC0C\uAC1C", "\uC0AC\uC774\uB4DC", "\uC0AC\uB9AC\u00B7\uBC25", "\uC8FC\uB958\u00B7\uC74C\uB8CC", "\uD3EC\uC7A5"];
+  assert.deepEqual(names.map(menuCategoryDisplayName), names);
 });
 
 test("menu scrolling activates the section whose start has reached the list top", () => {

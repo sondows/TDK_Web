@@ -56,6 +56,7 @@ runInNewContext(code, {
                     reserveKdsIpAttempt: async () => "allowed" } :
                     name === "@/lib/kds-network-server" ? { getKdsRateLimitIp: async () => null } :
                       name === "@/lib/program-trust-client-label" ? { programTrustClientLabel: () => "Test browser" } :
+                        name === "@/lib/program-trust-errors" ? { classifyProgramTrustFailure: () => ({ category: "internal_error", code: null }) } :
                         name === "@/lib/program-trust" ? {
                           isSecureTrustRequest: () => true,
                           programPermission: () => staff.kdsEnabled,

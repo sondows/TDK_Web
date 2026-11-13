@@ -35,6 +35,7 @@ export default function PosKitchenAlertPanel() {
   const [draggingSessionId, setDraggingSessionId] = useState<number | null>(null);
   const [dropTargetSessionId, setDropTargetSessionId] = useState<number | null>(null);
   const requestVersion = useRef(0);
+  const refreshInFlight = useRef(false);
   const saving = useRef(false);
   const pendingSaves = useRef(0);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -45,6 +46,8 @@ export default function PosKitchenAlertPanel() {
   const serverNow = now + serverOffset;
 
   const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     const version = ++requestVersion.current;
     try {
       const response = await fetch("/api/pos/kitchen", { cache: "no-store" });
@@ -62,6 +65,7 @@ export default function PosKitchenAlertPanel() {
       if (version === requestVersion.current) setError(reason instanceof Error ? reason.message : "주방 작업을 불러오지 못했습니다.");
     } finally {
       if (version === requestVersion.current) setLoading(false);
+      refreshInFlight.current = false;
     }
   }, []);
 

@@ -11,6 +11,7 @@ import { clearAdminAuthFailures, isAdminAuthAttemptAllowed, recordAdminAuthFailu
 import { isHttpsSameOriginRequest } from "@/lib/kds-device";
 import { getKdsRateLimitIp } from "@/lib/kds-network-server";
 import { programTrustClientLabel } from "@/lib/program-trust-client-label";
+import { classifyProgramTrustFailure } from "@/lib/program-trust-errors";
 import { getCurrentProgramTrust, hashProgramTrustToken, isSecureTrustRequest, newProgramTrustToken,
   programCookieName, programPermission, tokenCookieName, trustCookieOptions, type Program } from "@/lib/program-trust";
 
@@ -112,7 +113,7 @@ export async function trustStatus(program: Program, request?: Request) {
     }
     return response;
   } catch (error) {
-    console.error("Program trust status unavailable", { program, code: (error as { code?: string }).code });
+    console.error("Program trust status unavailable", { program, ...classifyProgramTrustFailure(error) });
     return NextResponse.json({ success: false, message: "인증 상태를 확인할 수 없습니다." }, { status: 503, headers: noStore });
   }
 }
@@ -184,9 +185,7 @@ export async function enrollProgramTrust(request: Request, program: Program) {
     response.cookies.set(tokenCookieName(program, tokenId), token, trustCookieOptions);
     return response;
   } catch (error) {
-    const detail = error as { name?: string; code?: string; cause?: { code?: string } };
-    console.error("Program trust enrollment unavailable", { program, stage, name: detail.name,
-      code: detail.code ?? detail.cause?.code });
+    console.error("Program trust enrollment unavailable", { program, stage, ...classifyProgramTrustFailure(error) });
     return NextResponse.json({ success: false, message: "인증 서비스를 이용할 수 없습니다." }, { status: 503, headers: noStore });
   }
 }
@@ -209,7 +208,7 @@ export async function revokeCurrentProgramTrust(request: Request, program: Progr
     response.cookies.set(trusted.cookieName, "", { ...trustCookieOptions, maxAge: 0 });
     return response;
   } catch (error) {
-    console.error("Program trust revocation unavailable", { program, code: (error as { code?: string }).code });
+    console.error("Program trust revocation unavailable", { program, ...classifyProgramTrustFailure(error) });
     return NextResponse.json({ success: false }, { status: 503, headers: noStore });
   }
 }

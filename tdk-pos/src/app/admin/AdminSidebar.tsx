@@ -11,6 +11,7 @@ type NavigationItem = NavigationLink | NavigationGroup;
 
 const navigation: NavigationItem[] = [
   { label: "대시보드", href: "/tdkadm" },
+  { label: "영업시간설정", href: "/tdkadm/business-hours" },
   {
     id: "sales",
     label: "판매조회",
@@ -23,12 +24,29 @@ const navigation: NavigationItem[] = [
   },
   { label: "고객 관리", href: "/tdkadm/customers" },
   {
+    id: "menus",
+    label: "메뉴",
+    href: "/tdkadm/menus",
+    children: [
+      { label: "메뉴관리", href: "/tdkadm/menus" },
+      { label: "메뉴분류", href: "/tdkadm/menus/categories" },
+    ],
+  },
+  {
+    id: "qr-settings",
+    label: "QR",
+    href: "/tdkadm/qr/title",
+    children: [
+      { label: "타이틀설정", href: "/tdkadm/qr/title" },
+      { label: "안내문", href: "/tdkadm/qr/notices" },
+    ],
+  },
+  {
     id: "pos-settings",
     label: "POS",
     href: "/tdkadm/settings/pos",
     children: [
       { label: "테이블 설정", href: "/tdkadm/tables" },
-      { label: "메뉴 관리", href: "/tdkadm/menus" },
       { label: "할인 설정", href: "/tdkadm/settings/discounts" },
       { label: "기타결제 설정", href: "/tdkadm/settings/other-payments" },
       { label: "포장 설정", href: "/tdkadm/settings/takeout" },
@@ -65,6 +83,7 @@ const navigation: NavigationItem[] = [
     href: "/tdkadm/security/devices",
     children: [
       { label: "직원관리", href: "/tdkadm/security/staff" },
+      { label: "API 관리", href: "/tdkadm/security/api" },
       { label: "신뢰 토큰 관리", href: "/tdkadm/security/devices" },
       { label: "최고관리자 관리", href: "/tdkadm/security/owners" },
     ],
@@ -86,7 +105,7 @@ function groupContainsPath(group: NavigationGroup, pathname: string) {
     || pathname.startsWith(`${group.href}/`);
 }
 
-export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, canManageHosLayout = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; onNavigate?: () => void }) {
+export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, canManageHosLayout = false, canManageMenu = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; canManageMenu?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   // /tdkadm is rewritten to /admin, so the server and browser pathname can differ during hydration.
@@ -107,10 +126,21 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
       : [...current, groupId]);
   };
 
-  const items: NavigationItem[] = menuOnly
-    ? [{ label: "메뉴 관리", href: "/tdkadm/menus" }]
-    : navigation.filter(item => (canAccessSecurity || !isGroup(item) || item.id !== "security") &&
-      (canManageHosLayout || !isGroup(item) || item.id !== "hos-settings"));
+  const items: NavigationItem[] = menuOnly && canManageMenu
+    ? [{
+      id: "menus",
+      label: "메뉴",
+      href: "/tdkadm/menus",
+      children: [
+        { label: "메뉴관리", href: "/tdkadm/menus" },
+        { label: "메뉴분류", href: "/tdkadm/menus/categories" },
+      ],
+    }]
+    : menuOnly ? [] : navigation.filter(item => (canAccessSecurity || !isGroup(item) || item.id !== "security") &&
+      (canManageHosLayout || !isGroup(item) || item.id !== "hos-settings") &&
+      (canManageMenu || !isGroup(item) || item.id !== "menus") &&
+      (canManageMenu || !isGroup(item) || item.id !== "qr-settings") &&
+      (canManageMenu || isGroup(item) || item.href !== "/tdkadm/business-hours"));
 
   return <aside className={`${styles.sidebar}${mobileDrawer ? ` ${styles.mobileDrawerSidebar}` : ""}`}>
     <nav aria-label="관리센터 메뉴" className={styles.navigation}>

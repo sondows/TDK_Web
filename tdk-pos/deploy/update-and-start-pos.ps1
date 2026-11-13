@@ -133,6 +133,7 @@ function Start-Server([string]$path) {
     }
   }
   $oldStorage = $env:MENU_IMAGE_STORAGE_PATH
+  $oldQrTitleStorage = $env:QR_TITLE_IMAGE_STORAGE_PATH
   $oldNodeEnv = $env:NODE_ENV
   $oldPort = $env:PORT
   $oldPath = $env:PATH
@@ -147,6 +148,13 @@ function Start-Server([string]$path) {
     }
     if (-not $oldStorage -and -not $configuredStorage) {
       $env:MENU_IMAGE_STORAGE_PATH = Join-Path $project 'public\uploads\menu'
+    }
+    $configuredQrTitleStorage = $false
+    if ($envFiles.Count -gt 0) {
+      $configuredQrTitleStorage = [bool](Select-String -LiteralPath $envFiles -Pattern '^\s*QR_TITLE_IMAGE_STORAGE_PATH\s*=' -Quiet)
+    }
+    if (-not $oldQrTitleStorage -and -not $configuredQrTitleStorage) {
+      $env:QR_TITLE_IMAGE_STORAGE_PATH = Join-Path $project '.pos-runtime\qr-title'
     }
     $npm = (Get-Command npm.cmd -CommandType Application -ErrorAction Stop).Source
     $node = (Get-Command node.exe -CommandType Application -ErrorAction Stop).Source
@@ -202,6 +210,7 @@ function Start-Server([string]$path) {
     return $false
   } finally {
     $env:MENU_IMAGE_STORAGE_PATH = $oldStorage
+    $env:QR_TITLE_IMAGE_STORAGE_PATH = $oldQrTitleStorage
     $env:NODE_ENV = $oldNodeEnv
     $env:PORT = $oldPort
     $env:PATH = $oldPath

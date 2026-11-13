@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { clampHosRemainingQuantity, getHosCancellationQuantity } from "@/lib/hos-order-quantity";
 import { getHosMenuCategoryAtTop, getHosMenuTailSpacerHeight } from "@/lib/hos-menu-scroll";
-import { menuCategoryDisplayName } from "@/lib/menu-category-display";
+import { getMenuCategoryTabStyles } from "@/lib/menu-category-tab-color";
 import { formatTradeBalance, tradeDescription, tradeTypeLabel, type CustomerTradeDetail, type CustomerTradeDetailResponse,
   type CustomerTradeResponse, type CustomerTradeRow } from "@/lib/customer-trade";
 import HosTableCanvas from "./HosTableCanvas";
@@ -33,7 +33,7 @@ type Menu = { menuId: number; categoryId: number | null; name: string; price: st
 type Modifier = { menuId: number; modifierGroupId: number; groupName: string; choiceDefaultOptionId: number | null;
   modifierOptionId: number; optionName: string; priceDelta: string; optionSortOrder: number };
 type Component = { menuComponentId: number; menuId: number; componentMenuId: number; itemName: string; quantity: number };
-type Catalog = { menus: Menu[]; categories: Array<{ categoryId: number; name: string }>; modifiers: Modifier[]; components: Component[] };
+type Catalog = { menus: Menu[]; categories: Array<{ categoryId: number; name: string; tabColor: string | null }>; modifiers: Modifier[]; components: Component[] };
 type DraftItem = { menuId: number; name: string; qty: number; options: Array<{ modifierOptionId: number; qty: number }>; components: Array<{ menuComponentId: number; qty: number }> };
 type PendingCancel = { orderItemId: number; keepQty: number };
 type CartPoint = { x: number; y: number };
@@ -152,6 +152,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const optionAddLockRef = useRef(false);
   const tableRequestRef = useRef<Promise<void> | null>(null);
   const detailRequestVersionRef = useRef(0);
+  const detailRequestsInFlightRef = useRef(new Set<number>());
   const activeDetailTableIdRef = useRef<number | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
   const tableScreenRef = useRef<HTMLElement | null>(null);
@@ -445,8 +446,29 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     return result;
   }, []);
 
+  const catalogRefreshInFlightRef = useRef(false);
+  useEffect(() => {
+    if (screen !== "menu") return;
+    const refresh = () => {
+      if (catalogRefreshInFlightRef.current || document.visibilityState === "hidden") return;
+      catalogRefreshInFlightRef.current = true;
+      void loadCatalog().then(next => {
+        setActiveCategoryId(current => current !== null && next.categories.some(category => category.categoryId === current)
+          ? current : next.categories[0]?.categoryId ?? null);
+      }).catch(() => undefined).finally(() => { catalogRefreshInFlightRef.current = false; });
+    };
+    const timer = window.setInterval(refresh, 45_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loadCatalog, screen]);
+
   const refreshDetail = useCallback(async (tableId: number) => {
     if (activeDetailTableIdRef.current !== tableId) return;
+    if (detailRequestsInFlightRef.current.has(tableId)) return;
+    detailRequestsInFlightRef.current.add(tableId);
     const requestVersion = ++detailRequestVersionRef.current;
     try {
       const response = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
@@ -457,6 +479,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId) {
         setError(cause instanceof Error ? cause.message : "주문 내역을 새로 고치지 못했습니다.");
       }
+    } finally {
+      detailRequestsInFlightRef.current.delete(tableId);
     }
   }, []);
 
@@ -558,9 +582,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       if (!draft.length) setPendingTableId(null);
     }
     try {
-      const currentCatalog = catalog ?? await loadCatalog();
-      const defaultCategory = currentCatalog.categories.find(category => menuCategoryDisplayName(category.name) === "찌개")
-        ?? currentCatalog.categories[0];
+      const currentCatalog = await loadCatalog();
+      const defaultCategory = currentCatalog.categories[0];
       setError(""); setActiveCategoryId(defaultCategory?.categoryId ?? null); setScreen("menu");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "메뉴를 불러오지 못했습니다."); }
   }
@@ -952,11 +975,10 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       qty: getHosCancellationQuantity(orderItem.effectiveQty, item.keepQty) } : null;
   }).filter((item): item is { orderItemId: number; qty: number } => item !== null && item.qty > 0);
   const menuSections = (catalog?.categories ?? []).map(category => ({ ...category,
-    displayName: menuCategoryDisplayName(category.name),
+    displayName: category.name,
     menus: (catalog?.menus ?? []).filter(menu => menu.categoryId === category.categoryId),
   }));
-  const defaultMenuCategoryId = menuSections.find(category => category.displayName === "찌개")?.categoryId
-    ?? menuSections[0]?.categoryId ?? null;
+  const defaultMenuCategoryId = menuSections[0]?.categoryId ?? null;
   const nonEmptyMenuSections = menuSections.filter(section => section.menus.length > 0);
   const categorizedMenuIds = new Set(nonEmptyMenuSections.flatMap(section => section.menus.map(menu => menu.menuId)));
   const uncategorizedMenus = (catalog?.menus ?? []).filter(menu => !categorizedMenuIds.has(menu.menuId));
@@ -1316,16 +1338,16 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
 
     {screen === "menu" && catalog && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden px-3 pb-3">
       <div aria-label="메뉴 분류" className="-mx-3 grid shrink-0 grid-cols-5 gap-2 border-b border-slate-100 bg-white px-3 py-2" ref={menuTabsRef}>
-        {menuSections.map(item => <button className={`min-h-11 w-full min-w-0 whitespace-nowrap rounded-full px-1 text-[17px] font-bold ${activeCategoryId === item.categoryId ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`} key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
+        {menuSections.map(item => { const active = activeCategoryId === item.categoryId; return <button aria-pressed={active} className="min-h-11 w-full min-w-0 whitespace-nowrap rounded-full px-1 text-[17px] font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700" key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
           if (element) menuTabRefs.current.set(item.categoryId, element); else menuTabRefs.current.delete(item.categoryId);
-        }} type="button">{item.displayName}</button>)}
+        }} style={getMenuCategoryTabStyles(item.tabColor, active)} type="button">{item.displayName}</button>; })}
       </div>
       <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onPointerDown={cancelProgrammaticMenuScroll} onScroll={syncMenuCategoryFromScroll} onTouchStart={cancelProgrammaticMenuScroll} onWheel={cancelProgrammaticMenuScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch" }}>
         {menuSectionsForDisplay.map((section, index) => <div className={`-mx-3 mb-[11.2px] border-y border-[#e5ebf0] bg-[#fbfcfe] px-3 shadow-[0_1px_3px_rgba(71,85,105,0.08)] ${index === menuSectionsForDisplay.length - 1 ? "mb-0" : ""}`} data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
           if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
         }}>
           {section.menus.map(menu => <div className="flex min-h-14 w-full items-center border-b border-slate-100 last:border-b-0" key={menu.menuId}>
-            <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={event => chooseMenu(menu, true, event.currentTarget)} type="button"><span className="flex min-w-0 flex-1 items-baseline gap-1 whitespace-nowrap"><span className="max-w-full shrink-0 truncate text-[19px] font-bold">{menu.name}</span>{section.name === "김치찌개" && <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-400" title="2.약간매운맛">2.약간매운맛</span>}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
+            <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={event => chooseMenu(menu, true, event.currentTarget)} type="button"><span className="flex min-w-0 flex-1 items-baseline gap-1 whitespace-nowrap"><span className="max-w-full shrink-0 truncate text-[19px] font-bold">{menu.name}</span>{catalog?.modifiers.some(modifier => modifier.menuId === menu.menuId && modifier.groupName === "매운맛") && <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-400" title="2.약간매운맛">2.약간매운맛</span>}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
             <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={event => quickAddMenu(menu, event.currentTarget)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
           </div>)}
         </div>)}

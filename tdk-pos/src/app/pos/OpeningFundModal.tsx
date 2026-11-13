@@ -225,11 +225,11 @@ export default function OpeningFundModal({ close, mode = "openingCash", onSaved,
               const count = draft.counts[denomination];
               return <div className="grid min-h-12 grid-cols-[76px_minmax(0,1fr)_90px] items-center gap-2" key={denomination}>
                 <button className={`${denominationButtonStyle} tabular-nums`} disabled={!snapshot || busy || saved} onClick={() => selectDenomination(denomination)} type="button">{format(denomination)}</button>
-                {count > 0 && <div className="flex items-center justify-center gap-1">
-                  <button aria-label={`${format(denomination)}원권 한 장 줄이기`} className="size-10 rounded-lg border border-slate-200 bg-slate-50 text-xl font-bold text-slate-700 disabled:opacity-40" disabled={busy || saved} onClick={() => adjust(denomination, -1)} type="button">−</button>
+                <div className="flex items-center justify-center gap-1">
+                  <button aria-label={`${format(denomination)}원권 한 장 줄이기`} className="size-10 rounded-lg border border-slate-200 bg-slate-50 text-xl font-bold text-slate-700 disabled:opacity-40" disabled={!snapshot || busy || saved || count === 0} onClick={() => adjust(denomination, -1)} type="button">−</button>
                   <span className="min-w-7 text-center font-bold tabular-nums text-slate-800">{format(count)}</span>
-                  <button aria-label={`${format(denomination)}원권 한 장 늘리기`} className="size-10 rounded-lg border border-slate-200 bg-slate-50 text-xl font-bold text-slate-700 disabled:opacity-40" disabled={busy || saved} onClick={() => adjust(denomination, 1)} type="button">+</button>
-                </div>}
+                  <button aria-label={`${format(denomination)}원권 한 장 늘리기`} className="size-10 rounded-lg border border-slate-200 bg-slate-50 text-xl font-bold text-slate-700 disabled:opacity-40" disabled={!snapshot || busy || saved} onClick={() => adjust(denomination, 1)} type="button">+</button>
+                </div>
                 {count > 0 && <strong className="text-right tabular-nums text-slate-800">{format(denomination * count)}</strong>}
               </div>;
             })}

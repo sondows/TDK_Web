@@ -2,77 +2,102 @@
 setlocal DisableDelayedExpansion
 chcp 65001 >nul
 
-set "EXIT_CODE=1"
-set "FAILED_STAGE=Initialization"
-set "STATUS_FILE="
-set "DEPLOY_COMMIT_FILE="
-
 cd /d "%~dp0"
-if errorlevel 1 goto failed
-if not exist ".git" goto failed
+set "EXIT_CODE=1"
 
-set "FAILED_STAGE=Tool check"
+echo.
+echo ==========================================
+echo          TDKPOS deployment
+echo ==========================================
+echo.
+
+set "FAILED_STAGE=Git repository check"
+git rev-parse --show-toplevel >nul 2>&1
+if errorlevel 1 goto failed
+if not exist "tdk-pos\package.json" goto failed
 where git >nul 2>&1
 if errorlevel 1 goto failed
 where ssh >nul 2>&1
 if errorlevel 1 goto failed
-where powershell.exe >nul 2>&1
-if errorlevel 1 goto failed
 
-set "FAILED_STAGE=Git branch check"
-set "CURRENT_BRANCH="
-for /f "delims=" %%B in ('git branch --show-current') do set "CURRENT_BRANCH=%%B"
-if not "%CURRENT_BRANCH%"=="main" goto failed
+for /f "delims=" %%B in ('git branch --show-current') do set "BRANCH=%%B"
+if not "%BRANCH%"=="main" goto wrong_branch
 git remote get-url origin >nul 2>&1
 if errorlevel 1 goto failed
 
-set "FAILED_STAGE=Git status"
-set "STATUS_FILE=%TEMP%\tdk-pos-deploy-status-%RANDOM%-%RANDOM%.tmp"
-git status --porcelain --untracked-files=normal > "%STATUS_FILE%"
+echo [1/4] Review deployment scope
+echo.
+git status --short -- deploy.bat tdk-pos
 if errorlevel 1 goto failed
-set "HAS_CHANGES="
-for %%F in ("%STATUS_FILE%") do if %%~zF GTR 0 set "HAS_CHANGES=1"
-del /q "%STATUS_FILE%" >nul 2>&1
-set "STATUS_FILE="
-if not defined HAS_CHANGES goto push
+echo.
+echo Only deploy.bat and changes under tdk-pos will be committed.
+echo Other staged paths will remain staged and will not be included.
+echo Database migrations are never run by this script.
+echo.
+choice /c YN /n /m "Have you independently verified all required production schema? [Y/N] "
+if errorlevel 2 goto cancelled
+echo.
+choice /c YN /n /m "Push and deploy TDKPOS to the NAS now? [Y/N] "
+if errorlevel 2 goto cancelled
 
-set "FAILED_STAGE=Commit message"
-set "DEPLOY_COMMIT_MESSAGE="
-set /p "DEPLOY_COMMIT_MESSAGE=Commit message: "
-if not defined DEPLOY_COMMIT_MESSAGE goto failed
-set "DEPLOY_COMMIT_FILE=%TEMP%\tdk-pos-deploy-commit-%RANDOM%-%RANDOM%.txt"
-powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; [System.IO.File]::WriteAllText($env:DEPLOY_COMMIT_FILE, $env:DEPLOY_COMMIT_MESSAGE, [System.Text.UTF8Encoding]::new($false))"
+set "FAILED_STAGE=NAS deployment preflight"
+ssh -tt sondows@192.168.0.83 "export PATH=/opt/bin:/opt/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH; cd /volume1/TDK-POS/tdk-pos || { echo '[FAIL] NAS TDKPOS directory is unavailable'; exit 21; }; test -f .env.production || { echo '[FAIL] NAS .env.production is missing'; exit 22; }; tr -d '\r' < .env.production | grep -Eq '^KASI_HOLIDAY_ENCRYPTION_KEY_PROD=[[:xdigit:]]{64}$' || { echo '[FAIL] KASI production key is missing or invalid (value hidden)'; exit 23; }; test -d storage/qr-title || { echo '[FAIL] storage/qr-title directory is missing'; exit 24; }; test -d storage/qr-notices || { echo '[FAIL] storage/qr-notices directory is missing'; exit 25; }; echo '[OK] NAS deployment prerequisites passed'"
 if errorlevel 1 goto failed
 
-set "FAILED_STAGE=Git add"
-git add .
+set "FAILED_STAGE=Stage deployment paths"
+git add -A -- deploy.bat tdk-pos
 if errorlevel 1 goto failed
-set "FAILED_STAGE=Git commit"
-git commit -F "%DEPLOY_COMMIT_FILE%"
-if errorlevel 1 goto failed
-del /q "%DEPLOY_COMMIT_FILE%" >nul 2>&1
-set "DEPLOY_COMMIT_FILE="
 
-:push
-echo [INFO] Pushing main to origin...
-set "FAILED_STAGE=Git push"
+set "FAILED_STAGE=Validate staged deployment paths"
+git diff --cached --check -- deploy.bat tdk-pos
+if errorlevel 1 goto failed
+git diff --cached --quiet -- deploy.bat tdk-pos
+if errorlevel 1 (
+    set "FAILED_STAGE=Commit deployment paths"
+    git commit -m "Update TDKPOS" --only -- deploy.bat tdk-pos
+    if errorlevel 1 goto failed
+) else (
+    echo [INFO] No deployment-path changes to commit.
+)
+
+set "FAILED_STAGE=Push main"
 git push origin main
 if errorlevel 1 goto failed
 
-echo [INFO] Deploying origin/main on NAS...
-set "FAILED_STAGE=NAS SSH connection or remote deployment"
-ssh -tt sondows@192.168.0.83 "echo [OK] SSH connected; export PATH=/opt/bin:/opt/sbin:$PATH || { echo [FAIL] NAS Entware PATH; exit 20; }; echo [OK] NAS command path; cd /volume1/TDK-POS || { echo [FAIL] NAS repository directory; exit 21; }; echo [OK] NAS repository directory; git fetch origin || { echo [FAIL] git fetch origin; exit 22; }; echo [OK] git fetch origin; git checkout main || { echo [FAIL] git checkout main; exit 23; }; echo [OK] git checkout main; git reset --hard origin/main || { echo [FAIL] reset origin/main; exit 24; }; echo [OK] reset origin/main; cd /volume1/TDK-POS/tdk-pos || { echo [FAIL] compose directory; exit 25; }; echo [OK] compose directory; command -v sudo >/dev/null 2>&1 || { echo [FAIL] sudo command unavailable; exit 30; }; sudo -v || { echo [FAIL] sudo authentication or permission; exit 31; }; echo [OK] sudo authentication; sudo docker compose up -d --build || { echo [FAIL] docker compose build/start; exit 32; }; echo [OK] docker compose up -d --build; sudo docker compose ps || { echo [FAIL] docker compose ps; exit 33; }; echo [OK] containers started"
+echo.
+echo [2/4] Update NAS source
+echo.
+set "FAILED_STAGE=NAS fast-forward update"
+ssh -tt sondows@192.168.0.83 "export PATH=/opt/bin:/opt/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH; cd /volume1/TDK-POS && git fetch origin && git checkout main && git pull --ff-only origin main"
 if errorlevel 1 goto failed
 
-echo [OK] Deployment finished. Check the tdk-pos status above.
+echo.
+echo [3/4] Build and replace TDKPOS container
+echo.
+set "FAILED_STAGE=TDKPOS Docker deployment"
+ssh -tt sondows@192.168.0.83 "export PATH=/opt/bin:/opt/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH; cd /volume1/TDK-POS/tdk-pos && sudo -v && OLD_IMAGE_ID=$(sudo docker inspect --format='{{.Image}}' tdk-pos-tdk-pos-1) && OLD_IMAGE_TAG=$(sudo docker inspect --format='{{.Config.Image}}' tdk-pos-tdk-pos-1) && sudo docker image tag $OLD_IMAGE_ID tdk-pos:backup-before-deploy && sudo docker compose build tdk-pos && (sudo docker compose up -d --no-deps --force-recreate tdk-pos || { echo '[ROLLBACK] Restore previous image'; sudo docker image tag tdk-pos:backup-before-deploy $OLD_IMAGE_TAG && sudo docker compose up -d --no-deps tdk-pos; exit 1; }) && sleep 5 && sudo docker compose ps tdk-pos"
+if errorlevel 1 goto failed
+
+echo.
+echo [4/4] Deployment complete
+set "EXIT_CODE=0"
+goto finish
+
+:wrong_branch
+echo [ERROR] Deployment is allowed only from main.
+goto finish
+
+:cancelled
+echo [INFO] Deployment cancelled. No files were staged or changed by this script.
 set "EXIT_CODE=0"
 goto finish
 
 :failed
-echo [FAIL] %FAILED_STAGE% failed. Deployment stopped.
+echo.
+echo [ERROR] Deployment failed at: %FAILED_STAGE%
+set "EXIT_CODE=1"
 
 :finish
-if defined STATUS_FILE if exist "%STATUS_FILE%" del /q "%STATUS_FILE%" >nul 2>&1
-if defined DEPLOY_COMMIT_FILE if exist "%DEPLOY_COMMIT_FILE%" del /q "%DEPLOY_COMMIT_FILE%" >nul 2>&1
+echo.
 pause
 exit /b %EXIT_CODE%

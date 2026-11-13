@@ -11,6 +11,8 @@ import {
   hasVerifiedExternalHttpsIngress,
   isAliasRewriteTarget,
   isKnownInternalHost,
+  isQrDevelopmentHost,
+  isQrDevelopmentPathAllowed,
   internalCanonicalPath,
 } from "@/lib/host-access";
 
@@ -34,6 +36,11 @@ export function proxy(request: NextRequest) {
   const aliasRewriteSurface = isAliasRewriteTarget(request.headers.get("x-tdk-external-surface"), pathname)
     ? request.headers.get("x-tdk-external-surface")
     : null;
+
+  if (isQrDevelopmentHost(host)) {
+    if (isQrDevelopmentPathAllowed(pathname, request.method)) return NextResponse.next();
+    return new NextResponse("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
 
   if (!isExternalAdminHost(host)) {
     if (isKnownInternalHost(host)) {

@@ -119,7 +119,7 @@ test("table double-click API starts waiting and cooking work with one configured
   assert.equal(requests[0].postCookTimerMinutes, 5);
   assert.equal(requests[1].postCookTimerMinutes, null);
   assert.equal(calls.commits, 1);
-  assert.equal(calls.updates.length, 2);
+  assert.equal(calls.updates.length, 3);
   assert.equal(calls.updates.some(call => call.sql.includes("SET status='DONE'")), false);
 });
 

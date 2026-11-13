@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useRouter, useSearchParams } from "next/navigation";
 import { formatMoney as formatPosMoney } from "@/lib/format-money";
 import { initialAdultCountFromStewOrder } from "@/lib/initial-table-person-count";
+import { normalizeMenuCategoryTabColor } from "@/lib/menu-category-tab-color";
+import { bindPosCategoryNavigation, getPosCategoryCornerColor, getPosCategoryTextColor, getPosMenuCardBackground, getPosMenuCategoryBottomPadding, getPosTopRowCategoryId, groupPosMenusIntoCategoryRows, type PosMenuRowPosition } from "@/lib/pos-top-row-category";
 import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
 import { partyPeerTableNos } from "@/lib/pos-party-peers";
 import { formatSessionElapsed } from "@/lib/session-time";
@@ -27,7 +29,7 @@ import { BusinessClosingDialog } from "./BusinessSessionDialogs";
 import PosSubHeader from "./PosSubHeader";
 import PosFooterBar from "./PosFooterBar";
 import TakeoutPanel, { type TakeoutSession } from "./TakeoutPanel";
-import { useHorizontalScroll } from "@/hooks/useHorizontalScroll";
+import PosQrWaitPanel from "./PosQrWaitPanel";
 import { posMainFixedTablePosition } from "@/lib/table-layout";
 import { sumTableFinancials, type TableFinancials } from "@/lib/table-session-financials";
 import { OPENING_FUND_PROMPT_DISMISSED_KEY, shouldPromptForOpeningFund } from "@/lib/opening-fund-prompt";
@@ -35,7 +37,7 @@ type Table = { tableId: number; tableNo: string; tableName: string | null; capac
 type Menu = { menuId: number; categoryId: number | null; menuNumber: number | null; name: string; price: string; categoryName: string | null; imageUrl: string | null; kdsKind: "NONE" | "POT" | "ADDON" | "SOLO"; kdsGroupKey: string | null };
 type MenuComponent = { menuComponentId: number; menuId: number; componentMenuId: number; itemName: string; price: string; quantity: number; printOnKitchen: number; printOnReceipt: number; sortOrder: number };
 type SelectedMenuComponent = { menuComponentId: number; qty: number };
-type Category = { categoryId: number; name: string };
+type Category = { categoryId: number; name: string; tabColor: string | null };
 type MenuModifier = { menuId: number; modifierGroupId: number; groupName: string; groupSortOrder: number; modifierOptionId: number; optionName: string; priceDelta: string; optionSortOrder: number; choiceDefaultOptionId: number | null };
 type MenuCatalog = { menus: Menu[]; categories: Category[]; modifiers: MenuModifier[]; components: MenuComponent[] };
 type MenuCatalogResponse = { success: boolean; changed?: boolean; version?: string; message?: string } & Partial<MenuCatalog>;
@@ -57,19 +59,54 @@ const viewTabStyles = {
 } as const;
 const categoryVisuals: Record<string, { color: string }> = {
  "김치찌개": { color: "#DC2626" },
+ "찌개": { color: "#DC2626" },
  "사이드": { color: "#16A34A" },
+ "단품": { color: "#16A34A" },
+ "사리·밥": { color: "#0891B2" },
  "주류·음료": { color: "#EA580C" },
+ "음료": { color: "#EA580C" },
  "추가": { color: "#0891B2" },
  "포장": { color: "#7C3AED" },
 };
 const categoryVisual = (name: string | null | undefined) => categoryVisuals[name ?? ""] ?? { color: "#64748B" };
-const categoryDisplayName = (name: string) => ({ "김치찌개": "찌개", "사이드": "단품", "주류·음료": "음료" }[name] ?? name);
+const categoryDisplayName = (name: string) => name;
 const legacyDomRendering = process.env.NEXT_PUBLIC_LEGACY_POS_DOM === "enabled";
 const legacyOrderSummaryRendering = process.env.NEXT_PUBLIC_LEGACY_ORDER_SUMMARY === "enabled";
 const legacyMenuRendering = process.env.NEXT_PUBLIC_LEGACY_MENU_DOM === "enabled";
 const countOpenTables = (tables: Table[]) => tables.filter(table => table.sessionId !== null).length;
 const physicalTableSessionIds = (table: Table): number[] => table.sessionId === null ? [] : [...new Set([table.sessionId, ...table.mergedSourceSessionIds])];
+function getPosMenuRowPositions(list: HTMLElement): PosMenuRowPosition[] {
+ const rows = [...list.querySelectorAll<HTMLElement>(".pos-menu-row")];
+ if (rows.length > 0) return rows.flatMap(row => {
+  const firstMenu = row.querySelector<HTMLElement>(".pos-menu-card[data-category]");
+  if (!firstMenu) return [];
+  const bounds = row.getBoundingClientRect();
+  const rawCategoryId = firstMenu.dataset.category;
+  const parsedCategoryId = rawCategoryId && rawCategoryId !== "uncategorized" ? Number(rawCategoryId) : null;
+  return [{ top: bounds.top, bottom: bounds.bottom,
+   firstCategoryId: parsedCategoryId !== null && Number.isSafeInteger(parsedCategoryId) ? parsedCategoryId : null }];
+ });
+
+ // Legacy POS renders the three-column grid without row wrapper elements.
+ const grouped: Array<PosMenuRowPosition & { rowBottom: number }> = [];
+ for (const menu of list.querySelectorAll<HTMLElement>(":scope > .pos-menu-card[data-category]")) {
+  const bounds = menu.getBoundingClientRect();
+  let row = grouped[grouped.length - 1];
+  if (!row || Math.abs(row.top - bounds.top) > 1) {
+   const rawCategoryId = menu.dataset.category;
+   const parsedCategoryId = rawCategoryId && rawCategoryId !== "uncategorized" ? Number(rawCategoryId) : null;
+   row = { top: bounds.top, bottom: bounds.bottom, rowBottom: bounds.bottom,
+    firstCategoryId: parsedCategoryId !== null && Number.isSafeInteger(parsedCategoryId) ? parsedCategoryId : null };
+   grouped.push(row);
+  } else {
+   row.rowBottom = Math.max(row.rowBottom, bounds.bottom);
+   row.bottom = row.rowBottom;
+  }
+ }
+ return grouped.map(({ rowBottom, ...row }) => ({ ...row, bottom: rowBottom }));
+}
 export default function PosShell({ staffName, tables, takeouts, menus: initialMenus, menuComponents: initialMenuComponents, categories: initialCategories, menuModifiers: initialMenuModifiers, orders, orderItems, orderDetails, discounts, sessionFinancials, quickDiscounts: _quickDiscounts, idleResetSeconds, riceCurrentQty }: { staffName: string; tables: Table[]; takeouts: Table[]; menus: Menu[]; menuComponents: MenuComponent[]; categories: Category[]; menuModifiers: MenuModifier[]; orders: Order[]; orderItems: OrderItem[]; orderDetails: OrderDetail[]; discounts: SessionDiscount[]; sessionFinancials: SessionFinancial[]; quickDiscounts: QuickDiscount[]; idleResetSeconds: number; riceCurrentQty: number | null }) {
+ const [qrWaitCount, setQrWaitCount] = useState(0);
  void _quickDiscounts;
  const [menuCatalog, setMenuCatalog] = useState<MenuCatalog>(() => ({ menus: initialMenus, categories: initialCategories, modifiers: initialMenuModifiers, components: initialMenuComponents }));
  const [tableSpicyOverrides, setTableSpicyOverrides] = useState<Record<number, { name: string; orderItemId: number; expiresAt: number }>>({});
@@ -577,32 +614,75 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   const escape = (value: string) => value.replace(/[&<>\"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char] ?? char));
   const formatMoney = (value: string) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Number(value));
   const categoryBar = document.createElement("div");
-  categoryBar.className = "horizontal-select-scroll pos-category-bar";
-  categoryBar.innerHTML = categories.map((category, index) => `<button class=\"pos-category-button${index === 0 ? " is-active" : ""}\" data-category=\"${category.categoryId}\" type=\"button\">${escape(category.name)}</button>`).join("");
+  categoryBar.className = "pos-category-bar";
+  categoryBar.style.setProperty("--pos-category-count", String(Math.max(categories.length, 1)));
+  const categoryById = new Map(categories.map(category => [category.categoryId, category]));
+  categoryBar.innerHTML = categories.map((category, index) => {
+   const active = index === 0;
+   const accent = normalizeMenuCategoryTabColor(category.tabColor) ?? categoryVisual(category.name).color;
+   const textColor = getPosCategoryTextColor(accent, accent);
+   const corner = `<span aria-hidden=\"true\" class=\"pos-category-corner-marker\" style=\"background-color:${escape(getPosCategoryCornerColor(category.tabColor, accent))}\"></span>`;
+   return `<button aria-pressed=\"${active}\" class=\"pos-category-button${active ? " is-active" : ""}\" style=\"--pos-category-active-background:${escape(accent)};--pos-category-active-foreground:${escape(textColor)}\" data-category=\"${category.categoryId}\" type=\"button\">${corner}<span class=\"relative\">${escape(category.name)}</span></button>`;
+  }).join("");
   menuPanel.classList.add("pos-right-menu-panel");
   menuPanel.insertBefore(categoryBar, list);
   const seenCategories = new Set<number | null>();
-  const renderCard = (menu: Menu) => { const start = !seenCategories.has(menu.categoryId); seenCategories.add(menu.categoryId); const displayName = escape(menu.name); const menuNumber = menu.menuNumber === null ? "" : `<span aria-hidden=\"true\" class=\"pos-menu-number\">${menu.menuNumber}</span>`; return `<button class=\"pos-menu-card\" style=\"--pos-menu-accent:${escape(categoryVisual(menu.categoryName).color)}\" data-menu-id=\"${menu.menuId}\" data-category=\"${menu.categoryId ?? "uncategorized"}\"${start ? " data-category-start=\"true\"" : ""} type=\"button\" aria-label=\"${escape(menu.name)} 상세\">${menuNumber}<div class=\"pos-menu-copy\"><strong>${displayName}</strong><span class=\"pos-menu-price\">${formatMoney(menu.price)}</span></div></button>`; };
+  const renderCard = (menu: Menu) => { const start = !seenCategories.has(menu.categoryId); seenCategories.add(menu.categoryId); const displayName = escape(menu.name); const menuNumber = menu.menuNumber === null ? "" : `<span aria-hidden=\"true\" class=\"pos-menu-number\">${menu.menuNumber}</span>`; const category = categoryById.get(menu.categoryId ?? -1); const accent = categoryVisual(category?.name ?? menu.categoryName).color; const background = getPosMenuCardBackground(category?.tabColor, accent); return `<button class=\"pos-menu-card\" style=\"--pos-menu-accent:${escape(accent)};--pos-menu-background:${escape(background)}\" data-menu-id=\"${menu.menuId}\" data-category=\"${menu.categoryId ?? "uncategorized"}\"${start ? " data-category-start=\"true\"" : ""} type=\"button\" aria-label=\"${escape(menu.name)} 상세\">${menuNumber}<div class=\"pos-menu-copy\"><strong>${displayName}</strong><span class=\"pos-menu-price\">${formatMoney(menu.price)}</span></div></button>`; };
+  const menuRows = groupPosMenusIntoCategoryRows(menus, categories.map(category => category.categoryId));
   list.className = "pos-menu-list";
   list.style.display = "grid";
-  list.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
+  list.style.gridTemplateColumns = "minmax(0, 1fr)";
   list.style.gridAutoFlow = "row";
-  list.innerHTML = menus.map(renderCard).join("");
+  list.innerHTML = menuRows.map(row => `<div class=\"pos-menu-row\">${row.menus.map(renderCard).join("")}</div>`).join("");
   const categoryStarts = () => [...list.querySelectorAll(".pos-menu-card[data-category-start=\"true\"]")] as HTMLElement[];
   const relativeTop = (element: HTMLElement) => element.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
   const ensureCategoryScrollRoom = () => {
+   const previousScrollTop = list.scrollTop;
    list.style.paddingBottom = "0px";
-   const requiredPadding = categoryStarts().reduce((largest, card) => Math.max(largest, relativeTop(card) - (list.scrollHeight - list.clientHeight)), 0);
-   list.style.paddingBottom = `${Math.max(0, Math.ceil(requiredPadding))}px`;
+   const categoryStartTops = categoryStarts().map(relativeTop);
+   const padding = getPosMenuCategoryBottomPadding(categoryStartTops, list.scrollHeight, list.clientHeight);
+   list.style.paddingBottom = `${padding}px`;
+   list.scrollTop = Math.min(previousScrollTop, Math.max(0, list.scrollHeight - list.clientHeight));
   };
-  const setActive = (id: string) => categoryBar.querySelectorAll("button").forEach(button => button.classList.toggle("is-active", button.dataset.category === id));
-  const scrollToCategory = (id: string) => { const target = list.querySelector(`.pos-menu-card[data-category=\"${id}\"][data-category-start=\"true\"]`) as HTMLElement | null; if (!target) return; list.scrollTo({ top: relativeTop(target), behavior: "smooth" }); };
-  const onClick = (event: Event) => { const button = (event.target as HTMLElement).closest("button[data-category]") as HTMLButtonElement | null; if (!button) return; const id = button.dataset.category ?? "all"; setActive(id); scrollToCategory(id); };
+  const setActive = (id: number) => categoryBar.querySelectorAll<HTMLButtonElement>("button").forEach(button => {
+   const active = Number(button.dataset.category) === id;
+   button.classList.toggle("is-active", active);
+   button.setAttribute("aria-pressed", String(active));
+  });
+  const scrollToCategory = (id: number) => { const target = list.querySelector(`.pos-menu-card[data-category=\"${id}\"][data-category-start=\"true\"]`) as HTMLElement | null; if (!target) return; ensureCategoryScrollRoom(); list.scrollTo({ top: relativeTop(target), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); };
+  let topRowSyncSuppressed = false;
+  let topRowSyncUnlockTimer = 0;
+  const releaseTopRowSync = () => { topRowSyncSuppressed = false; window.clearTimeout(topRowSyncUnlockTimer); scheduleTopRowSync(); };
+  const selectCategory = (id: number) => {
+   topRowSyncSuppressed = true;
+   window.clearTimeout(topRowSyncUnlockTimer);
+   topRowSyncUnlockTimer = window.setTimeout(releaseTopRowSync, 1000);
+   setActive(id);
+   scrollToCategory(id);
+  };
+  const onScrollEnd = () => releaseTopRowSync();
+  const onClick = (event: Event) => { const button = (event.target as HTMLElement).closest("button[data-category]") as HTMLButtonElement | null; if (!button) return; const id = Number(button.dataset.category); if (!Number.isSafeInteger(id)) return; selectCategory(id); };
   const onMenuClick = (event: Event) => { const card = (event.target as HTMLElement).closest("button[data-menu-id]") as HTMLButtonElement | null; if (!card) return; const menu = menus.find(item => item.menuId === Number(card.dataset.menuId)); if (menu) { setQuantityMenuConfig({ components: menuComponents.filter(component => component.menuId === menu.menuId), modifiers: menuModifiers.filter(modifier => modifier.menuId === menu.menuId) }); setQuantityMenu(menu); } };
-  const onScroll = () => { const current = categoryStarts().filter(card => relativeTop(card) <= list.scrollTop + 1).at(-1) ?? categoryStarts()[0]; if (current?.dataset.category) setActive(current.dataset.category); };
+  const syncTopRowCategory = () => {
+   if (topRowSyncSuppressed) return;
+   const focusLine = list.getBoundingClientRect().top + list.clientTop + 8;
+   const rowPositions = getPosMenuRowPositions(list);
+   const id = getPosTopRowCategoryId(rowPositions, focusLine);
+   if (id !== null) setActive(id);
+  };
+  let focusFrame = 0;
+  const scheduleTopRowSync = () => { if (focusFrame) return; focusFrame = requestAnimationFrame(() => { focusFrame = 0; syncTopRowCategory(); }); };
+  const onScroll = () => scheduleTopRowSync();
+  const unbindCategoryNavigation = bindPosCategoryNavigation(list, {
+   getCategoryIds: () => categories.map(category => category.categoryId),
+   getCurrentCategoryId: () => Number(categoryBar.querySelector<HTMLButtonElement>("button.is-active")?.dataset.category) || null,
+   onSelect: selectCategory,
+  });
   categoryBar.addEventListener("click", onClick); list.addEventListener("click", onMenuClick); list.addEventListener("scroll", onScroll, { passive: true });
-  const resizeObserver = new ResizeObserver(ensureCategoryScrollRoom); resizeObserver.observe(list); requestAnimationFrame(() => { ensureCategoryScrollRoom(); onScroll(); });
-  return () => { resizeObserver.disconnect(); categoryBar.removeEventListener("click", onClick); list.removeEventListener("click", onMenuClick); list.removeEventListener("scroll", onScroll); categoryBar.remove(); menuPanel.classList.remove("pos-right-menu-panel"); };
+  list.addEventListener("scrollend", onScrollEnd);
+  const resizeObserver = new ResizeObserver(() => { ensureCategoryScrollRoom(); scheduleTopRowSync(); }); resizeObserver.observe(list); window.addEventListener("resize", scheduleTopRowSync);
+  requestAnimationFrame(() => { ensureCategoryScrollRoom(); scheduleTopRowSync(); });
+  return () => { resizeObserver.disconnect(); window.removeEventListener("resize", scheduleTopRowSync); window.clearTimeout(topRowSyncUnlockTimer); unbindCategoryNavigation(); if (focusFrame) cancelAnimationFrame(focusFrame); categoryBar.removeEventListener("click", onClick); list.removeEventListener("click", onMenuClick); list.removeEventListener("scroll", onScroll); list.removeEventListener("scrollend", onScrollEnd); categoryBar.remove(); menuPanel.classList.remove("pos-right-menu-panel"); };
  }, [menus, categories, menuComponents, menuModifiers]);
  const handleFullscreen = async () => {
   try {
@@ -709,7 +789,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
    setCart([]);
    setOrderError("");
   }} adjustCartItem={adjustCartItem} adjustCartComponent={adjustCartComponent} submitting={submittingOrder || firstOrderBusy} submitError={orderError} orderDetails={orderDetails} workspaceResetVersion={menuResetVersion} selectionVersion={selectionVersion} onBlockingUiChange={setOrderSummaryBlockingUiOpen} onCancellationSuccess={() => requestServerRefresh(true)} onPaymentCompleted={handlePaymentCompleted} onCashPaymentRegistered={() => void handleOpenCashDrawer()} onBusinessOpeningRequired={requireBusinessOpening} onPrintReceipt={(checkoutId, isReprint) => sendReceipt(checkoutId ? { checkoutId, isReprint } : { tableId: selected?.tableId })} receiptPrinting={receiptPrinting} party={selectedParty} physicalSessionIds={selectedPhysicalSessionIds} sessionTableNos={Object.fromEntries([...displayTables, ...displayTakeouts].flatMap(table => table.sessionId === null ? [] : [[table.sessionId, table.tableNo]]))} discounts={discounts} menuModifiers={menuModifiers} potMenuIds={menus.filter(menu => menu.kdsKind === "POT").map(menu => menu.menuId)} onCustomerSelectionChanged={(sessionIds, customerName, customerId) => setSessionCustomerName(sessionIds, customerName, customerId)} onOptionSaved={(sessionId, optionName, orderItemId) => { setTableSpicyOverrides(current => ({ ...current, [sessionId]: { name: optionName, orderItemId, expiresAt: Date.now() + 10000 } })); requestServerRefresh(true); }} /></div>
-  <section className={`grid min-h-0 ${view === "takeout" ? "grid-rows-[10%_minmax(0,1fr)]" : view === "tables" ? "grid-rows-[10%_minmax(0,1fr)_minmax(140px,18%)]" : "grid-rows-[10%_60%_30%]"} rounded-2xl bg-white shadow-sm`} data-pos-middle-panel style={view === "tables" ? { gridTemplateRows: POS_TABLE_GRID_ROWS } : undefined}><div className="flex min-h-0 flex-col justify-center px-4" data-pos-top-tabs><div className="grid w-full grid-cols-4 gap-2">{([ ["tables", `테이블(${openTableCount})`], ["takeout", `포장(${displayTakeouts.length})`], ["reservation", "예약(0)"], ["waiting", "대기자(0)"] ] as const).map(([key, name]) => <button key={key} onClick={() => changeWorkTab(key)} className={`relative overflow-hidden whitespace-nowrap rounded-xl px-1 py-3 text-sm font-bold ${view === key ? `${viewTabStyles[key].activeClass} text-white` : "bg-slate-100 text-slate-600"}`} type="button"><span aria-hidden="true" className="pointer-events-none absolute left-0 top-0 size-7 rounded-br-[2rem] brightness-75" style={{ backgroundColor: viewTabStyles[key].color }} /><span className="relative">{name}</span></button>)}</div><div aria-hidden="true" className={`mt-1.5 h-[3px] w-full rounded-full ${viewTabStyles[view].activeClass}`} /></div>{view === "tables" ? <><TableLayoutRenderer tables={displayTables} renderTable={(table, fixedPosition) => <TableVisual fixedPosition={fixedPosition} selectedGroupId={selectedGroupId} table={table} tables={displayTables} selected={table.tableId === selectedId} choose={() => choose(table)} />} className="justify-self-center rounded-2xl border border-dashed border-slate-300 bg-slate-50" debugName="pos-table-area" style={{ width: "calc(100% - 2rem)", overflow: "visible" }}><PosFanLayer /></TableLayoutRenderer><div className="min-h-0 px-4 pb-4 pt-1.5"><RequestMessagePanel /></div></> : view === "takeout" ? <TakeoutPanel sessions={takeoutPanelSessions} selectedId={selectedId} onSelect={selectTakeout} onCreated={takeoutCreated} onCancelled={takeoutCancelled} onBlockingUiChange={setTakeoutBlockingUiOpen} onBusinessOpeningRequired={requireBusinessOpening} /> : <><p className="flex min-h-0 items-center justify-center px-4 text-sm text-slate-400">준비 중입니다.</p><div aria-hidden="true" className="min-h-0" /></>}</section>
+  <section className={`grid min-h-0 ${view === "takeout" ? "grid-rows-[10%_minmax(0,1fr)]" : view === "tables" ? "grid-rows-[10%_minmax(0,1fr)_minmax(140px,18%)]" : "grid-rows-[10%_60%_30%]"} rounded-2xl bg-white shadow-sm`} data-pos-middle-panel style={view === "tables" ? { gridTemplateRows: POS_TABLE_GRID_ROWS } : undefined}><div className="flex min-h-0 flex-col justify-center px-4" data-pos-top-tabs><div className="grid w-full grid-cols-4 gap-2">{([ ["tables", `테이블(${openTableCount})`], ["takeout", `포장(${displayTakeouts.length})`], ["reservation", "예약(0)"], ["waiting", `대기자(${qrWaitCount})`] ] as const).map(([key, name]) => <button key={key} onClick={() => changeWorkTab(key)} className={`relative overflow-hidden whitespace-nowrap rounded-xl px-1 py-3 text-sm font-bold ${view === key ? `${viewTabStyles[key].activeClass} text-white` : "bg-slate-100 text-slate-600"}`} type="button"><span aria-hidden="true" className="pointer-events-none absolute left-0 top-0 size-7 rounded-br-[2rem] brightness-75" style={{ backgroundColor: viewTabStyles[key].color }} /><span className="relative">{name}</span></button>)}</div><div aria-hidden="true" className={`mt-1.5 h-[3px] w-full rounded-full ${viewTabStyles[view].activeClass}`} /></div>{view === "tables" ? <><TableLayoutRenderer tables={displayTables} renderTable={(table, fixedPosition) => <TableVisual fixedPosition={fixedPosition} selectedGroupId={selectedGroupId} table={table} tables={displayTables} selected={table.tableId === selectedId} choose={() => choose(table)} />} className="justify-self-center rounded-2xl border border-dashed border-slate-300 bg-slate-50" debugName="pos-table-area" style={{ width: "calc(100% - 2rem)", overflow: "visible" }}><PosFanLayer /></TableLayoutRenderer><div className="min-h-0 px-4 pb-4 pt-1.5"><RequestMessagePanel /></div></> : view === "takeout" ? <TakeoutPanel sessions={takeoutPanelSessions} selectedId={selectedId} onSelect={selectTakeout} onCreated={takeoutCreated} onCancelled={takeoutCancelled} onBlockingUiChange={setTakeoutBlockingUiOpen} onBusinessOpeningRequired={requireBusinessOpening} /> : view === "waiting" ? <PosQrWaitPanel tables={displayTables.map(({ tableId, tableNo, sessionId }) => ({ tableId, tableNo, sessionId }))} onChanged={() => requestServerRefresh(true)} onCountChange={setQrWaitCount} /> : <><p className="flex min-h-0 items-center justify-center px-4 text-sm text-slate-400">준비 중입니다.</p><div aria-hidden="true" className="min-h-0" /></>}</section>
   <PosMenuPanel canOrderMenu={canOrderMenu} categories={categories} menus={menus} openQuantityModal={openQuantityModal} quickAddToCart={quickAddToCart} resetVersion={menuResetVersion} refreshError={menuRefreshError} />
   <PosFooterBar><button aria-label="공기밥 현재수량 및 수량 조절" data-digits={String(riceCurrentQty ?? 0).length} className="rice-stock-count h-[72px] rounded-xl bg-slate-100 text-slate-800 transition hover:bg-slate-200 disabled:opacity-50" disabled={riceCurrentQty === null} onClick={() => setRiceStockModal(true)} type="button">{riceCurrentQty ?? ""}</button><button aria-label="판매내역" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200" onClick={() => router.push("/tdkpos/sales")} type="button">판매</button><button aria-label="CashBox" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed" disabled={drawerOpening} onClick={() => void handleOpenCashDrawer()} type="button">{drawerOpening ? "여는 중..." : "CashBox"}</button><button aria-label="영수증" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed" disabled={receiptPrinting} onClick={() => void printSelectedReceipt()} type="button">{receiptPrinting ? "출력 중..." : "영수증"}</button><button aria-label="고객 선택" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setCustomerSelectOpen(true)} type="button">고객</button><button aria-label="인원 조정" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed" disabled={!selected?.sessionId} onClick={() => { if (!selected?.sessionId) return; setPersonError(""); setPersonModal(true); }} type="button">인원</button><button aria-label="할인" className="h-[72px] rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed" disabled={!selected?.sessionId || physicalAggregateTotal <= 0} onClick={() => setDiscountModal(true)} type="button">할인</button><button aria-label="테이블 관리" className="flex h-[72px] items-center justify-center gap-2 rounded-xl bg-slate-100 text-sm font-bold text-slate-700 transition hover:bg-slate-200 active:scale-[0.99]" onClick={() => router.push("/tdkpos/table-management")} type="button"><svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><rect height="13" rx="1" width="16" x="4" y="5" /><path d="M8 18v2M16 18v2M8 9h3M13 9h3M8 13h3M13 13h3" /></svg><span>테이블관리</span></button></PosFooterBar></div>{firstOrderPersonModal && selected && !selected.sessionId && <PersonCountModal key={selected.tableId} title="인원 확인" personCount={firstOrderAdultCount > 0 ? firstOrderAdultCount : selected.personCount ?? 0} babyCount={0} busy={firstOrderBusy} error={firstOrderError} close={() => !firstOrderBusy && setFirstOrderPersonModal(false)} save={confirmFirstOrder} />}{personModal && selected?.sessionId && <PersonCountModal sessionId={selected.sessionId} personCount={selected.personCount ?? 0} babyCount={selected.babyCount ?? 0} busy={personBusy} error={personError} close={() => !personBusy && setPersonModal(false)} save={savePersonCount} />}{discountModal && selected?.sessionId && <DiscountModal sessionId={selected.sessionId} table={selected} items={items} subtotal={physicalAggregateTotal} savedDiscounts={selectedDiscounts} close={() => setDiscountModal(false)} completed={() => { setDiscountModal(false); requestServerRefresh(true); }} />}{riceStockModal && <RiceStockModal close={() => { setRiceStockModal(false); requestServerRefresh(true); }} onAdjusted={() => requestServerRefresh(true)} />}{businessOpening && <OpeningFundModal context="login" close={() => { openingRetry.current = null; openingPromptDismissed.current = true; try { window.sessionStorage.setItem(OPENING_FUND_PROMPT_DISMISSED_KEY, "1"); } catch { /* The current POS session still remembers the dismissal. */ } setBusinessOpening(false); }} onSaved={() => { const retry = openingRetry.current; openingRetry.current = null; setBusinessOpening(false); retry?.(); }} drawerOpening={drawerOpening} onOpenCashDrawer={() => void handleOpenCashDrawer()} />}{businessClosing && <BusinessClosingDialog onClose={() => setBusinessClosing(false)} onClosed={() => { setBusinessClosing(false); setBusinessCloseConfirmed(true); setExitMessage(""); setShutdownConfirmOpen(true); }} />}{openingFundModal && <OpeningFundModal mode="cashCheck" close={() => setOpeningFundModal(false)} drawerOpening={drawerOpening} onOpenCashDrawer={() => void handleOpenCashDrawer()} />}{quantityMenu && <QuantityModal key={quantityMenu.menuId} menu={quantityMenu} stale={quantityMenuChanged} components={quantityMenuConfig?.components ?? []} modifiers={quantityMenuConfig?.modifiers ?? []} inheritedChoiceId={tableSpicyChoice(quantityMenu)?.modifierOptionId ?? null} close={() => setQuantityMenu(null)} add={(unitPrice, qty, options, components, isComplimentary) => { addToCart(quantityMenu, unitPrice, qty, options, components, isComplimentary); setQuantityMenu(null); }} />}{receiptNotice && <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/50 p-4"><section aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl" role="alertdialog"><h2 className={`text-2xl font-extrabold ${receiptNotice.success ? "text-blue-700" : "text-red-600"}`}>{receiptNotice.title}</h2><p className="mt-5 whitespace-pre-line text-lg text-slate-600">{receiptNotice.message}</p><button autoFocus className="mt-7 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-bold text-white" onClick={() => setReceiptNotice(null)} type="button">확인</button></section></div>}{exitDialogOpen && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/45 p-4" onClick={() => { if (!shutdownConfirmOpen) { setExitDialogOpen(false); setExitMessage(""); } }}><section aria-modal="true" className="w-full max-w-md overflow-hidden rounded-2xl border border-[#cbd5da] bg-white shadow-2xl" onClick={event => event.stopPropagation()} role="dialog" style={{ boxShadow: "0 18px 48px rgb(22 37 45 / 22%)" }}><header className="flex h-16 shrink-0 items-center gap-[15px] border-b border-[#e2e8eb] bg-white pr-5 pl-1 text-[#25343b]">
   <span className="-mr-[13px] flex shrink-0"><button aria-label={"TDK-POS \uC885\uB8CC \uB2EB\uAE30"} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-[#25343b] transition hover:bg-slate-100 active:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white" onClick={() => { setExitDialogOpen(false); setExitMessage(""); }} title={"TDK-POS \uC885\uB8CC \uB2EB\uAE30"} type="button"><svg aria-hidden="true" className="h-[28px] w-[28px]" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 24 24"><path d="m15.5 18-6-6 6-6" /></svg></button></span>
@@ -718,16 +798,68 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
 }
 function PosMenuPanel({ menus, categories, canOrderMenu, openQuantityModal, quickAddToCart, resetVersion, refreshError }: { menus: Menu[]; categories: Category[]; canOrderMenu: boolean; openQuantityModal: (menu: Menu) => void; quickAddToCart: (menu: Menu) => void; resetVersion: number; refreshError: string }) {
  const listRef = useRef<HTMLDivElement>(null);
- const [categorySelection, setCategorySelection] = useState(() => ({ categoryId: null as number | null, resetVersion }));
- const requestedCategoryId = categorySelection.resetVersion === resetVersion ? categorySelection.categoryId : null;
- const activeCategoryId = requestedCategoryId !== null && !categories.some(category => category.categoryId === requestedCategoryId) ? null : requestedCategoryId;
- const categoryTabs = [{ categoryId: null, name: "ALL" }, ...categories];
- const { ref: categoryScrollRef, handlers: categoryScrollHandlers } = useHorizontalScroll(true, categoryTabs.map(category => category.categoryId ?? "all").join("\0"), false);
- const activeCategory = activeCategoryId === null ? categoryTabs[0] : categories.find(category => category.categoryId === activeCategoryId);
- const activeCategoryColor = activeCategoryId === null ? viewTabStyles.tables.color : categoryVisual(activeCategory?.name).color;
- const filteredMenus = activeCategoryId === null ? menus : menus.filter(menu => menu.categoryId === activeCategoryId);
- const selectCategory = (categoryId: number | null) => { setCategorySelection({ categoryId, resetVersion }); listRef.current?.scrollTo({ top: 0, behavior: "auto" }); };
- useEffect(() => { listRef.current?.scrollTo({ top: 0, behavior: "auto" }); }, [resetVersion]);
+ const topRowSyncSuppressedRef = useRef(false);
+ const topRowSyncTimerRef = useRef<number | null>(null);
+ const syncTopRowRef = useRef<() => void>(() => {});
+ const firstCategoryId = categories[0]?.categoryId ?? null;
+ const [categorySelection, setCategorySelection] = useState(() => ({ categoryId: firstCategoryId, resetVersion }));
+ const requestedCategoryId = categorySelection.resetVersion === resetVersion ? categorySelection.categoryId : firstCategoryId;
+ const activeCategoryId = requestedCategoryId !== null && categories.some(category => category.categoryId === requestedCategoryId)
+  ? requestedCategoryId : firstCategoryId;
+ const activeCategoryIdRef = useRef<number | null>(null);
+ useEffect(() => { activeCategoryIdRef.current = activeCategoryId; }, [activeCategoryId]);
+ const activeCategory = categories.find(category => category.categoryId === activeCategoryId) ?? categories[0];
+ const activeCategoryColor = activeCategory
+  ? normalizeMenuCategoryTabColor(activeCategory.tabColor) ?? categoryVisual(activeCategory.name).color
+  : viewTabStyles.tables.color;
+ const categoryById = useMemo(() => new Map(categories.map(category => [category.categoryId, category])), [categories]);
+ const menuRows = useMemo(() => groupPosMenusIntoCategoryRows(menus, categories.map(category => category.categoryId)), [categories, menus]);
+ const categoryStartMenuIds = useMemo(() => {
+  const starts = new Set<number>();
+  const seen = new Set<number | null>();
+  for (const row of menuRows) {
+   if (seen.has(row.categoryId)) continue;
+   seen.add(row.categoryId);
+   if (row.menus[0]) starts.add(row.menus[0].menuId);
+  }
+  return starts;
+ }, [menuRows]);
+ const ensureCategoryScrollRoom = useCallback(() => {
+  const list = listRef.current;
+  if (!list) return;
+  const previousScrollTop = list.scrollTop;
+  list.style.paddingBottom = "0px";
+  const listTop = list.getBoundingClientRect().top;
+  const categoryStartTops = [...list.querySelectorAll<HTMLElement>(".pos-menu-card[data-category-start=\"true\"]")]
+   .map(card => card.getBoundingClientRect().top - listTop + list.scrollTop);
+  const padding = getPosMenuCategoryBottomPadding(categoryStartTops, list.scrollHeight, list.clientHeight);
+  list.style.paddingBottom = `${padding}px`;
+  list.scrollTop = Math.min(previousScrollTop, Math.max(0, list.scrollHeight - list.clientHeight));
+ }, []);
+ const releaseTopRowSync = () => {
+  topRowSyncSuppressedRef.current = false;
+  if (topRowSyncTimerRef.current !== null) window.clearTimeout(topRowSyncTimerRef.current);
+  topRowSyncTimerRef.current = null;
+  syncTopRowRef.current();
+ };
+ const selectCategory = useCallback((categoryId: number) => {
+  activeCategoryIdRef.current = categoryId;
+  setCategorySelection({ categoryId, resetVersion });
+  topRowSyncSuppressedRef.current = true;
+  if (topRowSyncTimerRef.current !== null) window.clearTimeout(topRowSyncTimerRef.current);
+  topRowSyncTimerRef.current = window.setTimeout(releaseTopRowSync, 1000);
+  const list = listRef.current;
+  ensureCategoryScrollRoom();
+  const target = list?.querySelector<HTMLElement>(`.pos-menu-card[data-category=\"${categoryId}\"][data-category-start=\"true\"]`);
+  if (!list || !target) return;
+  const top = target.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+  list.scrollTo({ top, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+ }, [ensureCategoryScrollRoom, resetVersion]);
+ const selectCategoryRef = useRef<(categoryId: number) => void>(() => {});
+ useEffect(() => { selectCategoryRef.current = selectCategory; }, [selectCategory]);
+ useEffect(() => {
+  listRef.current?.scrollTo({ top: 0, behavior: "auto" });
+ }, [resetVersion, firstCategoryId]);
  useEffect(() => {
  const list = listRef.current;
  if (!list) return;
@@ -740,9 +872,58 @@ function PosMenuPanel({ menus, categories, canOrderMenu, openQuantityModal, quic
    card.tabIndex = canOrderMenu ? 0 : -1;
   });
   list.querySelectorAll<HTMLButtonElement>(".pos-menu-cart-button").forEach(button => { button.disabled = !canOrderMenu; });
- }, [canOrderMenu, filteredMenus]);
- const renderMenuCard = (menu: Menu) => { const openMenu = () => openQuantityModal(menu); return <div aria-label={`${menu.name} 상세`} className="pos-menu-card pos-menu-card-with-cart" style={{ "--pos-menu-accent": categoryVisual(menu.categoryName).color } as CSSProperties} data-category={menu.categoryId ?? "uncategorized"} key={menu.menuId} onClick={openMenu} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(); } }} role="button" tabIndex={0}>{menu.menuNumber !== null && <span aria-hidden="true" className="pos-menu-number">{menu.menuNumber}</span>}<div className="pos-menu-copy"><strong>{menu.name}</strong><span className="pos-menu-price">{new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Number(menu.price))}</span></div><button aria-label={`${menu.name} 주문예정에 1개 추가`} className="pos-menu-cart-button" onClick={event => { event.stopPropagation(); quickAddToCart(menu); }} onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} type="button"><img src="/icons/cart_plus_icon.svg" alt="" aria-hidden="true" className="pointer-events-none size-[22px]" /></button></div>; };
- return <section className="pos-right-menu-panel pos-right-menu-panel-aligned min-h-0 rounded-2xl bg-white px-4 pb-4 shadow-sm"><div className="pos-menu-header"><div className="flex min-w-0 items-center gap-1"><div className={`horizontal-select-scroll pos-category-bar min-w-0 flex-1${categoryTabs.length === 6 ? " is-six-items" : ""}`} {...categoryScrollHandlers} ref={categoryScrollRef}>{categoryTabs.map(category => { const visual = category.categoryId === null ? { color: viewTabStyles.tables.color } : categoryVisual(category.name); const active = activeCategoryId === category.categoryId; return <button className={`pos-category-button${active ? " is-active" : ""}`} disabled={!canOrderMenu} key={category.categoryId ?? "all"} onClick={() => selectCategory(category.categoryId)} style={active ? { backgroundColor: visual.color } : undefined} type="button"><span aria-hidden="true" className="pos-category-corner-marker" style={{ backgroundColor: visual.color }} /><span className="relative">{categoryDisplayName(category.name)}</span></button>; })}</div></div><div aria-hidden="true" className="pos-category-underline" style={{ backgroundColor: activeCategoryColor }} /></div>{refreshError && <p className="mb-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700" role="alert">{refreshError}</p>}<div className="pos-menu-list" ref={listRef}>{Array.from({ length: Math.ceil(filteredMenus.length / 3) }, (_, rowIndex) => { const row = filteredMenus.slice(rowIndex * 3, rowIndex * 3 + 3); return <div className="pos-menu-row" key={row[0].menuId}>{row.map(renderMenuCard)}</div>; })}</div></section>;
+ }, [canOrderMenu, menus]);
+ useEffect(() => {
+  const list = listRef.current;
+  if (!list) return;
+  topRowSyncSuppressedRef.current = false;
+  if (topRowSyncTimerRef.current !== null) window.clearTimeout(topRowSyncTimerRef.current);
+  topRowSyncTimerRef.current = null;
+  let frame = 0;
+  const syncTopRowCategory = () => {
+   if (topRowSyncSuppressedRef.current) return;
+   const focusLine = list.getBoundingClientRect().top + list.clientTop + 8;
+   const rows = getPosMenuRowPositions(list);
+   const id = getPosTopRowCategoryId(rows, focusLine);
+   if (id !== null && categories.some(category => category.categoryId === id)) {
+    activeCategoryIdRef.current = id;
+    setCategorySelection(current => current.categoryId === id && current.resetVersion === resetVersion
+     ? current : { categoryId: id, resetVersion });
+   }
+  };
+  syncTopRowRef.current = syncTopRowCategory;
+  const scheduleSync = () => {
+   if (frame) return;
+   frame = window.requestAnimationFrame(() => { frame = 0; syncTopRowCategory(); });
+  };
+  const unbindCategoryNavigation = bindPosCategoryNavigation(list, {
+   getCategoryIds: () => categories.map(category => category.categoryId),
+   getCurrentCategoryId: () => activeCategoryIdRef.current,
+   onSelect: categoryId => selectCategoryRef.current(categoryId),
+  });
+  list.addEventListener("scroll", scheduleSync, { passive: true });
+  list.addEventListener("scrollend", releaseTopRowSync);
+  window.addEventListener("resize", scheduleSync);
+  const observer = new ResizeObserver(() => { ensureCategoryScrollRoom(); scheduleSync(); });
+  observer.observe(list);
+  ensureCategoryScrollRoom();
+  scheduleSync();
+  return () => {
+   list.removeEventListener("scroll", scheduleSync);
+   window.removeEventListener("resize", scheduleSync);
+   observer.disconnect();
+   unbindCategoryNavigation();
+   list.removeEventListener("scrollend", releaseTopRowSync);
+   if (syncTopRowRef.current === syncTopRowCategory) syncTopRowRef.current = () => {};
+   if (topRowSyncTimerRef.current !== null) window.clearTimeout(topRowSyncTimerRef.current);
+   if (frame) window.cancelAnimationFrame(frame);
+  };
+ }, [categories, ensureCategoryScrollRoom, menus, resetVersion]);
+ useEffect(() => () => {
+  if (topRowSyncTimerRef.current !== null) window.clearTimeout(topRowSyncTimerRef.current);
+ }, []);
+ const renderMenuCard = (menu: Menu) => { const openMenu = () => openQuantityModal(menu); const category = categoryById.get(menu.categoryId ?? -1); const accent = categoryVisual(category?.name ?? menu.categoryName).color; const background = getPosMenuCardBackground(category?.tabColor, accent); return <div aria-label={`${menu.name} 상세`} className="pos-menu-card pos-menu-card-with-cart" style={{ "--pos-menu-accent": accent, "--pos-menu-background": background } as CSSProperties} data-category={menu.categoryId ?? "uncategorized"} data-category-start={categoryStartMenuIds.has(menu.menuId) ? "true" : undefined} key={menu.menuId} onClick={openMenu} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(); } }} role="button" tabIndex={0}>{menu.menuNumber !== null && <span aria-hidden="true" className="pos-menu-number">{menu.menuNumber}</span>}<div className="pos-menu-copy"><strong>{menu.name}</strong><span className="pos-menu-price">{new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Number(menu.price))}</span></div><button aria-label={`${menu.name} 주문예정에 1개 추가`} className="pos-menu-cart-button" onClick={event => { event.stopPropagation(); quickAddToCart(menu); }} onKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} type="button"><img src="/icons/cart_plus_icon.svg" alt="" aria-hidden="true" className="pointer-events-none size-[22px]" /></button></div>; };
+ return <section className="pos-right-menu-panel pos-right-menu-panel-aligned min-h-0 rounded-2xl bg-white px-4 pb-4 shadow-sm"><div className="pos-menu-header"><div className="pos-category-bar" style={{ "--pos-category-count": String(Math.max(categories.length, 1)) } as CSSProperties}>{categories.map(category => { const active = activeCategoryId === category.categoryId; const accent = normalizeMenuCategoryTabColor(category.tabColor) ?? categoryVisual(category.name).color; const corner = <span aria-hidden="true" className="pos-category-corner-marker" style={{ backgroundColor: getPosCategoryCornerColor(category.tabColor, accent) }} />; const buttonColors = { "--pos-category-active-background": accent, "--pos-category-active-foreground": getPosCategoryTextColor(accent, accent) } as CSSProperties; return <button aria-pressed={active} className={`pos-category-button${active ? " is-active" : ""}`} disabled={!canOrderMenu} key={category.categoryId} onClick={() => selectCategory(category.categoryId)} style={buttonColors} type="button">{corner}<span className="relative">{categoryDisplayName(category.name)}</span></button>; })}</div><div aria-hidden="true" className="pos-category-underline" style={{ backgroundColor: activeCategoryColor }} /></div>{refreshError && <p className="mb-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700" role="alert">{refreshError}</p>}<div className="pos-menu-list" ref={listRef}>{menuRows.map(row => <div className="pos-menu-row" key={row.menus[0].menuId}>{row.menus.map(renderMenuCard)}</div>)}</div></section>;
 }
 function TableVisual({ table, tables, selected, selectedGroupId, choose, fixedPosition }: { table: Table; tables: Table[]; selected: boolean; selectedGroupId: number | null; choose: () => void; fixedPosition: ReturnType<typeof posMainFixedTablePosition> }) {
  const guestCount = (table.personCount ?? 0) + (table.babyCount ?? 0);

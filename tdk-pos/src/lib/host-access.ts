@@ -1,4 +1,6 @@
 export const EXTERNAL_ADMIN_HOST = "tdkon.myasustor.com";
+const QR_DEVELOPMENT_HOST = "tdkimchi.iptime.org";
+const QR_DEVELOPMENT_PORT = "8090";
 
 const DEFAULT_INTERNAL_HOSTS = ["192.168.0.83", "192.168.0.54", "localhost", "127.0.0.1", "::1"];
 const SAFE_READ_METHODS = new Set(["GET", "HEAD"]);
@@ -16,10 +18,42 @@ export function isExternalAdminHost(hostHeader: string | null): boolean {
 export function hasVerifiedExternalHttpsIngress(headers: Pick<Headers, "get">): boolean {
   return headers.get("x-tdk-verified-https") === "1";
 }
+/** Set only by server.cjs after verifying a loopback socket and localhost Host. */
+export function hasVerifiedLocalDevelopmentIngress(headers: Pick<Headers, "get">): boolean {
+  return headers.get("x-tdk-local-dev") === "1";
+}
 export function isKnownInternalHost(hostHeader: string | null, configuredHosts = process.env.POS_INTERNAL_HOSTS): boolean {
   const hostname = hostnameFromHeader(hostHeader);
   if (!hostname) return false;
   return new Set([...DEFAULT_INTERNAL_HOSTS, ...(configuredHosts ?? "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean)]).has(hostname);
+}
+/** The DDNS forwarded port is accepted only by the local development server. */
+export function isQrDevelopmentHost(hostHeader: string | null, nodeEnv = process.env.NODE_ENV): boolean {
+  if (nodeEnv !== "development" || !hostHeader) return false;
+  try {
+    const parsed = new URL(`http://${hostHeader}`);
+    return parsed.username === "" && parsed.password === "" && parsed.pathname === "/" &&
+      parsed.hostname.toLowerCase() === QR_DEVELOPMENT_HOST && parsed.port === QR_DEVELOPMENT_PORT;
+  } catch {
+    return false;
+  }
+}
+/** Only customer QR pages, QR APIs and the assets required to render them are exposed. */
+export function isQrDevelopmentPathAllowed(pathname: string, method: string): boolean {
+  const verb = method.toUpperCase();
+  if ((pathname === "/qr" || pathname === "/qr/wait") && (verb === "GET" || verb === "HEAD")) return true;
+  if ((pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title" || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname) || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)) &&
+      ["GET", "HEAD"].includes(verb)) return true;
+  if ((pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" ||
+      pathname === "/api/qr/cart-events") && verb === "POST") return true;
+  if (/^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname) &&
+      ["GET", "PATCH", "DELETE"].includes(verb)) return true;
+  if (["GET", "HEAD"].includes(verb) && (
+    pathname.startsWith("/_next/") || pathname.startsWith("/icons/") ||
+    pathname === "/favicon.ico" || pathname === "/images/menu/no-image.png" ||
+    /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname)
+  )) return true;
+  return false;
 }
 function isPathOrChild(pathname: string, root: string): boolean { return pathname === root || pathname.startsWith(`${root}/`); }
 function isReadOnly(method: string): boolean { return SAFE_READ_METHODS.has(method.toUpperCase()); }
@@ -27,7 +61,7 @@ function isPublicAsset(pathname: string, method: string): boolean {
   if (!isReadOnly(method)) return false;
   if (isPathOrChild(pathname, "/_next") || isPathOrChild(pathname, "/icons")) return true;
   if (["/favicon.ico", "/manifest.webmanifest", "/kds.webmanifest"].includes(pathname)) return true;
-  return /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname);
+  return /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname) || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname);
 }
 function isAdminPageOrApi(pathname: string): boolean {
   return isPathOrChild(pathname, "/admin") || isPathOrChild(pathname, "/api/admin") || isPathOrChild(pathname, "/api/admin-center");

@@ -1898,11 +1898,32 @@ Constraints: no production DB/log/NAS/deployment access, no schema changes, no f
 | Step | Goal | Scope | Status |
 | --- | --- | --- | --- |
 | 1 | Trace table-button render/grouping and existing start/completion/cancel snapshots | `KitchenClient.tsx`, `kds-server.ts`, table APIs | PASS |
-| 2 | Add distinct touch/mouse double-click dispatch and an atomic per-session server request that starts waiting tasks, requests completion, and stores exact restoration snapshots | KDS client/server/routes | TODO |
-| 3 | Add cancellation/finalization and regression fixtures for WAITING/COOKING mixtures, POT/SOLO, grouping, and duplicate input | KDS tests | TODO |
-| 4 | Run full KDS tests, TypeScript, targeted ESLint, and production build; report browser/live limits | Project validation | TODO |
+| 2 | Add distinct touch/mouse double-click dispatch and an atomic per-session server request that starts waiting tasks, requests completion, and stores exact restoration snapshots | KDS client/server/routes | PASS |
+| 3 | Add cancellation/finalization and regression fixtures for WAITING/COOKING mixtures, POT/SOLO, grouping, and duplicate input | KDS tests | PASS |
+| 4 | Run full KDS tests, TypeScript, targeted ESLint, and production build; report browser/live limits | Project validation | PASS |
 
 Constraints: preserve single-click table behavior and individual controls, task/group/version checks, configured countdown, and existing POT/add-on atomicity. Do not alter schema, production DB, or NAS. No backup or Git branch required.
+
+- Step 2 implementation: table-button clicks are disambiguated for 300ms; double-click sends the dedicated `DOUBLE_CLICK_REQUEST` per physical-table session. The server verifies the exact active task snapshot and writes a shared request ID/countdown inside a session transaction. WAITING tasks enter COOKING immediately; eligible POT tasks use the configured default boil time, while SOLO tasks skip it. A pending double-click command ignores ordinary table clicks so it cannot accidentally cancel itself.
+- Step 3 coverage: added tests for a mixed WAITING/COOKING POT/SOLO/add-on set, duplicate requests, exact restoration on explicit cancellation, post-deadline completion that cannot be undone, and stale snapshots rejected without partial updates. Full KDS suite: 156/156.
+- Step 4: `tsc --noEmit`, targeted ESLint, and `next build` passed. Build keeps the existing two dynamic filesystem tracing warnings in `src/lib/menu-image-storage.ts`.
+- Multi-session physical tables issue one transaction per session, with client compensation if one session request fails; there is no cross-session database transaction. No live database/NAS or browser/device touch validation was performed, so operational multi-session behavior remains unverified. No DB/schema changes or deployment.
+
+## TDKON QR customer menu phase 1
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Inspect HOS catalog, menu/image/modifier schema, QR visibility, translations, existing QR routes, and menu statistics | HOS catalog, schema, routes | PASS |
+| 2 | Add a public, minimal QR catalog endpoint and mobile category/menu/detail/cart experience using shared menu IDs and option data | `/qr`, QR catalog API, pure cart/localization helpers | PASS |
+| 3 | Add regression tests for visibility/category order, option price and selection validation, local cart restore/quantity/total, and locale preference | QR helpers and route tests | PASS |
+| 4 | Run tests, TypeScript, targeted ESLint, production build, and report browser/DB limitations | Project validation | PASS |
+
+Constraints: use existing `is_qr_visible`, QR image variants, HOS menu/category/modifier records; expose no KDS/admin internals and do not add schema fields or order submission. Selection rate is withheld without a defined metric; description/origin are absent from the current schema.
+
+- Added `/qr` mobile client page and public `GET /api/qr/menu-catalog`. The route returns active QR-visible menus, active categories containing those menus in HOS sort order, QR thumbnail/large then POS image URLs, and active modifier choices only. It omits KDS, recipe/components, staff, and order data.
+- HOS `getMenuChoice` is reused for configured defaults and the default spicy option; all group min/max/required rules are validated. Cart identity uses menu ID plus option IDs, is shared under one versioned localStorage key, and is revalidated against the live catalog on restore. Totals derive from the server-loaded menu and option prices. No order submission exists.
+- Added QR helper tests: 4/4 pass (category page filtering, locale mapping, HOS defaults/option constraints, cart merge/restore/quantity/estimate). Targeted TypeScript and ESLint pass; production build passes with the existing two dynamic filesystem tracing warnings in `menu-image-storage.ts`.
+- No browser/device visual test or DB-backed API test was available. Schema inspection found `menus.is_qr_visible` and `menu_images` QR image types, but no menu description, origin, localized name, or selection-rate field/metric. Existing order quantities could support a future popularity measure, but the unit, date range, and denominator need product definition. ADM menu editor does not currently expose description/origin fields. No DB/schema changes, operating DB access, or NAS deployment.
 
 ### Completion stale-state follow-up
 
@@ -1911,3 +1932,103 @@ Constraints: preserve single-click table behavior and individual controls, task/
 - Step 3: PASS. Added route/server fixtures for duplicate single-task and grouped POT/add-on finalization, post-completion cancel, lost/duplicate request semantics, and cancellation/missing request preservation. Full KDS suite: 150/150.
 - Step 4: PASS. TypeScript, targeted ESLint, and Production Build passed. Build retains the two existing dynamic filesystem tracing warnings in `src/lib/menu-image-storage.ts`.
 - Actual API+DB integration and live table 10 were not run: no development DB connection was available and production DB/log/NAS access was not used. Browser/device behavior remains unverified. No DB/schema changes or deployment.
+
+## TDKON QR waiting-order phase 2
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Audit phase-1 QR, current POS waiting view, existing order confirmation APIs, and schema | QR client/catalog, POS shell, order/session routes, `src/db/schema.ts` | PASS |
+| 2 | Add approved additive four-table schema and test-only migration | `qr_visit_sessions`, `qr_visit_events`, `qr_wait_orders`, `qr_wait_order_items`; no `orders`/`order_items` schema changes | PASS (migration prepared, not applied) |
+| 3 | Implement customer wait QR registration/retrieval/edit/cancel and POS assignment/confirmation using existing order-write validation | QR and POS routes/UI; pending orders stay outside `orders`/KDS until staff confirmation | PASS (code) |
+| 4 | Add idempotency, token authorization, price-change, cancellation, and confirmation regression tests | QR/POS tests | PASS (12 helper/policy tests) |
+| 5 | Run TypeScript, scoped ESLint, relevant tests, and production build; report browser/live limits | Local validation only; no production DB/NAS | PASS |
+
+Findings: phase-1 QR stored cart and locale in browser localStorage and had no visitor capability or event endpoint. POS had a waiting-tab placeholder. Existing `orders` rows are accepted immediately and feed KDS, so pending QR orders use separate tables and create a standard order only after staff confirmation. A legacy raw `qr_orders`/`qr_sessions` read exists in HOS projection; this work does not reuse or modify it.
+
+Migration status: additive migration is pinned to `TDK_POS_TEST` and uses `CREATE TABLE IF NOT EXISTS`; it has not been applied because the local `.env.local` does not positively identify a test database. Do not run against any unverified connection.
+
+## TDKON QR cart interest events (2026-11-10)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace QR cart add/decrement/remove, local persistence, current catalog price validation, and migration conventions | QR client/helpers, QR catalog API, schema, migrations | PASS |
+| 2 | Add anonymous visit-cookie session and idempotent cart interaction event API with channel, option IDs, quantity deltas, and server-derived estimate fields | QR event route, schema, additive migration | PASS |
+| 3 | Queue client events without blocking cart actions; record menu detail views and add/increase/decrease/remove interactions; retry safely | QR client and pure analytics helpers | PASS |
+| 4 | Add dedupe, repeat-action, channel, option, and outbox regression tests; define bounded retention cleanup | QR helper tests and server retention job | PASS |
+| 5 | Run targeted tests, TypeScript, ESLint, and production build; report DB migration/browser limitations | Local validation only; no production DB/NAS | PASS |
+
+Policy: events contain no customer name, phone, IP, or raw visitor token. The anonymous token is HttpOnly and stored as a hash. Cart interaction telemetry is not inserted into `orders`; actual sales remain independently counted from accepted order rows. Menu selection rate can use menu-detail opens as its denominator; card impressions are not tracked. Retention target is 180 days with bounded application cleanup once per day. Tests: analytics/cart helper tests 8/8; TypeScript, targeted ESLint, and production build pass. DB-backed route behavior and browser/mobile interaction were not exercised because no development DB/browser session was used. Migration files were added but not applied; no production DB or NAS was accessed.
+- Follow-up approved implementation: verified runtime DB is `TDK_POS_TEST`. All four QR tables are present with expected columns, indexes, InnoDB engine, charset/collation, and foreign keys. The prior agent's CREATE attempt was denied; the tables appeared afterward, likely through administrator application (origin not confirmed). Customer QR API integration against the local app/test DB passed and its unique test rows were cleaned. No production DB/NAS access.
+- Steps: (1) source audit/schema prepared PASS; (2) table existence and metadata verified read-only PASS; (3) QR customer API integration (visit, analytics, registration, owner access, edit, cancel, idempotent replay, other visitor, CSRF) PASS; wait-order capability cookies use the wait API namespace path so a lost-response retry can return the existing order; (4) staff endpoints correctly reject unauthenticated calls PASS, positive staff assignment/confirmation unavailable without a test staff session; (5) QR tests 14/14, TypeScript, feature-targeted ESLint and build PASS; source-wide ESLint retains 16 unrelated/current-project errors and 2 warnings; (6) DB staff/order/KDS flows and browser/mobile tests NOT RUN.
+
+## TDKON QR title photo management (phase 1)
+
+- Added ADM QR → 타이틀설정 with multi-file selection, one-by-one mobile-ratio crop/zoom, preview, re-edit, ordering, activation, and deletion. Source copies stay outside `public`; deletion removes source and cropped WebP files. Existing `system_settings` stores compact ordering/active/crop metadata; no schema or migration change.
+- `/qr` and `/qr/wait` render the same active title photo list before the existing QR header. One photo renders statically; multiple photos loop every 3 seconds with a right-to-left transition, touch swipe, dots, offscreen pause, and reduced-motion handling. Existing menu and wait/cart client flows remain in place.
+- Persistent image path: `.pos-runtime/qr-title` for local/service startup and `/app/storage/qr-title` for Docker with a mounted `./storage/qr-title` volume. Runtime override is `QR_TITLE_IMAGE_STORAGE_PATH`.
+- Verification: title model tests 3/3 PASS (`node --experimental-strip-types --test`); TypeScript PASS; scoped ESLint PASS; production build PASS. Build retains two existing dynamic filesystem tracing warnings in `menu-image-storage.ts`. PowerShell deploy-script syntax parse PASS. Docker Compose validation was unavailable because Docker CLI is not installed. The first sandboxed DB preflight was blocked with `EACCES`; the guarded read-only retry confirmed `TDK_POS_TEST`. No DB/schema change was needed or applied. No browser/mobile interaction test was available; upload and photo CRUD round-trip remain unverified against a live session.
+- No deployment, production DB/NAS access, or runtime photo upload was performed.
+
+## TDKON QR store name and business-hours card (phase 2)
+
+- Reused the existing store_name system setting as the single store-name source. QR business hours use per-weekday and per-date keys in the existing system_settings.setting_value field; values are compact JSON within its 255-character limit. No table/column migration.
+- Added the ADM title settings extension for store name, Sunday–Saturday hours, overnight spans, break periods, regular holidays, and up to 100 date exceptions. Admin API checks the existing ADM/menu-management session and validates all settings before a transaction. Public title data includes only store name, weekly/special hours, active title photos, and server time.
+- Added the shared floating store card and hours sheet to /qr and /qr/wait. The clock uses shared Asia/Seoul business-status logic on server and client, refreshes every 30 seconds, handles overnight carry-over and date exceptions, and leaves document scroll position intact when the sheet opens/closes.
+- Verification: business-hours/title-model tests 7/7 PASS; TypeScript PASS; scoped ESLint PASS; production build PASS. Two existing menu-image-storage.ts tracing warnings remain. Read-only database preflight confirmed TDK_POS_TEST; no SQL/schema changes or data writes were made. No real ADM session/browser/mobile interaction test; Docker Compose CLI unavailable. No production DB/NAS access or deployment.
+
+## TDKON QR notice management and rich notice sheet
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Inspect QR scroll/title composition, existing admin authorization, image storage, schema, and migration conventions | QR client/title, ADM navigation, title API/storage, Drizzle schema | PASS |
+| 2 | Add isolated notice schema and TDK_POS_TEST-pinned additive migration | `qr_notices`, migration only; no application to production DB | IN_PROGRESS |
+| 3 | Implement validated notice models, admin CRUD/order/visibility APIs, and public read projection | notice helpers and API routes | PASS (code/type checks; DB roundtrip pending) |
+| 4 | Implement authenticated image upload, safe public image serving, and unreferenced asset cleanup | notice image storage and routes | PASS (code/build checks; upload roundtrip pending) |
+| 5 | Add ADM QR → 안내문 block editor and list management | admin page/client/sidebar | PASS (build; admin session/browser check pending) |
+| 6 | Render active titles in shared QR title stack and show ordered text/image content in a bottom sheet | `/qr`, `/qr/wait`, `QrStoreTitle` | PASS (build; device/browser check pending) |
+| 7 | Run notice model/storage tests, TypeScript, scoped ESLint, and production build; record database/browser limits | new feature files and app build | IN_PROGRESS |
+
+Constraints: preserve existing QR scroll/category/cart behavior and all title/business-hours settings; no production DB or NAS deployment. Migration is prepared for `TDK_POS_TEST` and must not execute against an unverified DB connection.
+
+### 단계 검증 기록
+
+- Step 1 PASS: `QrMenuClient` owns document scrolling and the category sticky header; `QrStoreTitle` already provides the hours bottom-sheet overlay/scroll restoration pattern and a placeholder notice prop. ADM QR group permissions reuse `canManageMenu`; title photos use generated IDs, server-side Sharp processing, and a mounted runtime storage directory. `system_settings.setting_value` is limited to 255 characters, so notice content uses a separate `LONGTEXT` table rather than reusing settings.
+- Step 2 IN_PROGRESS: added Drizzle schema and `db-migrations/20261113_qr_notices_test.sql` pinned with `USE TDK_POS_TEST`. `.env.local` DB name check returned `TDK_POS_TEST`. Applying the migration did not connect: sandbox attempt returned `EACCES 192.168.0.83:3306`; authorized guarded retry failed with `Too many connections` before executing DDL. No table changes are confirmed and no production DB was contacted.
+- Steps 3–6 code implemented. Notice content is plain structured blocks rather than stored HTML, with allowlisted text styles and UUID image refs. Only active notices are returned publicly; customer pages render title rows and open a shared-style bottom sheet for detail. DB/API roundtrip and real browser/mobile interaction were not available.
+- Step 7: notice model tests 4/4 PASS; TypeScript PASS; scoped ESLint PASS; production build PASS. Build has two existing tracing warnings in `src/lib/menu-image-storage.ts`. The new notice feature compiled without warnings. DB-backed CRUD, actual file upload/deletion, and browser/device checks remain unverified because the test DB connection could not be acquired and no browser session was available.
+
+## TDKON database connection exhaustion audit (2026-11-13)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Audit pool creation/reuse, connection release, transactions, app processes, and recurring reads | `src/db`, all MySQL access, POS/ADM/KDS/HOS/QR polling | PASS |
+| 2 | Fix verified HMR pool duplication and overlapping poll requests without changing their intervals | pool registry and existing polling clients | PASS |
+| 3 | Classify trust-service DB failures in server logs without exposing secrets | program trust routes | PASS |
+| 4 | Verify against TDK_POS_TEST only, run concurrent/repeated auth checks, lint/type/build | guarded dev DB preflight and local checks | PASS |
+
+Constraints: never connect to `TDK_POS`, change environment files, alter schema or credentials, or deploy/restart the operating NAS. If the test DB cannot be reached, record that limitation and do not retry against any other database.
+
+- Audit: only `src/db/index.ts` creates the runtime mysql2 pool. It is shared by the Next.js POS/ADM/KDS/HOS and `/qr` routes; `tdk-device-agent` contains no MariaDB client. Request queries use `pool.query/execute`, which return connections automatically. Every `pool.getConnection()` use in application source has a `finally` release; transactional paths rollback in `catch` and release in `finally`.
+- Fixes: cache the one pool on `globalThis` so Next development module reloads reuse it. Keep the existing per-process `connectionLimit: 10` and queue behavior because there is no evidence supporting arbitrary limit changes. Add in-flight guards to KDS, POS kitchen alert, HOS detail, and POS QR wait polling; intervals are unchanged. Trust-status failures now log a safe category and allowlisted driver code only.
+- Verification: guarded preflight confirmed `TDK_POS_TEST`. Simulated two module evaluations and 30 concurrent reads: same pool object; peak 10 connections; after work, 10/10 connections free, queue 0, active borrowed 0. POS trust status returned HTTP 200 for 30/30 read-only requests (10 concurrent x 3 rounds). Failure classification tests 4/4 PASS; TypeScript, scoped ESLint, and production build PASS. Build reports two existing dynamic filesystem tracing warnings in `menu-image-storage.ts`.
+- Production NAS logs and MariaDB global/process connection statistics were not accessible. The outage's originating error is therefore not confirmed; HMR pool duplication is a verified development risk, while the previous server-side `Too many connections` event and current client polling show connection exhaustion is plausible but not proven for production.
+
+## TDKON QR nearest business transition message (2026-11-13)
+
+- Updated the shared QR business-status calculation to announce the nearest actual transition using Seoul time and Korean 12-hour labels. Early break, early close, special hours, holidays, closures, overnight shifts, and all-day schedules flow through the existing schedule resolver.
+- The shared QR title component continues to refresh every 30 seconds and uses the same status result in its title card and business-hours sheet summary. No settings UI, stored hours, database schema, menu/order behavior, production DB, or NAS was changed.
+- Verification: business-hours and display-model tests 19/19 PASS; scoped ESLint PASS; TypeScript PASS; production build PASS. Build reports the two existing dynamic filesystem tracing warnings in `menu-image-storage.ts`.
+- Browser/mobile rendering and live customer-order interaction were not exercised in this local verification.
+
+## TDKPOS inventory adjustment history shows today only (2026-11-13)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Confirm the shared adjustment modal/API and timestamp storage semantics | RiceStockModal, `/api/pos/rice-stock`, inventory transaction schema | PASS |
+| 2 | Filter adjustment history by Seoul day only and refresh when the Seoul date rolls over | history GET query and modal history display | PASS |
+| 3 | Verify date-boundary tests, TypeScript, and scoped ESLint | date helper, API route, modal | PASS |
+
+Constraints: preserve current quantity and transaction write/calculation behavior; no schema, production DB, or NAS changes.
+
+- Implementation: query bounds are derived from the current Asia/Seoul calendar date and converted from `+09:00` to the MySQL session time zone; returned row times are converted back to Seoul. Only adjustment history uses these bounds. A midnight timeout fetches the history-only endpoint and leaves current quantity untouched.
+- Verification: Seoul midnight/month/year boundary tests 2/2 PASS; scoped ESLint PASS; TypeScript PASS. A guarded read-only check confirmed `.env.local` targets `TDK_POS_TEST`, but the connection was blocked with `EACCES`; MariaDB `CONVERT_TZ` query execution remains unverified. No database data was read or changed.
