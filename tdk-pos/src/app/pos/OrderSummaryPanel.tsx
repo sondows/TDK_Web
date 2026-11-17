@@ -17,6 +17,7 @@ import OrderTableInfoHeader from "./OrderTableInfoHeader";
 import OrderSummaryRows from "./OrderSummaryRows";
 import OrderSummaryColumnHeader from "./OrderSummaryColumnHeader";
 import PosKitchenAlertPanel from "./PosKitchenAlertPanel";
+import MeasuredMenuLabel from "./MeasuredMenuLabel";
 import { ORDER_INFO_STYLES } from "./order-info-styles";
 type SessionDiscount = {
   sessionId: number;
@@ -581,7 +582,10 @@ export default function OrderSummaryPanel({
           selectedForCancellation = selectable && d.checked,
           hasCancellationPlanned = selectedForCancellation && !editableComponent && d.keep < i.effectiveQty,
           fullyCancelled = i.status === "CANCELLED" || o.status === "CANCELLED" || (i.effectiveQty === 0 && i.cancelledQty > 0),
-          effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty;
+          effectiveAmount = i.itemType === "SERVICE" ? 0 : Number(i.unitPrice) * i.effectiveQty,
+          optionLabel = i.options.slice().sort((left, right) =>
+            (left.modifierOptionId ?? 0) - (right.modifierOptionId ?? 0) || left.optionName.localeCompare(right.optionName, "ko"),
+          ).map(option => `${option.optionName}${option.independentQty && option.qty > 1 ? ` ×${option.qty}` : ""}`).join(", ");
         return (
           <div
             className={`pos-display-copy mt-2 rounded-lg ${i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "ml-3" : ""} ${selectable ? "cursor-pointer px-2 py-1 transition hover:bg-orange-50" : ""} ${selectedForCancellation ? "bg-orange-50 ring-1 ring-orange-200" : ""}`}
@@ -593,12 +597,13 @@ export default function OrderSummaryPanel({
             <div className={`grid items-center text-sm ${cancellationLayout
               ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5"
               : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"}`}>
-              <span
-                className={`truncate font-medium ${hasCancellationPlanned ? "text-orange-800 line-through" : selectedForCancellation ? "text-orange-800" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
-              >
-                {i.itemType === "COMPONENT" && i.parentOrderItemId !== null && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
-                {i.itemName}{i.itemType === "SERVICE" && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}
-              </span>
+              <MeasuredMenuLabel
+                className={`block min-w-0 overflow-hidden whitespace-nowrap font-medium ${hasCancellationPlanned ? "text-orange-800 line-through" : selectedForCancellation ? "text-orange-800" : fullyCancelled ? "text-slate-500 line-through" : ""}`}
+                name={i.itemName}
+                optionLabel={optionLabel || undefined}
+                prefix={i.itemType === "COMPONENT" && i.parentOrderItemId !== null ? "└" : undefined}
+                tail={i.itemType === "SERVICE" ? "무료제공" : undefined}
+              />
               <span
                 className={`text-right ${fullyCancelled ? "text-slate-400" : "text-slate-500"}`}
               >
@@ -668,7 +673,12 @@ export default function OrderSummaryPanel({
   const pendingRows = cart.map((i) => (
     <div className="pos-display-copy space-y-1" key={pendingCartItemKey(i)}>
       <div className="grid grid-cols-[1fr_52px_76px_58px] items-center gap-1 text-sm">
-        <span className="truncate font-medium">{i.menuName}{i.isComplimentary && <small className="ml-1 font-semibold text-blue-700">무료제공</small>}</span>
+        <MeasuredMenuLabel
+          className="block min-w-0 overflow-hidden whitespace-nowrap font-medium"
+          name={i.menuName}
+          optionLabel={i.options?.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`).join(", ") || undefined}
+          tail={i.isComplimentary ? "무료제공" : undefined}
+        />
         <span className="text-right text-slate-500">{new Intl.NumberFormat("ko-KR").format(i.isComplimentary ? 0 : i.unitPrice)}</span>
         <span className="grid grid-cols-3 text-center"><button disabled={submitting} onClick={() => adjustCartItem(i, -1)} type="button">−</button><b>{i.qty}</b><button disabled={submitting} onClick={() => adjustCartItem(i, 1)} type="button">+</button></span>
         <b className="text-right">{money(i.isComplimentary ? 0 : i.unitPrice * i.qty)}</b>
@@ -755,15 +765,12 @@ export default function OrderSummaryPanel({
                   className={`grid ${viewTab === "detail" && c.mode ? "grid-cols-[minmax(0,1fr)_minmax(44px,60px)_minmax(120px,124px)_minmax(52px,68px)] gap-1.5" : "grid-cols-[minmax(0,1fr)_52px_52px_68px] gap-1"} items-center text-sm ${index > 0 ? "pl-3 text-slate-600" : ""}`}
                   key={row.rowKey}
                 >
-                  <span className="min-w-0 truncate font-medium">
-                    {index > 0 && <span aria-hidden="true" className="mr-1 text-slate-400">└</span>}
-                    {row.name}
-                    {row.optionLabel && (
-                      <small className="ml-1 text-[10px] font-normal text-slate-500">
-                        ({row.optionLabel})
-                      </small>
-                    )}
-                  </span>
+                  <MeasuredMenuLabel
+                    className="block min-w-0 overflow-hidden whitespace-nowrap font-medium"
+                    name={row.name}
+                    optionLabel={row.optionLabel}
+                    prefix={index > 0 ? "└" : undefined}
+                  />
                   <span className="text-right text-slate-500">
                     {new Intl.NumberFormat("ko-KR").format(row.itemType === "SERVICE" ? 0 : row.unitPrice)}
                   </span>
