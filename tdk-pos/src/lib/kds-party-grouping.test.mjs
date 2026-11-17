@@ -31,6 +31,21 @@ test("same-order compatible stews share one row without crossing order boundarie
   assert.equal(groupKdsPotDisplayRows([pot(1, "흑돼지김치찌개", "WAITING", "TAKEOUT_PHONE"), pot(2, "불고기김치찌개", "WAITING", "TAKEOUT_PHONE")]).length, 2);
 });
 
+test("simple-cook display rows stay independent from regular pots and add-on grouping", () => {
+  const pot = (taskId, simpleCook = false) => ({
+    ...task(taskId, 11, null), orderId: 101, kind: "POT", compatibilityKey: "STEW", simpleCook,
+    startedAtMs: null, completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ name: `Stew${taskId}`, kind: "POT", kdsKind: "POT", kdsGroupKey: "STEW", qty: 1, options: [] }],
+  });
+  const simpleAddon = {
+    ...task(3, 11, null), orderId: 101, kind: "SOLO", compatibilityKey: "MENU:addon", simpleCook: true,
+    startedAtMs: null, completionRequestScope: null, completionRequestId: null, completionRequestedAtMs: null,
+    items: [{ name: "QuickAddon", kind: "SOLO", kdsKind: "ADDON", kdsGroupKey: "STEW", qty: 1, options: [] }],
+  };
+  const rows = groupKdsPotDisplayRows([pot(1), pot(2, true), simpleAddon]);
+  assert.deepEqual(rows.map(row => row.map(member => member.taskId)), [[1], [2], [3]]);
+});
+
 test("same-table pots only share a status control when their cooking options match", () => {
   const pot = (taskId, cookSignature, name) => ({
     ...task(taskId, 11, null), orderId: 101, kind: "POT", compatibilityKey: "STEW", cookSignature,

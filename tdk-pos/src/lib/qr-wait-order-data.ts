@@ -1,11 +1,12 @@
 import "server-only";
 
-import { groupQrModifiers, normalizeQrCart, qrLineUnitPrice, type QrCartLine, type QrCatalog } from "@/lib/qr-menu-cart";
+import { groupQrModifiers, normalizeQrCart, qrLineTotal, qrLineUnitPrice, type QrCartLine, type QrCatalog } from "@/lib/qr-menu-cart";
 
 /** Keep per-order capability cookies limited to the QR wait-order API namespace. */
 export const QR_WAIT_ORDER_COOKIE_PATH = "/api/qr/wait-orders";
 
-export type ValidatedQrWaitLine = { line: QrCartLine; itemName: string; unitPrice: number; lineTotal: number };
+export type ValidatedQrWaitLine = { line: QrCartLine; itemName: string; unitPrice: number; lineTotal: number;
+  optionSnapshots: Array<{ modifierOptionId: number; qty: number; optionName: string; unitPrice: string }> };
 
 export function configuredQrVisitTtlDays() {
   const value = Number(process.env.QR_VISIT_TTL_DAYS ?? 180);
@@ -37,7 +38,14 @@ export function validateQrWaitCart(value: unknown, catalog: QrCatalog): Validate
     if (!menu) return null;
     const unitPrice = qrLineUnitPrice(menu, line.options);
     if (!Number.isSafeInteger(Math.round(unitPrice * 100)) || unitPrice < 0) return null;
-    output.push({ line, itemName: menu.name, unitPrice, lineTotal: unitPrice * line.qty });
+    const menuOptions = menu.groups.flatMap(group => group.options);
+    const optionSnapshots = line.options.map(selected => {
+      const option = menuOptions.find(candidate => candidate.modifierOptionId === selected.modifierOptionId);
+      return option ? { ...selected, optionName: option.optionName, unitPrice: option.priceDelta } : null;
+    });
+    if (optionSnapshots.some(option => option === null)) return null;
+    output.push({ line, itemName: menu.name, unitPrice, lineTotal: qrLineTotal(menu, line.options, line.qty),
+      optionSnapshots: optionSnapshots as ValidatedQrWaitLine["optionSnapshots"] });
   }
   return output;
 }

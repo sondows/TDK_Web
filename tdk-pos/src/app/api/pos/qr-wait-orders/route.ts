@@ -1,7 +1,9 @@
-import { asc, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/db";
-import { modifierOptions, qrWaitOrderItems, qrWaitOrders } from "@/db/schema";
+import { menus, modifierGroups, modifierOptions, qrWaitOrderItems, qrWaitOrders } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
 
 export const dynamic = "force-dynamic";
 
@@ -24,14 +26,19 @@ export async function GET() {
       try { return (JSON.parse(item.optionIdsJson) as Array<{ modifierOptionId?: unknown }>).map(option => Number(option.modifierOptionId)).filter(id => Number.isSafeInteger(id) && id > 0); }
       catch { return []; }
     }))];
-    const options = optionIds.length ? await db.select({ modifierOptionId: modifierOptions.modifierOptionId, name: modifierOptions.posName })
-      .from(modifierOptions).where(inArray(modifierOptions.modifierOptionId, optionIds)) : [];
-    const optionNameById = new Map(options.map(option => [option.modifierOptionId, option.name]));
+    const addonMenu = alias(menus, "qr_wait_list_addon_menu");
+    const options = optionIds.length ? await db.select({ modifierOptionId: modifierOptions.modifierOptionId,
+      name: modifierOptions.posName, groupName: modifierGroups.posName, addonMenuName: addonMenu.posName })
+      .from(modifierOptions).innerJoin(modifierGroups, eq(modifierGroups.modifierGroupId, modifierOptions.modifierGroupId))
+      .leftJoin(addonMenu, eq(addonMenu.menuId, modifierOptions.linkedMenuId))
+      .where(inArray(modifierOptions.modifierOptionId, optionIds)) : [];
+    const optionNameById = new Map(options.map(option => [option.modifierOptionId,
+      isQrMenuAddonGroupName(option.groupName) ? option.addonMenuName ?? "현재 추가 메뉴를 확인해 주세요" : option.name]));
     const byOrder = new Map<number, typeof items>();
     for (const item of items) byOrder.set(item.waitOrderId, [...(byOrder.get(item.waitOrderId) ?? []), item]);
     return Response.json({ success: true, orders: rows.map(row => ({ ...row, items: (byOrder.get(row.waitOrderId) ?? []).map(item => ({
       menuId: item.menuId, itemName: item.itemName, quantity: item.quantity,
-      options: (JSON.parse(item.optionIdsJson) as Array<{ modifierOptionId: number; qty: number }>).map(option => ({ ...option, optionName: optionNameById.get(option.modifierOptionId) ?? "현재 옵션을 확인해 주세요" })), estimatedUnitPrice: item.estimatedUnitPrice,
+      options: (JSON.parse(item.optionIdsJson) as Array<{ modifierOptionId: number; qty: number; optionName?: string }>).map(option => ({ ...option, optionName: option.optionName ?? optionNameById.get(option.modifierOptionId) ?? "현재 옵션을 확인해 주세요" })), estimatedUnitPrice: item.estimatedUnitPrice,
       estimatedLineTotal: item.estimatedLineTotal,
     })) })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

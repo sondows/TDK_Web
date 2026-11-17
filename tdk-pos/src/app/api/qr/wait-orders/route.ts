@@ -53,7 +53,7 @@ export async function POST(request: Request) {
       const waitOrderId = Number(inserted.insertId);
       await tx.insert(qrWaitOrderItems).values(lines.map((entry, sortOrder) => ({
         waitOrderId, menuId: entry.line.menuId, itemName: entry.itemName, quantity: entry.line.qty,
-        optionIdsJson: JSON.stringify(entry.line.options), estimatedUnitPrice: entry.unitPrice.toFixed(2),
+        optionIdsJson: JSON.stringify(entry.optionSnapshots), estimatedUnitPrice: entry.unitPrice.toFixed(2),
         estimatedLineTotal: entry.lineTotal.toFixed(2), sortOrder,
       })));
       return { kind: "created" as const, visitor, waitOrderId, publicReference };

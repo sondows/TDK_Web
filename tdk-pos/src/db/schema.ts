@@ -477,12 +477,12 @@ export const menus = mysqlTable("menus", {
   }),
   isActive: tinyint("is_active").notNull().default(1),
   isQrVisible: tinyint("is_qr_visible").notNull().default(1),
-  menuNumber: int("menu_number"),
   sortOrder: int("sort_order").notNull().default(0),
   kdsKind: mysqlEnum("kds_kind", ["NONE", "POT", "ADDON", "SOLO"]).notNull().default("NONE"),
   kdsGroupKey: varchar("kds_group_key", { length: 60 }),
   kdsCompletionTimer: tinyint("kds_completion_timer").notNull().default(0),
   kdsPostCookTimer: tinyint("kds_post_cook_timer").notNull().default(0),
+  kdsSimpleCook: tinyint("kds_simple_cook").notNull().default(0),
   kdsVisible: tinyint("kds_visible").notNull().default(1),
   createdAt: datetime("created_at")
     .notNull()
@@ -550,6 +550,95 @@ export const qrVisitSessions = mysqlTable("qr_visit_sessions", {
   uniqueIndex("uq_qr_visit_token_hash").on(table.tokenHash),
   index("idx_qr_visit_expires").on(table.expiresAt),
 ]);
+
+/** Customer credentials bound to one active table-use session. Sticker IDs are not credentials. */
+export const qrSessions = mysqlTable("qr_sessions", {
+  qrSessionId: bigint("qr_session_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).references(() => tableSessions.sessionId),
+  tableId: bigint("table_id", { mode: "number", unsigned: true }).references(() => diningTables.tableId),
+  tokenHash: varchar("token_hash", { length: 255 }).notNull(),
+  languageCode: varchar("language_code", { length: 10 }).notNull().default("ko"),
+  status: mysqlEnum("status", ["ACTIVE", "CLOSED", "EXPIRED"]).notNull().default("ACTIVE"),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastActiveAt: datetime("last_active_at"),
+  closedAt: datetime("closed_at"),
+}, table => [uniqueIndex("uq_qr_session_token").on(table.tokenHash), index("idx_qr_sessions_session_status").on(table.sessionId, table.status), index("idx_qr_sessions_table_status").on(table.tableId, table.status)]);
+
+/** Printable sticker identifiers are public routing values and never authorize customer access. */
+export const qrCodes = mysqlTable("qr_codes", {
+  qrCodeId: bigint("qr_code_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  identifier: varchar("identifier", { length: 16 }).notNull(),
+  managementNumber: varchar("management_number", { length: 32 }).notNull(),
+  targetType: mysqlEnum("target_type", ["UNASSIGNED", "TABLE_ORDER", "GUEST_MENU", "WAITING"]).notNull().default("UNASSIGNED"),
+  status: mysqlEnum("status", ["UNUSED", "IN_USE", "LOCKED", "RETIRED"]).notNull().default("UNUSED"),
+  createdByStaffId: bigint("created_by_staff_id", { mode: "number", unsigned: true }).notNull().references(() => staff.staffId),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_qr_codes_identifier").on(table.identifier), uniqueIndex("uq_qr_codes_management_number").on(table.managementNumber), index("idx_qr_codes_status_target").on(table.status, table.targetType, table.createdAt)]);
+
+/** Atomically allocates immutable daily management numbers for printed QR stickers. */
+export const qrCodeDailyCounters = mysqlTable("qr_code_daily_counters", {
+  issueDate: date("issue_date", { mode: "string" }).primaryKey(),
+  lastSerial: int("last_serial", { unsigned: true }).notNull().default(0),
+});
+
+/** Current table mapping only; unique table_id guarantees one assigned sticker per table. */
+export const qrTableLinks = mysqlTable("qr_table_links", {
+  qrCodeId: bigint("qr_code_id", { mode: "number", unsigned: true }).primaryKey().references(() => qrCodes.qrCodeId),
+  tableId: bigint("table_id", { mode: "number", unsigned: true }).notNull().references(() => diningTables.tableId),
+  assignedByStaffId: bigint("assigned_by_staff_id", { mode: "number", unsigned: true }).notNull().references(() => staff.staffId),
+  assignedAt: datetime("assigned_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_qr_table_links_table").on(table.tableId)]);
+
+/** Invitation bearer values are one-time, expiring, and stored only as a hash. */
+export const qrSessionInvites = mysqlTable("qr_session_invites", {
+  inviteId: bigint("invite_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).notNull().references(() => tableSessions.sessionId),
+  createdByQrSessionId: bigint("created_by_qr_session_id", { mode: "number", unsigned: true }).notNull().references(() => qrSessions.qrSessionId),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: datetime("expires_at").notNull(),
+  redeemedAt: datetime("redeemed_at"),
+  revokedAt: datetime("revoked_at"),
+}, table => [uniqueIndex("uq_qr_session_invites_token_hash").on(table.tokenHash), index("idx_qr_session_invites_session_expiry").on(table.sessionId, table.expiresAt, table.redeemedAt)]);
+
+export const qrOrders = mysqlTable("qr_orders", {
+  qrOrderId: bigint("qr_order_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  qrSessionId: bigint("qr_session_id", { mode: "number", unsigned: true }).notNull().references(() => qrSessions.qrSessionId),
+  clientRequestId: varchar("client_request_id", { length: 36 }),
+  status: mysqlEnum("status", ["PENDING", "ACCEPTED", "REJECTED", "CANCELLED"]).notNull().default("PENDING"),
+  subtotalAmount: decimal("subtotal_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  discountAmount: decimal("discount_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  acceptedOrderId: bigint("accepted_order_id", { mode: "number", unsigned: true }).references(() => orders.orderId),
+  orderedAt: datetime("ordered_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  acceptedAt: datetime("accepted_at"),
+  acceptedByStaffId: bigint("accepted_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId),
+  rejectedAt: datetime("rejected_at"),
+  note: varchar("note", { length: 500 }),
+}, table => [uniqueIndex("uq_qr_orders_accepted_order").on(table.acceptedOrderId), uniqueIndex("uq_qr_orders_client_request_id").on(table.clientRequestId), index("idx_qr_orders_status_time").on(table.status, table.orderedAt)]);
+
+export const qrOrderItems = mysqlTable("qr_order_items", {
+  qrOrderItemId: bigint("qr_order_item_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  qrOrderId: bigint("qr_order_id", { mode: "number", unsigned: true }).notNull().references(() => qrOrders.qrOrderId),
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId),
+  itemName: varchar("item_name", { length: 200 }).notNull(),
+  qty: int("qty").notNull(),
+  unitPrice: decimal("unit_price", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  note: varchar("note", { length: 500 }),
+}, table => [index("idx_qr_order_items_order").on(table.qrOrderId)]);
+
+export const qrOrderItemOptions = mysqlTable("qr_order_item_options", {
+  qrOrderItemOptionId: bigint("qr_order_item_option_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  qrOrderItemId: bigint("qr_order_item_id", { mode: "number", unsigned: true }).notNull().references(() => qrOrderItems.qrOrderItemId),
+  modifierOptionId: bigint("modifier_option_id", { mode: "number", unsigned: true }).references(() => modifierOptions.modifierOptionId),
+  optionName: varchar("option_name", { length: 200 }).notNull(),
+  qty: int("qty").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 14, scale: 2 }).notNull().default("0.00"),
+  totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0.00"),
+}, table => [index("idx_qr_order_item_options_item").on(table.qrOrderItemId)]);
 
 /** A pending QR order is never an order row and cannot reach KDS until staff confirms it. */
 export const qrWaitOrders = mysqlTable("qr_wait_orders", {
@@ -641,6 +730,7 @@ export const modifierOptions = mysqlTable("modifier_options", {
   modifierOptionId: bigint("modifier_option_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   modifierGroupId: bigint("modifier_group_id", { mode: "number", unsigned: true }).notNull().references(() => modifierGroups.modifierGroupId, { onDelete: "cascade" }),
   posName: varchar("pos_name", { length: 150 }).notNull(),
+  qrDescription: varchar("qr_description", { length: 300 }).notNull().default(""),
   priceDelta: decimal("price_delta", { precision: 14, scale: 2 }).notNull().default("0.00"),
   linkedMenuId: bigint("linked_menu_id", { mode: "number", unsigned: true }).references(() => menus.menuId),
   sortOrder: int("sort_order").notNull().default(0),
@@ -1054,3 +1144,34 @@ export const qrNotices = mysqlTable("qr_notices", {
   updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }),
 }, (table) => [index("idx_qr_notices_active_order").on(table.isActive, table.sortOrder, table.noticeId)]);
+
+/** Per-menu QR copy is stored independently by language. */
+export const qrMenuDescriptions = mysqlTable("qr_menu_descriptions", {
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),
+  localeCode: varchar("locale_code", { length: 5 }).notNull().default("ko"),
+  shortDescription: varchar("short_description", { length: 1000 }).notNull().default(""),
+  detailDescription: text("detail_description").notNull(),
+  originDescription: text("origin_description"),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId, { onDelete: "set null" }),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [primaryKey({ columns: [table.menuId, table.localeCode] })]);
+
+/** Stable origin item rows can hold independent translations per supported locale. */
+export const qrMenuOriginItems = mysqlTable("qr_menu_origin_items", {
+  originId: bigint("origin_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  menuId: bigint("menu_id", { mode: "number", unsigned: true }).notNull().references(() => menus.menuId, { onDelete: "cascade" }),
+  sortOrder: int("sort_order").notNull().default(0),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId, { onDelete: "set null" }),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [index("idx_qr_menu_origin_items_menu_order").on(table.menuId, table.sortOrder, table.originId)]);
+
+export const qrMenuOriginTranslations = mysqlTable("qr_menu_origin_translations", {
+  originId: bigint("origin_id", { mode: "number", unsigned: true }).notNull().references(() => qrMenuOriginItems.originId, { onDelete: "cascade" }),
+  localeCode: varchar("locale_code", { length: 5 }).notNull().default("ko"),
+  ingredientName: varchar("ingredient_name", { length: 120 }).notNull(),
+  originText: varchar("origin_text", { length: 200 }).notNull(),
+  updatedByStaffId: bigint("updated_by_staff_id", { mode: "number", unsigned: true }).references(() => staff.staffId, { onDelete: "set null" }),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [primaryKey({ columns: [table.originId, table.localeCode] })]);

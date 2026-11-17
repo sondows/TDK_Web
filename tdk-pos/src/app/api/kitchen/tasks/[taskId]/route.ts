@@ -1,6 +1,6 @@
 import { getCurrentKdsStaff } from "@/lib/kds-auth";
 import { isKdsPostCookTimerMinutes, kdsStartUndoWindowMs, MAX_KDS_COMPLETION_COUNTDOWN_SECONDS } from "@/lib/kds-model";
-import { cancelKdsTaskCompletion, finalizeKdsTaskCompletion, KdsActionError, requestKdsTaskCompletion, updateKdsTask } from "@/lib/kds-server";
+import { cancelKdsTaskCompletion, finalizeKdsTaskCompletion, KdsActionError, requestKdsTaskCompletion, toggleSimpleCookTaskCompletion, updateKdsTask } from "@/lib/kds-server";
 import { getKdsCompletionCountdownSeconds } from "@/lib/kds-completion-countdown-setting";
 
 export async function POST(request: Request, { params }: { params: Promise<{ taskId: string }> }) {
@@ -9,7 +9,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
   }
   const taskId = Number((await params).taskId);
   const body = await request.json().catch(() => null) as { action?: unknown; expectedStatus?: unknown; expectedChangedAtMs?: unknown; postCookTimerMinutes?: unknown; completionInputButton?: unknown; expectedRequestAtMs?: unknown; immediate?: unknown; queuedUndoDelayMs?: unknown } | null;
-  const actions = ["MENU", "STATUS", "TIME", "ACK", "REQUEST_COMPLETION", "CANCEL_COMPLETION", "FINALIZE_COMPLETION"];
+  const actions = ["MENU", "STATUS", "TIME", "ACK", "REQUEST_COMPLETION", "CANCEL_COMPLETION", "FINALIZE_COMPLETION", "SIMPLE_COMPLETE"];
   if (!Number.isSafeInteger(taskId) || taskId <= 0 || !body || !actions.includes(String(body.action)) ||
     !["WAITING", "COOKING", "DONE"].includes(String(body.expectedStatus)) ||
     !(body.expectedChangedAtMs === null || (typeof body.expectedChangedAtMs === "number" && Number.isSafeInteger(body.expectedChangedAtMs) && body.expectedChangedAtMs >= 0))) {
@@ -29,6 +29,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
       status: body.expectedStatus as "WAITING" | "COOKING" | "DONE",
       changedAtMs: body.expectedChangedAtMs as number | null,
     };
+    if (body.action === "SIMPLE_COMPLETE") {
+      const result = await toggleSimpleCookTaskCompletion(taskId, expected);
+      return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (body.action === "REQUEST_COMPLETION") {
       const countdownSeconds = await getKdsCompletionCountdownSeconds();
       if (body.completionInputButton !== undefined && !["MENU", "STATUS"].includes(String(body.completionInputButton))) {

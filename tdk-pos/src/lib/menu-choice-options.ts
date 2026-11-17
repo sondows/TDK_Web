@@ -2,24 +2,30 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { menuModifierGroups, modifierGroups, modifierOptions } from "@/db/schema";
 
-export type MenuChoiceConfig = { enabled: boolean; title: string; buttons: string[]; defaultIndex: number };
+export type MenuChoiceConfig = { enabled: boolean; title: string; buttons: string[]; qrDescriptions: string[]; defaultIndex: number };
 type MenuTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export function parseMenuChoiceConfig(value: unknown): MenuChoiceConfig | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
   if (typeof input.enabled !== "boolean") return null;
-  if (!input.enabled) return { enabled: false, title: "", buttons: [], defaultIndex: 0 };
+  if (!input.enabled) return { enabled: false, title: "", buttons: [], qrDescriptions: [], defaultIndex: 0 };
   if (typeof input.title !== "string" || !Array.isArray(input.buttons) || !Number.isInteger(input.defaultIndex)) return null;
   const title = input.title.trim();
   const buttons = input.buttons.map(button => typeof button === "string" ? button.trim() : "");
+  const rawQrDescriptions = input.qrDescriptions === undefined ? [] : input.qrDescriptions;
+  if (!Array.isArray(rawQrDescriptions)) return null;
+  const qrDescriptions = buttons.map((_, index) => {
+    const description = rawQrDescriptions[index];
+    return typeof description === "string" ? description.trim() : "";
+  });
   const defaultIndex = Number(input.defaultIndex);
-  if (title.length > 150 || buttons.length < 2 || buttons.length > 4 || buttons.some(button => !button || button.length > 150) || defaultIndex < 0 || defaultIndex >= buttons.length) return null;
-  return { enabled: true, title, buttons, defaultIndex };
+  if (title.length > 150 || buttons.length < 2 || buttons.length > 4 || buttons.some(button => !button || button.length > 150) || qrDescriptions.some(description => description.length > 300) || defaultIndex < 0 || defaultIndex >= buttons.length) return null;
+  return { enabled: true, title, buttons, qrDescriptions, defaultIndex };
 }
 
 export async function loadMenuChoiceConfigs() {
-  const rows = await db.select({ menuId: menuModifierGroups.menuId, groupId: modifierGroups.modifierGroupId, title: modifierGroups.posName, defaultOptionId: menuModifierGroups.posChoiceDefaultOptionId, optionId: modifierOptions.modifierOptionId, optionName: modifierOptions.posName, optionSortOrder: modifierOptions.sortOrder })
+  const rows = await db.select({ menuId: menuModifierGroups.menuId, groupId: modifierGroups.modifierGroupId, title: modifierGroups.posName, defaultOptionId: menuModifierGroups.posChoiceDefaultOptionId, optionId: modifierOptions.modifierOptionId, optionName: modifierOptions.posName, qrDescription: modifierOptions.qrDescription, optionSortOrder: modifierOptions.sortOrder })
     .from(menuModifierGroups)
     .innerJoin(modifierGroups, and(eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId), eq(modifierGroups.isActive, 1)))
     .innerJoin(modifierOptions, and(eq(modifierOptions.modifierGroupId, modifierGroups.modifierGroupId), eq(modifierOptions.isActive, 1)))
@@ -30,8 +36,9 @@ export async function loadMenuChoiceConfigs() {
     const groupRows = rows.filter(item => item.menuId === row.menuId && item.groupId === row.groupId);
     if (result.has(row.menuId) || !groupRows.length) continue;
     const buttons = groupRows.map(item => item.optionName);
+    const qrDescriptions = groupRows.map(item => item.qrDescription ?? "");
     const defaultIndex = Math.max(0, groupRows.findIndex(item => item.optionId === row.defaultOptionId || (row.defaultOptionId === null && item.optionName === "약간매운맛")));
-    result.set(row.menuId, { enabled: true, title: row.title, buttons, defaultIndex });
+    result.set(row.menuId, { enabled: true, title: row.title, buttons, qrDescriptions, defaultIndex });
   }
   return result;
 }
@@ -61,10 +68,10 @@ export async function saveMenuChoiceConfig(tx: MenuTransaction, menuId: number, 
   for (const [index, label] of config.buttons.entries()) {
     const existingOption = oldOptions[index];
     if (existingOption) {
-      await tx.update(modifierOptions).set({ posName: label, sortOrder: (index + 1) * 10 }).where(eq(modifierOptions.modifierOptionId, existingOption.optionId));
+      await tx.update(modifierOptions).set({ posName: label, qrDescription: config.qrDescriptions[index] ?? "", sortOrder: (index + 1) * 10 }).where(eq(modifierOptions.modifierOptionId, existingOption.optionId));
       optionIds.push(existingOption.optionId);
     } else {
-      const inserted = await tx.insert(modifierOptions).values({ modifierGroupId: groupId, posName: label, priceDelta: "0.00", sortOrder: (index + 1) * 10, isActive: 1 });
+      const inserted = await tx.insert(modifierOptions).values({ modifierGroupId: groupId, posName: label, qrDescription: config.qrDescriptions[index] ?? "", priceDelta: "0.00", sortOrder: (index + 1) * 10, isActive: 1 });
       optionIds.push(Number(inserted[0].insertId));
     }
   }

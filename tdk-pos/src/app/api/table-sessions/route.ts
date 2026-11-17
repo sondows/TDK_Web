@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { tableSessionMerges, tableSessions } from "@/db/schema";
+import { diningTables, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
@@ -72,9 +72,15 @@ export async function POST(request: Request) {
 
     const sessionId = await db.transaction(async tx => {
       if (!hosStaff) await ensureDailyOpeningCash(tx);
-      const [existing] = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
-        .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN"))).limit(1);
-      if (existing) throw new Error("이미 사용 중인 테이블입니다.");
+      const [table] = await tx.select({ tableId: diningTables.tableId }).from(diningTables)
+        .where(and(eq(diningTables.tableId, tableId), eq(diningTables.isActive, 1))).for("update").limit(1);
+      if (!table) throw new Error("테이블을 찾을 수 없습니다.");
+      const openRows = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
+        .where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.status, "OPEN")));
+      const activeMerges = openRows.length ? await tx.select({ sourceSessionId: tableSessionMerges.sourceSessionId })
+        .from(tableSessionMerges).where(and(eq(tableSessionMerges.status, "ACTIVE"), inArray(tableSessionMerges.sourceSessionId, openRows.map(row => row.sessionId)))) : [];
+      const mergedSourceIds = new Set(activeMerges.map(merge => Number(merge.sourceSessionId)));
+      if (openRows.some(row => !mergedSourceIds.has(Number(row.sessionId)))) throw new Error("이미 사용 중인 테이블입니다.");
       const [insertResult] = await tx.insert(tableSessions).values({
         tableId, personCount, babyCount, status: "OPEN",
         openedByStaffId: currentStaff?.staffId,

@@ -1,7 +1,7 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { diningTables, orderItemCancellations, orderItems, orders, staff, tableSessionMerges, tableSessions } from "@/db/schema";
+import { diningTables, orderItemCancellations, orderItems, orders, qrSessionInvites, qrSessions, staff, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidEmployeePin } from "@/lib/pin";
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       const merges = partySessionIds.length ? await tx.select({ mergeId: tableSessionMerges.mergeId, sourceSessionId: tableSessionMerges.sourceSessionId })
         .from(tableSessionMerges).where(and(eq(tableSessionMerges.status, "ACTIVE"), inArray(tableSessionMerges.destinationSessionId, partySessionIds))).for("update") : [];
       const sessionIds = [...new Set([...partySessionIds, ...merges.map(merge => merge.sourceSessionId)])];
-      const sessions = await tx.select({ sessionId: tableSessions.sessionId, status: tableSessions.status, tableNo: diningTables.tableNo })
+      const sessions = await tx.select({ sessionId: tableSessions.sessionId, status: tableSessions.status, tableId: tableSessions.tableId, tableNo: diningTables.tableNo })
         .from(tableSessions).innerJoin(diningTables, eq(tableSessions.tableId, diningTables.tableId)).where(inArray(tableSessions.sessionId, sessionIds)).for("update");
       if (sessions.length !== sessionIds.length || sessions.some(session => session.status !== "OPEN")) throw new Error("테이블 상태가 변경되었습니다. 다시 확인해 주세요.");
 
@@ -120,6 +120,10 @@ export async function POST(request: Request) {
       for (const orderId of orderIds) await tx.update(orders).set({ subtotalAmount: "0.00", totalAmount: "0.00", status: "CANCELLED" }).where(eq(orders.orderId, orderId));
       if (merges.length) await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(inArray(tableSessionMerges.mergeId, merges.map(merge => merge.mergeId)));
       await tx.update(tableSessions).set({ status: "CANCELLED", closedAt: new Date(), closedByStaffId: checker.staffId }).where(inArray(tableSessions.sessionId, sessionIds));
+      const tableIds = sessions.flatMap(session => session.tableId === null ? [] : [session.tableId]);
+      const customerSessions = tableIds.length ? or(inArray(qrSessions.sessionId, sessionIds), inArray(qrSessions.tableId, tableIds)) : inArray(qrSessions.sessionId, sessionIds);
+      await tx.update(qrSessions).set({ status: "CLOSED", closedAt: new Date() }).where(and(customerSessions, eq(qrSessions.status, "ACTIVE")));
+      await tx.update(qrSessionInvites).set({ revokedAt: new Date() }).where(and(inArray(qrSessionInvites.sessionId, sessionIds), isNull(qrSessionInvites.revokedAt)));
       await cancelOrphanedUnpaidCheckouts(tx, sessionIds);
 
       return { tableNos: sessions.map(session => session.tableNo).sort((a, b) => a.localeCompare(b, "ko", { numeric: true })) };

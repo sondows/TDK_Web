@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Area } from "react-easy-crop";
 import { QR_TITLE_ASPECT_RATIO, type QrPublicTitleSettings, type QrTitleCrop } from "@/lib/qr-title-model";
+import type { QrPublicNotice } from "@/lib/qr-notice-model";
 import QrStoreTitle from "@/app/qr/QrStoreTitle";
 
 export type QrTitleAdminPhoto = {
@@ -17,7 +18,7 @@ export type QrTitleAdminPhoto = {
   sourceUrl: string;
 };
 
-type Props = { initialPhotos: QrTitleAdminPhoto[]; initialError: string; previewSettings: QrPublicTitleSettings };
+type Props = { initialPhotos: QrTitleAdminPhoto[]; initialError: string; previewNotices: QrPublicNotice[]; previewSettings: QrPublicTitleSettings };
 
 function imageDimensions(file: Blob) {
   return new Promise<{ width: number; height: number }>((resolve, reject) => {
@@ -42,7 +43,7 @@ async function cropToWebp(imageUrl: string, crop: Area) {
   return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("편집한 사진을 만들 수 없습니다.")), "image/webp", 0.94));
 }
 
-export default function QrTitleManagementClient({ initialPhotos, initialError, previewSettings }: Props) {
+export default function QrTitleManagementClient({ initialPhotos, initialError, previewNotices, previewSettings }: Props) {
   const [photos, setPhotos] = useState(initialPhotos);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [error, setError] = useState(initialError);
@@ -203,7 +204,7 @@ export default function QrTitleManagementClient({ initialPhotos, initialError, p
     <section className="mx-auto w-full max-w-[390px] overflow-hidden rounded-[2rem] border-[8px] border-slate-800 bg-slate-50 shadow-xl">
       <div className="bg-slate-900 px-4 py-2 text-center text-xs text-white">모바일 타이틀 미리보기 · 기기 390 × 800</div>
       <div className="h-[800px] overflow-y-auto bg-white">
-        <QrStoreTitle photoHeightPx={374 * 0.75} photoViewportHeightPx={374 * 0.375} settings={virtualSettings} />
+        <QrStoreTitle photoHeightPx={374 * 0.75} photoViewportHeightPx={374 * 0.375} notices={previewNotices} settings={virtualSettings} />
         <div className="border-b border-slate-200 px-4 pb-3 pt-5">
           <div className="flex items-center justify-between"><span className="font-bold text-slate-900">QR 메뉴</span><span className="text-xs text-slate-500">한국어⌄</span></div>
           <div className="mt-4 flex gap-5 overflow-hidden whitespace-nowrap border-b border-slate-200 text-sm"><span className="border-b-2 border-blue-700 pb-2 font-bold text-blue-700">전체</span><span className="pb-2 text-slate-600">추천 메뉴</span><span className="pb-2 text-slate-600">식사류</span></div>

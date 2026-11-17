@@ -12,33 +12,25 @@ import type { KdsMenuConfig } from "@/lib/kds-menu-config";
 type Category = { categoryId: number; name: string; sortOrder: number };
 type ComponentMenu = { menuId: number; name: string; price: string };
 type MenuComponent = { menuComponentId: number; componentMenuId: number; itemName: string; price: string; qtyPerUnit: number; printOnKitchen: number; printOnReceipt: number; sortOrder: number };
-type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; isActive: number; menuNumber: number | null; sortOrder: number; imageUrl: string | null; components: MenuComponent[]; optionConfig: MenuChoiceConfig; kdsKind: KdsMenuConfig["kdsKind"]; kdsGroupKey: string | null; kdsCompletionTimer: number; kdsPostCookTimer: number; kdsVisible: number };
+type Menu = { menuId: number; menuCode: string; name: string; price: string; categoryId: number | null; categoryName: string; categorySortOrder: number; isActive: number; isQrVisible?: number; sortOrder: number; imageUrl: string | null; components: MenuComponent[]; optionConfig: MenuChoiceConfig; kdsKind: KdsMenuConfig["kdsKind"]; kdsGroupKey: string | null; kdsCompletionTimer: number; kdsPostCookTimer: number; kdsSimpleCook: number; kdsVisible: number };
 type MenuComponentInput = { componentMenuId: number; qtyPerUnit: number; printOnKitchen: boolean; printOnReceipt: boolean };
-type MenuPayload = { name: string; price: string; categoryId: number; menuNumber: number | null; isActive: boolean; components: MenuComponentInput[]; optionConfig: MenuChoiceConfig } & KdsMenuConfig;
-type DuplicateMenuNumberCheck = (categoryId: number, menuNumber: number | null, exceptMenuId?: number) => string | null;
+type MenuPayload = { name: string; price: string; categoryId: number; isActive: boolean; isQrVisible?: boolean; components: MenuComponentInput[]; optionConfig: MenuChoiceConfig } & KdsMenuConfig;
 
 const kdsKindLabel = (kind: KdsMenuConfig["kdsKind"]) => ({ NONE: "KDS 제외", POT: "찌개/냄비 조리", ADDON: "찌개 첨가", SOLO: "독립 조리" })[kind];
 const parsePrice = (value: string) => Number(value.replaceAll(",", "").trim());
 const formatPriceInput = (value: string | number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(Number(value));
 const sortMenus = (items: Menu[]) => [...items].sort((a, b) => a.categorySortOrder - b.categorySortOrder || a.sortOrder - b.sortOrder || a.menuId - b.menuId);
 
-export default function MenuManagementClient({ categories, initialMenus, componentMenus }: { categories: Category[]; initialMenus: Menu[]; componentMenus: ComponentMenu[] }) {
+export default function MenuManagementClient({ categories, initialMenus, componentMenus, showQrVisibility = false }: { categories: Category[]; initialMenus: Menu[]; componentMenus: ComponentMenu[]; showQrVisibility?: boolean }) {
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
   const [menuRows, setMenuRows] = useState(() => sortMenus(initialMenus));
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
   const [message, setMessage] = useState("");
   const [movingMenuId, setMovingMenuId] = useState<number | null>(null);
+  const [updatingQrMenuId, setUpdatingQrMenuId] = useState<number | null>(null);
 
   const visibleGroups = useMemo(() => categories.filter(category => activeCategoryId === null || category.categoryId === activeCategoryId).map(category => ({ category, menus: menuRows.filter(menu => menu.categoryId === category.categoryId) })), [activeCategoryId, categories, menuRows]);
-  const checkDuplicateMenuNumber: DuplicateMenuNumberCheck = (categoryId, menuNumber, exceptMenuId) => {
-    if (menuNumber === null) return null;
-    const duplicate = menuRows.some(menu => menu.categoryId === categoryId && menu.menuNumber === menuNumber && menu.menuId !== exceptMenuId);
-    if (!duplicate) return null;
-    const categoryName = categories.find(category => category.categoryId === categoryId)?.name ?? "선택한 카테고리";
-    return `${menuCategoryDisplayName(categoryName)} 분류에서 이미 사용 중인 메뉴번호입니다.`;
-  };
-
   const moveMenu = async (menu: Menu, direction: "up" | "down") => {
     setMovingMenuId(menu.menuId); setMessage("");
     try {
@@ -61,6 +53,18 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     if (!response.ok || !result.success || !result.menu) throw new Error(result.message ?? "메뉴를 수정할 수 없습니다.");
     setMenuRows(current => sortMenus(current.map(item => item.menuId === menuId ? result.menu! : item))); setActiveCategoryId(categoryId); setEditingMenu(null); setMessage("메뉴를 수정했습니다.");
   };
+  const toggleQrVisibility = async (menu: Menu) => {
+    if (updatingQrMenuId !== null) return;
+    const isQrVisible = menu.isQrVisible !== 1;
+    setUpdatingQrMenuId(menu.menuId); setMessage("");
+    try {
+      const response = await fetch(`/api/admin/menus/${menu.menuId}/qr-visibility`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isQrVisible }) });
+      const result = await response.json() as { success?: boolean; message?: string; isQrVisible?: boolean };
+      if (!response.ok || !result.success || typeof result.isQrVisible !== "boolean") throw new Error(result.message ?? "QR 표시 설정을 저장하지 못했습니다.");
+      setMenuRows(current => current.map(item => item.menuId === menu.menuId ? { ...item, isQrVisible: result.isQrVisible ? 1 : 0 } : item));
+    } catch (error) { setMessage(error instanceof Error ? error.message : "QR 표시 설정을 저장하지 못했습니다."); }
+    finally { setUpdatingQrMenuId(null); }
+  };
 
   return <section className="mx-auto mt-6 max-w-6xl">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
@@ -68,72 +72,73 @@ export default function MenuManagementClient({ categories, initialMenus, compone
       <div className="flex gap-2"><button className={activeClass + " disabled:bg-slate-300"} disabled={!categories.length} onClick={() => setIsCreateOpen(true)} type="button">+ 새 메뉴 추가</button></div>
     </div>
     {message && <p className="mt-3 text-sm font-semibold text-blue-700">{message}</p>}
-    <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} />)}</div>
-    {isCreateOpen && <CreateMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} />}
-    {editingMenu && <EditMenuDialog categories={categories} checkDuplicateMenuNumber={checkDuplicateMenuNumber} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} sourceMenus={menuRows.filter(row => row.menuId !== editingMenu.menuId)} update={updateMenu} />}
+    <div className="mt-4 space-y-4">{visibleGroups.map(group => <MenuGroup category={group.category} editMenu={setEditingMenu} key={group.category.categoryId} menus={group.menus} moveMenu={moveMenu} movingMenuId={movingMenuId} showQrVisibility={showQrVisibility} toggleQrVisibility={toggleQrVisibility} updatingQrMenuId={updatingQrMenuId} />)}</div>
+    {isCreateOpen && <CreateMenuDialog categories={categories} componentMenus={componentMenus} close={() => setIsCreateOpen(false)} create={addMenu} defaultCategoryId={activeCategoryId ?? categories[0]?.categoryId ?? 0} showQrVisibility={showQrVisibility} />}
+    {editingMenu && <EditMenuDialog categories={categories} componentMenus={componentMenus.filter(component => component.menuId !== editingMenu.menuId)} close={() => setEditingMenu(null)} menu={editingMenu} sourceMenus={menuRows.filter(row => row.menuId !== editingMenu.menuId)} update={updateMenu} showQrVisibility={showQrVisibility} />}
   </section>;
 }
 
 const activeClass = "min-h-11 rounded-xl bg-blue-600 px-4 font-bold text-white";
 const idleClass = "min-h-11 rounded-xl border border-slate-300 bg-white px-4 font-bold text-slate-700";
 
-function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu }: { category: Category; menus: Menu[]; movingMenuId: number | null; moveMenu: (menu: Menu, direction: "up" | "down") => Promise<void>; editMenu: (menu: Menu) => void }) {
+function MenuGroup({ category, menus, movingMenuId, moveMenu, editMenu, showQrVisibility, toggleQrVisibility, updatingQrMenuId }: { category: Category; menus: Menu[]; movingMenuId: number | null; moveMenu: (menu: Menu, direction: "up" | "down") => Promise<void>; editMenu: (menu: Menu) => void; showQrVisibility: boolean; toggleQrVisibility: (menu: Menu) => Promise<void>; updatingQrMenuId: number | null }) {
+  const columns = showQrVisibility ? "grid-cols-[56px_minmax(0,1fr)_110px_90px_76px_80px_108px]" : "grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px]";
   return <section className="overflow-x-auto rounded-2xl bg-white shadow-sm"><h2 className="border-b border-slate-200 px-5 py-4 text-lg font-extrabold">{menuCategoryDisplayName(category.name)}</h2><div className="min-w-[720px]">
-    <div className="grid grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-bold text-slate-500"><span>순서</span><span>메뉴명</span><span className="text-right">가격</span><span>카테고리</span><span>사용 상태</span><span className="text-center">순서 변경</span></div>
-    {menus.length ? menus.map((menu, index) => <div className="grid min-h-14 cursor-pointer grid-cols-[56px_minmax(0,1fr)_110px_90px_88px_108px] items-center gap-3 border-b border-slate-100 px-5 py-2 last:border-b-0 hover:bg-slate-50" key={menu.menuId} onClick={() => editMenu(menu)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); editMenu(menu); } }} role="button" tabIndex={0}>
-      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{menuCategoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span><span className="flex justify-center gap-2"><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></span>
+    <div className={`grid ${columns} gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-bold text-slate-500`}><span>순서</span><span>메뉴명</span><span className="text-right">가격</span><span>카테고리</span><span>사용 상태</span>{showQrVisibility && <span className="text-center">QR 표시</span>}<span className="text-center">순서 변경</span></div>
+    {menus.length ? menus.map((menu, index) => <div className={`grid min-h-14 cursor-pointer ${columns} items-center gap-3 border-b border-slate-100 px-5 py-2 last:border-b-0 hover:bg-slate-50`} key={menu.menuId} onClick={() => editMenu(menu)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); editMenu(menu); } }} role="button" tabIndex={0}>
+      <span className="font-bold text-slate-500">{index + 1}</span><span className="truncate font-bold">{menu.name}</span><span className="text-right font-semibold text-blue-700">{formatMoney(menu.price)}</span><span className="truncate text-slate-600">{menuCategoryDisplayName(menu.categoryName)}</span><span className={menu.isActive ? "font-semibold text-emerald-700" : "font-semibold text-slate-400"}>{menu.isActive ? "사용 중" : "사용 안 함"}</span>{showQrVisibility && <button aria-label={`${menu.name} QR ${menu.isQrVisible === 1 ? "표시" : "숨김"}`} aria-pressed={menu.isQrVisible === 1} className={`min-h-9 rounded-lg px-2 text-xs font-bold disabled:opacity-50 ${menu.isQrVisible === 1 ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`} disabled={updatingQrMenuId !== null} onClick={event => { event.stopPropagation(); void toggleQrVisibility(menu); }} type="button">{updatingQrMenuId === menu.menuId ? "저장 중" : menu.isQrVisible === 1 ? "표시" : "숨김"}</button>}<span className="flex justify-center gap-2"><button aria-label={menu.name + " 위로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === 0 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "up"); }} type="button">↑</button><button aria-label={menu.name + " 아래로 이동"} className="min-h-10 min-w-10 rounded-lg border border-slate-300 bg-white font-bold disabled:cursor-not-allowed disabled:text-slate-300" disabled={index === menus.length - 1 || movingMenuId !== null} onClick={event => { event.stopPropagation(); void moveMenu(menu, "down"); }} type="button">↓</button></span>
     </div>) : <p className="px-5 py-8 text-sm text-slate-400">등록된 메뉴가 없습니다.</p>}
   </div></section>;
 }
 
-function CreateMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, defaultCategoryId, close, create }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; defaultCategoryId: number; close: () => void; create: (payload: MenuPayload) => Promise<void> }) {
-  const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>({ enabled: false, title: "", buttons: ["", ""], defaultIndex: 0 });
-  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: "NONE", kdsGroupKey: null, kdsCompletionTimer: false, kdsPostCookTimer: false, kdsVisible: false });
-  const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [menuNumberInput, setMenuNumberInput] = useState(""); const [categoryId, setCategoryId] = useState(defaultCategoryId); const [isActive, setIsActive] = useState(true); const [components, setComponents] = useState<MenuComponentInput[]>([]); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
-  const submit = async () => { const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !price.trim() || !Number.isFinite(Number(price)) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리, 옵션 버튼 이름을 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && optionConfig.buttons.some(button => !button.trim())) { setError("옵션 버튼 이름을 모두 입력해 주세요."); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, menuNumber, isActive, components, optionConfig, ...kdsConfig }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
+function CreateMenuDialog({ categories, componentMenus, defaultCategoryId, close, create, showQrVisibility }: { categories: Category[]; componentMenus: ComponentMenu[]; defaultCategoryId: number; close: () => void; create: (payload: MenuPayload) => Promise<void>; showQrVisibility: boolean }) {
+  const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>({ enabled: false, title: "", buttons: ["", ""], qrDescriptions: ["", ""], defaultIndex: 0 });
+  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: "NONE", kdsGroupKey: null, kdsCompletionTimer: false, kdsPostCookTimer: false, kdsSimpleCook: false, kdsVisible: false });
+  const [name, setName] = useState(""); const [price, setPrice] = useState(""); const [categoryId, setCategoryId] = useState(defaultCategoryId); const [isActive, setIsActive] = useState(true); const [isQrVisible, setIsQrVisible] = useState(true); const [components, setComponents] = useState<MenuComponentInput[]>([]); const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
+  const submit = async () => { if (!name.trim() || !price.trim() || !Number.isFinite(Number(price))) { setError("메뉴명, 가격, 카테고리, 옵션 버튼 이름을 확인하세요."); return; } if (optionConfig.enabled && optionConfig.buttons.some(button => !button.trim())) { setError("옵션 버튼 이름을 모두 입력해 주세요."); return; } setSaving(true); setError(""); try { await create({ name: name.trim(), price, categoryId, isActive, ...(showQrVisibility ? { isQrVisible } : {}), components, optionConfig, ...kdsConfig }); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 등록할 수 없습니다."); } finally { setSaving(false); } };
   return <Dialog close={close} saving={saving} title="새 메뉴 추가">
     <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
       <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
       <PosUseToggle isActive={isActive} setIsActive={setIsActive} />
     </div>
+    {showQrVisibility && <div className="mt-2"><MenuSwitch checked={isQrVisible} label="QR 표시" onChange={setIsQrVisible} /></div>}
     <label className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>메뉴명 *</span><input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label>
-    <div className="mt-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+    <div className="mt-2 grid grid-cols-1 gap-3">
       <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>가격 *</span><PriceInput onChange={setPrice} value={price} /></label>
-      <MenuNumberField value={menuNumberInput} setValue={setMenuNumberInput} />
     </div>
     <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
     <KdsSettingsEditor value={kdsConfig} onChange={setKdsConfig} />
-    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} />
+    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} showQrDescriptions={showQrVisibility} />
     {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
     <DialogFooter cancel={close} saving={saving} submit={submit} submitText="메뉴 추가" />
   </Dialog>;
 }
 
-function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, close, menu, sourceMenus, update }: { categories: Category[]; checkDuplicateMenuNumber: DuplicateMenuNumberCheck; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; sourceMenus: Menu[]; update: (menuId: number, form: FormData, categoryId: number) => Promise<void> }) {
+function EditMenuDialog({ categories, componentMenus, close, menu, sourceMenus, update, showQrVisibility }: { categories: Category[]; componentMenus: ComponentMenu[]; close: () => void; menu: Menu; sourceMenus: Menu[]; update: (menuId: number, form: FormData, categoryId: number) => Promise<void>; showQrVisibility: boolean }) {
   const [optionConfig, setOptionConfig] = useState<MenuChoiceConfig>(menu.optionConfig);
-  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: menu.kdsKind, kdsGroupKey: menu.kdsGroupKey, kdsCompletionTimer: Boolean(menu.kdsCompletionTimer), kdsPostCookTimer: Boolean(menu.kdsPostCookTimer), kdsVisible: Boolean(menu.kdsVisible) });
+  const [kdsConfig, setKdsConfig] = useState<KdsMenuConfig>({ kdsKind: menu.kdsKind, kdsGroupKey: menu.kdsGroupKey, kdsCompletionTimer: Boolean(menu.kdsCompletionTimer), kdsPostCookTimer: Boolean(menu.kdsPostCookTimer), kdsSimpleCook: Boolean(menu.kdsSimpleCook), kdsVisible: Boolean(menu.kdsVisible) });
   const [copyOpen, setCopyOpen] = useState(false);
   const [pendingCopy, setPendingCopy] = useState<Menu | null>(null);
-  const applyCopiedOptions = (source: Menu) => { setOptionConfig({ ...source.optionConfig, buttons: [...source.optionConfig.buttons] }); setCopyOpen(false); setPendingCopy(null); };
+  const applyCopiedOptions = (source: Menu) => { setOptionConfig({ ...source.optionConfig, buttons: [...source.optionConfig.buttons], qrDescriptions: [...source.optionConfig.qrDescriptions] }); setCopyOpen(false); setPendingCopy(null); };
   const requestCopy = (source: Menu) => { if (optionConfig.enabled || optionConfig.title.trim() || optionConfig.buttons.some(button => button.trim())) setPendingCopy(source); else applyCopiedOptions(source); };
-  const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [menuNumberInput, setMenuNumberInput] = useState(menu.menuNumber === null ? "" : String(menu.menuNumber)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [isActive, setIsActive] = useState(menu.isActive === 1); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState(menu.name); const [price, setPrice] = useState(formatPriceInput(menu.price)); const [categoryId, setCategoryId] = useState(menu.categoryId ?? categories[0]?.categoryId ?? 0); const [isActive, setIsActive] = useState(menu.isActive === 1); const [isQrVisible, setIsQrVisible] = useState(menu.isQrVisible !== 0); const [components, setComponents] = useState<MenuComponentInput[]>(menu.components.map(component => ({ componentMenuId: component.componentMenuId, qtyPerUnit: component.qtyPerUnit, printOnKitchen: component.printOnKitchen === 1, printOnReceipt: component.printOnReceipt === 1 }))); const [previewUrl, setPreviewUrl] = useState(menu.imageUrl); const [croppedImage, setCroppedImage] = useState<File | null>(null); const [removeImage, setRemoveImage] = useState(false); const [cropSource, setCropSource] = useState<string | null>(null); const [crop, setCrop] = useState({ x: 0, y: 0 }); const [zoom, setZoom] = useState(1); const [cropPixels, setCropPixels] = useState<Area | null>(null); const [error, setError] = useState(""); const [saving, setSaving] = useState(false); const inputRef = useRef<HTMLInputElement>(null);
   const selectImage = (file: File | undefined) => { if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 10 * 1024 * 1024) { setError("JPG, PNG, WebP 형식의 10MB 이하 이미지를 선택하세요."); return; } setError(""); setCropSource(URL.createObjectURL(file)); setZoom(1); };
   const applyCrop = async () => { if (!cropSource || !cropPixels) return; try { const image = new Image(); image.src = cropSource; await image.decode(); const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 1200; const context = canvas.getContext("2d"); if (!context) throw new Error("이미지를 처리할 수 없습니다."); context.drawImage(image, cropPixels.x, cropPixels.y, cropPixels.width, cropPixels.height, 0, 0, 1200, 1200); const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error("이미지를 처리할 수 없습니다.")), "image/webp", 0.92)); setCroppedImage(new File([blob], "menu-crop.webp", { type: "image/webp" })); setPreviewUrl(URL.createObjectURL(blob)); setRemoveImage(false); setCropSource(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "이미지를 자를 수 없습니다."); } };
-  const submit = async () => { const numericPrice = parsePrice(price); const menuNumber = parseMenuNumberInput(menuNumberInput); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId) || menuNumber === undefined) { setError("메뉴명, 메뉴번호, 가격, 카테고리, 옵션 버튼 이름을 확인하세요."); return; } const duplicateMessage = checkDuplicateMenuNumber(categoryId, menuNumber, menu.menuId); if (duplicateMessage) { setError(duplicateMessage); return; } if (optionConfig.enabled && optionConfig.buttons.some(button => !button.trim())) { setError("옵션 버튼 이름을 모두 입력해 주세요."); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("menuNumber", menuNumber === null ? "" : String(menuNumber)); form.set("isActive", String(isActive)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); form.set("optionConfig", JSON.stringify(optionConfig)); form.set("kdsKind", kdsConfig.kdsKind); form.set("kdsGroupKey", kdsConfig.kdsGroupKey ?? ""); form.set("kdsCompletionTimer", String(kdsConfig.kdsCompletionTimer)); form.set("kdsPostCookTimer", String(kdsConfig.kdsPostCookTimer)); form.set("kdsVisible", String(kdsConfig.kdsVisible)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
+  const submit = async () => { const numericPrice = parsePrice(price); if (!name.trim() || !Number.isFinite(numericPrice) || !Number.isInteger(categoryId)) { setError("메뉴명, 가격, 카테고리, 옵션 버튼 이름을 확인하세요."); return; } if (optionConfig.enabled && optionConfig.buttons.some(button => !button.trim())) { setError("옵션 버튼 이름을 모두 입력해 주세요."); return; } const form = new FormData(); form.set("name", name.trim()); form.set("price", String(numericPrice)); form.set("categoryId", String(categoryId)); form.set("isActive", String(isActive)); if (showQrVisibility) form.set("isQrVisible", String(isQrVisible)); form.set("removeImage", String(removeImage)); form.set("components", JSON.stringify(components)); form.set("optionConfig", JSON.stringify(optionConfig)); form.set("kdsKind", kdsConfig.kdsKind); form.set("kdsGroupKey", kdsConfig.kdsGroupKey ?? ""); form.set("kdsCompletionTimer", String(kdsConfig.kdsCompletionTimer)); form.set("kdsPostCookTimer", String(kdsConfig.kdsPostCookTimer)); form.set("kdsSimpleCook", String(kdsConfig.kdsSimpleCook)); form.set("kdsVisible", String(kdsConfig.kdsVisible)); if (croppedImage) form.set("image", croppedImage); setSaving(true); setError(""); try { await update(menu.menuId, form, categoryId); } catch (reason) { setError(reason instanceof Error ? reason.message : "메뉴를 수정할 수 없습니다."); } finally { setSaving(false); } };
   return <><Dialog close={close} saving={saving} title="메뉴 수정">
     <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-center gap-3">
       <CategorySelect categories={categories} categoryId={categoryId} setCategoryId={setCategoryId} />
       <PosUseToggle isActive={isActive} setIsActive={setIsActive} />
     </div>
+    {showQrVisibility && <div className="mt-2"><MenuSwitch checked={isQrVisible} label="QR 표시" onChange={setIsQrVisible} /></div>}
     <label className="mt-2 grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>메뉴명 *</span><input autoFocus className={inputClass} maxLength={150} onChange={event => setName(event.target.value)} value={name} /></label>
-    <div className="mt-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+    <div className="mt-2 grid grid-cols-1 gap-3">
       <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 text-sm font-bold"><span>가격 *</span><PriceInput onBlur={() => { const value = parsePrice(price); if (Number.isFinite(value)) setPrice(formatPriceInput(value)); }} onChange={value => setPrice(value.replace(/[^\d,.-]/g, ""))} value={price} /></label>
-      <MenuNumberField value={menuNumberInput} setValue={setMenuNumberInput} />
     </div>
-    <ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} />
+    {!showQrVisibility && <ImageEditor inputRef={inputRef} previewUrl={previewUrl} remove={() => { setCroppedImage(null); setPreviewUrl(null); setRemoveImage(true); }} select={() => inputRef.current?.click()} selectImage={selectImage} />}
     <MenuComponentsEditor components={components} componentMenus={componentMenus} setComponents={setComponents} />
     <KdsSettingsEditor value={kdsConfig} onChange={setKdsConfig} />
-    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} onCopy={() => setCopyOpen(true)} />
+    <MenuChoiceEditor value={optionConfig} onChange={setOptionConfig} onCopy={() => setCopyOpen(true)} showQrDescriptions={showQrVisibility} />
     {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
     <DialogFooter cancel={close} saving={saving} submit={submit} submitText="저장" />
   </Dialog>
@@ -143,7 +148,7 @@ function EditMenuDialog({ categories, checkDuplicateMenuNumber, componentMenus, 
       <p className="mt-2 text-xs text-slate-500">변경한 내용은 메뉴 수정창에서 저장할 때 반영됩니다.</p>
       <DialogFooter cancel={() => setPendingCopy(null)} saving={false} submit={() => applyCopiedOptions(pendingCopy)} submitText="변경" />
     </Dialog>}
-    {cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}
+    {!showQrVisibility && cropSource && <CropDialog apply={() => void applyCrop()} crop={crop} cropSource={cropSource} setCrop={setCrop} setCropSource={setCropSource} setZoom={setZoom} zoom={zoom} onCropComplete={(_croppedArea, croppedAreaPixels) => setCropPixels(croppedAreaPixels)} />}
   </>;
 }
 
@@ -155,7 +160,7 @@ function KdsSettingsEditor({ value, onChange }: { value: KdsMenuConfig; onChange
       <label className="grid gap-1 font-semibold">조리분류
         <select className={inputClass} onChange={event => {
           const kind = event.target.value as KdsMenuConfig["kdsKind"];
-          onChange({ ...value, kdsKind: kind, kdsGroupKey: kind === "NONE" ? null : value.kdsGroupKey, kdsCompletionTimer: kind === "NONE" ? false : value.kdsCompletionTimer, kdsPostCookTimer: kind === "NONE" ? false : value.kdsPostCookTimer });
+          onChange({ ...value, kdsKind: kind, kdsGroupKey: kind === "NONE" ? null : value.kdsGroupKey, kdsCompletionTimer: kind === "NONE" ? false : value.kdsCompletionTimer, kdsPostCookTimer: kind === "NONE" ? false : value.kdsPostCookTimer, kdsSimpleCook: kind === "NONE" ? false : value.kdsSimpleCook });
         }} value={value.kdsKind}>
           {(["NONE", "POT", "ADDON", "SOLO"] as const).map(kind => <option key={kind} value={kind}>{kdsKindLabel(kind)}</option>)}
         </select>
@@ -165,20 +170,24 @@ function KdsSettingsEditor({ value, onChange }: { value: KdsMenuConfig; onChange
       </label>
     </div>
     <label className="mt-3 flex items-center gap-2 font-semibold"><input checked={value.kdsCompletionTimer} disabled={value.kdsKind === "NONE"} onChange={event => onChange({ ...value, kdsCompletionTimer: event.target.checked })} type="checkbox" />조리완료 후 경과시간 표시</label>
-    <label className="mt-2 flex items-center gap-2 font-semibold"><input checked={value.kdsPostCookTimer} disabled={value.kdsKind === "NONE"} onChange={event => onChange({ ...value, kdsPostCookTimer: event.target.checked })} type="checkbox" />조리완료 시 3/5/10분 타이머 선택</label>
+    <label className="mt-2 flex items-center gap-2 font-semibold"><input checked={value.kdsPostCookTimer} disabled={value.kdsKind === "NONE" || value.kdsSimpleCook} onChange={event => onChange({ ...value, kdsPostCookTimer: event.target.checked })} type="checkbox" />조리완료 시 3/5/10분 타이머 선택</label>
+    <label className="mt-2 flex items-center gap-2 font-semibold"><input checked={value.kdsSimpleCook} disabled={value.kdsKind === "NONE"} onChange={event => onChange({ ...value, kdsSimpleCook: event.target.checked, kdsPostCookTimer: event.target.checked ? false : value.kdsPostCookTimer })} type="checkbox" />단순조리 (클릭 시 즉시 조리완료)</label>
     <p className="mt-2 text-xs text-slate-500">KDS 표시를 끄면 POS 주문에는 남고 주방 화면에서만 제외됩니다. 조리분류가 KDS 제외이면 표시를 켜도 조리작업을 만들지 않습니다. 조리 후 타이머 설정 메뉴는 조리완료 시 3/5/10분 선택이 필요합니다.</p>
     <p className="mt-1 text-xs text-slate-500">그룹을 비우면 찌개는 서로 묶이고, 독립 조리는 같은 메뉴끼리 묶입니다. 같은 그룹명을 입력하면 다른 메뉴도 함께 시작할 수 있습니다.</p>
   </section>;
 }
 
-function MenuChoiceEditor({ value, onChange, onCopy }: { value: MenuChoiceConfig; onChange: (value: MenuChoiceConfig) => void; onCopy?: () => void }) {
-  const changeCount = (count: number) => onChange({ ...value, buttons: Array.from({ length: count }, (_, index) => value.buttons[index] ?? ""), defaultIndex: value.defaultIndex < count ? value.defaultIndex : 0 });
+function MenuChoiceEditor({ value, onChange, onCopy, showQrDescriptions = false }: { value: MenuChoiceConfig; onChange: (value: MenuChoiceConfig) => void; onCopy?: () => void; showQrDescriptions?: boolean }) {
+  const changeCount = (count: number) => onChange({ ...value, buttons: Array.from({ length: count }, (_, index) => value.buttons[index] ?? ""), qrDescriptions: Array.from({ length: count }, (_, index) => value.qrDescriptions[index] ?? ""), defaultIndex: value.defaultIndex < count ? value.defaultIndex : 0 });
   return <section className="mt-3 rounded-xl border border-slate-200 p-3 text-sm">
     <div className="flex items-center justify-between gap-3"><h3 className="font-bold">옵션 설정</h3><div className="flex items-center gap-3">{onCopy && <button className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50" onClick={onCopy} type="button">옵션 복사</button>}<label className="flex items-center gap-2 font-semibold">옵션 사용<input checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked, buttons: value.buttons.length >= 2 ? value.buttons : ["", ""] })} type="checkbox" /></label></div></div>
     {value.enabled && <div className="mt-3 space-y-3">
       <label className="grid grid-cols-[100px_minmax(0,1fr)] items-center gap-2 font-semibold">옵션 제목 (선택)<input className={inputClass} maxLength={150} onChange={event => onChange({ ...value, title: event.target.value })} value={value.title} /></label>
       <div className="flex items-center gap-3"><span className="font-semibold">버튼 수량</span>{[2,3,4].map(count => <button aria-pressed={value.buttons.length === count} className={value.buttons.length === count ? activeClass : idleClass} key={count} onClick={() => changeCount(count)} type="button">{count}개</button>)}</div>
-      <div className="space-y-2">{value.buttons.map((button, index) => <div className="grid grid-cols-[68px_minmax(0,1fr)_78px] items-center gap-2" key={index}><label className="font-semibold" htmlFor={"choice-" + index}>버튼 {index + 1}</label><input className={inputClass} id={"choice-" + index} maxLength={150} onChange={event => onChange({ ...value, buttons: value.buttons.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} value={button} /><label className="flex items-center gap-1 whitespace-nowrap"><input checked={value.defaultIndex === index} name="menu-choice-default" onChange={() => onChange({ ...value, defaultIndex: index })} type="radio" />기본값</label></div>)}</div>
+      <div className="space-y-2">
+        {showQrDescriptions ? <div className="grid grid-cols-[68px_minmax(0,3fr)_minmax(0,7fr)_78px] items-end gap-2 text-xs font-semibold text-slate-600"><span /><label htmlFor="choice-0">옵션명</label><label htmlFor="choice-qr-0">QR 설명</label><span /></div> : null}
+        {value.buttons.map((button, index) => <div className={`grid ${showQrDescriptions ? "grid-cols-[68px_minmax(0,3fr)_minmax(0,7fr)_78px]" : "grid-cols-[68px_minmax(0,1fr)_78px]"} items-center gap-2`} key={index}><label className="font-semibold" htmlFor={"choice-" + index}>버튼 {index + 1}</label><input className={inputClass} id={"choice-" + index} maxLength={150} onChange={event => onChange({ ...value, buttons: value.buttons.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} value={button} />{showQrDescriptions && <input aria-label={`버튼 ${index + 1} QR 설명`} className={inputClass} id={"choice-qr-" + index} maxLength={300} onChange={event => onChange({ ...value, qrDescriptions: value.qrDescriptions.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} value={value.qrDescriptions[index] ?? ""} />}<label className="flex items-center gap-1 whitespace-nowrap"><input checked={value.defaultIndex === index} name="menu-choice-default" onChange={() => onChange({ ...value, defaultIndex: index })} type="radio" />기본값</label></div>)}
+      </div>
     </div>}
   </section>;
 }
@@ -204,16 +213,6 @@ function OptionCopyDialog({ categories, menus, close, onApply }: { categories: C
 const inputClass = "min-h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3";
 function PriceInput({ value, onChange, onBlur }: { value: string; onChange: (value: string) => void; onBlur?: () => void }) {
   return <span className="flex min-h-10 w-full min-w-0 items-center rounded-lg border border-slate-300 px-3 focus-within:border-blue-500"><input className="min-h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-right outline-none focus:ring-0" inputMode="decimal" onBlur={onBlur} onChange={event => onChange(event.target.value)} value={value} /><span className="ml-2 shrink-0">원</span></span>;
-}
-function parseMenuNumberInput(value: string): number | null | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (!/^\d+$/.test(trimmed)) return undefined;
-  const number = Number(trimmed);
-  return Number.isSafeInteger(number) && number > 0 && number <= 2_147_483_647 ? number : undefined;
-}
-function MenuNumberField({ value, setValue }: { value: string; setValue: (value: string) => void }) {
-  return <label className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap text-sm font-bold">메뉴번호<input aria-label="메뉴번호" className={inputClass} inputMode="numeric" maxLength={10} onChange={event => setValue(event.target.value.replace(/\D/g, ""))} pattern="[0-9]*" value={value} /></label>;
 }
 function MenuComponentsEditor({ componentMenus, components, setComponents }: { componentMenus: ComponentMenu[]; components: MenuComponentInput[]; setComponents: (value: MenuComponentInput[]) => void }) {
   const [newComponentMenuId, setNewComponentMenuId] = useState("");

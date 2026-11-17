@@ -9,7 +9,6 @@ import { qrPageIcons } from "@/lib/qr-manifest";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "탑동김치찌개",
   applicationName: "탑동김치찌개",
   description: "탑동김치찌개 QR 메뉴",
   manifest: "/qr/manifest.webmanifest?v=2",

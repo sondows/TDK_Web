@@ -57,6 +57,7 @@ type DetailItem = {
     optionName: string;
     qty: number;
     unitPrice: string;
+    independentQty?: boolean;
   }>;
   cancellations: Array<{
     cancellationId: number;

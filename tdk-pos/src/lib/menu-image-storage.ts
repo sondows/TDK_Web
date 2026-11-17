@@ -11,7 +11,7 @@ const externalPublicBaseUrl = () => process.env.MENU_IMAGE_PUBLIC_BASE_URL?.repl
 export type MenuImageType = "POS" | "QR_THUMBNAIL" | "QR_LARGE";
 export type GeneratedMenuImage = { imageType: MenuImageType; imageUrl: string; fileName: string };
 
-const isSafeFileName = (fileName: string) => /^(pos|qr|large)-[0-9a-f-]+\.webp$/i.test(fileName);
+const isSafeFileName = (fileName: string) => /^(pos|qr|large|detail)-[0-9a-f-]+\.webp$/i.test(fileName);
 
 export function menuImageFilePath(menuId: number, fileName: string) {
   if (!Number.isInteger(menuId) || menuId <= 0 || !isSafeFileName(fileName)) throw new Error("Invalid menu image path");
@@ -51,6 +51,25 @@ export async function generateMenuImages(menuId: number, source: Buffer) {
     throw error;
   }
   return generated.map(item => ({ imageType: item.imageType, fileName: item.fileName, imageUrl: menuImageUrl(menuId, item.fileName) }));
+}
+
+export async function generateMenuImageVariant(menuId: number, source: Buffer, imageType: "QR_THUMBNAIL" | "QR_LARGE") {
+  if (!Number.isInteger(menuId) || menuId <= 0) throw new Error("Invalid menu");
+  if (source.length === 0 || source.length > 10 * 1024 * 1024) throw new Error("이미지 파일은 10MB 이하여야 합니다.");
+  const metadata = await sharp(source, { limitInputPixels: 40_000_000 }).metadata();
+  if (!metadata.format || !["jpeg", "png", "webp"].includes(metadata.format) || !metadata.width || !metadata.height) throw new Error("JPG, PNG, WebP 이미지 파일만 사용할 수 있습니다.");
+
+  const isMain = imageType === "QR_THUMBNAIL";
+  const fileName = (isMain ? "qr-" : "detail-") + randomUUID() + ".webp";
+  const filePath = menuImageFilePath(menuId, fileName);
+  const directory = path.dirname(filePath);
+  const transformer = sharp(source, { limitInputPixels: 40_000_000 });
+  const buffer = isMain
+    ? await transformer.resize(600, 600, { fit: "cover", position: "centre" }).webp({ quality: 88 }).toBuffer()
+    : await transformer.resize(1200, 600, { fit: "cover", position: "centre", withoutEnlargement: true }).webp({ quality: 90 }).toBuffer();
+  await mkdir(directory, { recursive: true });
+  await writeFile(filePath, buffer);
+  return { imageType, fileName, imageUrl: menuImageUrl(menuId, fileName) };
 }
 
 export async function removeStoredMenuImages(menuId: number, imageUrls: string[]) {

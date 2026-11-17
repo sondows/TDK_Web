@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildOrderSummaryRows, buildPartyOrderRows } from "./pos-order-summary-rows.ts";
 
+test("POS summaries show independent add-on quantities and keep different addon quantities separate", () => {
+  const base = { parentOrderItemId: null, menuId: 7, itemType: "NORMAL", itemName: "Stew", unitPrice: "10000.00" };
+  const rows = buildOrderSummaryRows([
+    { ...base, orderId: 1, orderItemId: 1, qty: 2, effectiveQty: 2,
+      options: [{ modifierOptionId: 301, optionName: "Ham", qty: 1, unitPrice: "3000.00", independentQty: true }] },
+    { ...base, orderId: 2, orderItemId: 2, qty: 2, effectiveQty: 2,
+      options: [{ modifierOptionId: 301, optionName: "Ham", qty: 3, unitPrice: "3000.00", independentQty: true }] },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(row => row.optionLabel), ["Ham", "Ham ×3"]);
+});
+
+test("partial base-menu cancellation preserves independently selected add-on amount", () => {
+  const [row] = buildOrderSummaryRows([{
+    orderId: 1, orderItemId: 1, parentOrderItemId: null, menuId: 7, itemType: "NORMAL",
+    itemName: "Stew", qty: 2, effectiveQty: 1, unitPrice: "10000.00", totalAmount: "26000.00",
+    options: [{ modifierOptionId: 301, optionName: "Ham", qty: 2, unitPrice: "3000.00", independentQty: true }],
+  }]);
+  assert.equal(row.total, 16000);
+});
+
 test("summary keeps different options separate without changing amounts", () => {
   const base = { parentOrderItemId: null, menuId: 7, itemType: "NORMAL", itemName: "찌개", unitPrice: "10000.00" };
   const rows = buildOrderSummaryRows([

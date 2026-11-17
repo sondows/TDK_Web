@@ -1,27 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
-import { addQrCartLine, defaultQrSelections, groupQrModifiers, normalizeQrCart, qrCartTotal,
-  QR_CART_STORAGE_KEY, qrLineUnitPrice, qrLocaleFromPreferences,
-  selectedQrOptions, validQrSelections, type QrCartLine, type QrCatalog, type QrLocale, type QrMenu } from "@/lib/qr-menu-cart";
+import { qrOriginHasDisplayText, qrOriginTextRuns } from "@/lib/qr-menu-description-model";
+import { addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartTotal, qrImmediateAddLine, qrMenuAddonGroups, qrOtherOptionalGroups,
+  QR_CART_STORAGE_KEY, qrLineItemCount, qrLineTotal, qrLocaleFromPreferences,
+  selectedQrOptions, splitQrCartAddonLines, validQrSelections, isQrSpiceGroupName, type QrCartLine, type QrCatalog, type QrLocale, type QrMenu } from "@/lib/qr-menu-cart";
 import { acknowledgeQrCartEvents, appendQrCartEvents, normalizeQrCartEventOutbox, QR_CART_EVENT_BATCH_SIZE, QR_CART_EVENT_OUTBOX_KEY,
   qrCartEventSourceFromSearch, type QrCartAnalyticsEvent, type QrCartEventSource, type QrCartEventType } from "@/lib/qr-cart-analytics";
-import QrStoreTitle from "./QrStoreTitle";
+import QrStoreTitle, { type QrTitleSnapDetail } from "./QrStoreTitle";
 import QrTitleCarousel from "./QrTitleCarousel";
+import QrOrderTitleBar from "@/app/qrorder/QrOrderTitleBar";
 import { qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, type QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
 
 const copy: Record<QrLocale, Record<string, string>> = {
-  ko: { title: "메뉴", cart: "장바구니", count: "개", empty: "장바구니가 비어 있습니다.", add: "장바구니에 담기", close: "닫기", qty: "수량", total: "예상 합계", estimate: "예상 금액이며 주문 또는 결제가 확정된 금액이 아닙니다.", remove: "삭제", required: "필수", optional: "선택", none: "선택 안 함", loading: "메뉴를 불러오는 중입니다.", error: "메뉴를 불러오지 못했습니다.", networkError: "네트워크 연결을 확인해 주세요.", invalidError: "메뉴 서버 응답을 확인할 수 없습니다.", retry: "다시 시도", noMenus: "이 분류에 표시할 메뉴가 없습니다.", noImage: "메뉴 사진", optionPrice: "추가", language: "언어" },
-  en: { title: "Menu", cart: "Cart", count: "items", empty: "Your cart is empty.", add: "Add to cart", close: "Close", qty: "Qty", total: "Estimated total", estimate: "Estimate only. This is not a confirmed order or payment.", remove: "Remove", required: "Required", optional: "Optional", none: "No selection", loading: "Loading menu…", error: "Could not load the menu.", networkError: "Check your network connection.", invalidError: "The menu server returned an invalid response.", retry: "Try again", noMenus: "No items in this category.", noImage: "Menu photo", optionPrice: "Add", language: "Language" },
-  "zh-CN": { title: "菜单", cart: "购物车", count: "份", empty: "购物车为空。", add: "加入购物车", close: "关闭", qty: "数量", total: "预计合计", estimate: "仅供参考，不代表订单或付款已确认。", remove: "删除", required: "必选", optional: "可选", none: "不选择", loading: "正在加载菜单…", error: "无法加载菜单。", networkError: "请检查网络连接。", invalidError: "菜单服务器返回了无效数据。", retry: "重试", noMenus: "此分类暂无菜单。", noImage: "菜品图片", optionPrice: "加价", language: "语言" },
-  ja: { title: "メニュー", cart: "カート", count: "点", empty: "カートは空です。", add: "カートに入れる", close: "閉じる", qty: "数量", total: "合計目安", estimate: "目安金額です。注文・決済は確定していません。", remove: "削除", required: "必須", optional: "任意", none: "選択しない", loading: "メニューを読み込み中…", error: "メニューを読み込めませんでした。", networkError: "ネットワーク接続を確認してください。", invalidError: "メニューサーバーの応答を確認できません。", retry: "再試行", noMenus: "このカテゴリにメニューはありません。", noImage: "料理写真", optionPrice: "追加", language: "言語" },
+  ko: { title: "메뉴", cart: "장바구니", count: "개", empty: "장바구니가 비어 있습니다.", add: "장바구니에 담기", close: "닫기", qty: "수량", total: "주문금액", remove: "삭제", required: "필수", optional: "선택", none: "선택 안 함", loading: "메뉴를 불러오는 중입니다.", error: "메뉴를 불러오지 못했습니다.", networkError: "네트워크 연결을 확인해 주세요.", invalidError: "메뉴 서버 응답을 확인할 수 없습니다.", retry: "다시 시도", noMenus: "이 분류에 표시할 메뉴가 없습니다.", noImage: "메뉴 사진", optionPrice: "추가", language: "언어" },
+  en: { title: "Menu", cart: "Cart", count: "items", empty: "Your cart is empty.", add: "Add to cart", close: "Close", qty: "Qty", total: "Order amount", remove: "Remove", required: "Required", optional: "Optional", none: "No selection", loading: "Loading menu…", error: "Could not load the menu.", networkError: "Check your network connection.", invalidError: "The menu server returned an invalid response.", retry: "Try again", noMenus: "No items in this category.", noImage: "Menu photo", optionPrice: "Add", language: "Language" },
+  "zh-CN": { title: "菜单", cart: "购物车", count: "份", empty: "购物车为空。", add: "加入购物车", close: "关闭", qty: "数量", total: "订单金额", remove: "删除", required: "必选", optional: "可选", none: "不选择", loading: "正在加载菜单…", error: "无法加载菜单。", networkError: "请检查网络连接。", invalidError: "菜单服务器返回了无效数据。", retry: "重试", noMenus: "此分类暂无菜单。", noImage: "菜品图片", optionPrice: "加价", language: "语言" },
+  ja: { title: "メニュー", cart: "カート", count: "点", empty: "カートは空です。", add: "カートに入れる", close: "閉じる", qty: "数量", total: "注文金額", remove: "削除", required: "必須", optional: "任意", none: "選択しない", loading: "メニューを読み込み中…", error: "メニューを読み込めませんでした。", networkError: "ネットワーク接続を確認してください。", invalidError: "メニューサーバーの応答を確認できません。", retry: "再試行", noMenus: "このカテゴリにメニューはありません。", noImage: "料理写真", optionPrice: "追加", language: "言語" },
 };
 const QR_WAIT_ORDER_ID_KEY = "tdkon:qr-wait-order-id:v1";
 type WaitOrder = { waitOrderId: number; publicReference: string; status: string; version: number; estimatedTotal: string; items: Array<{ menuId: number; itemName: string; quantity: number; options: QrCartLine["options"] }> };
-type ApiCatalog = { categories: Array<{ categoryId: number; name: string; tabColor: string | null }>; menus: Array<Omit<QrMenu, "groups">>; modifierGroups: Array<{ menuId: number; modifierGroupId: number; name: string; minSelect: number; maxSelect: number; isRequired: boolean; defaultOptionId: number | null; modifierOptionId: number; optionName: string; priceDelta: string; groupSortOrder: number; optionSortOrder: number }> };
+type ApiCatalog = { categories: Array<{ categoryId: number; name: string; tabColor: string | null }>; menus: Array<Omit<QrMenu, "groups">>; modifierGroups: Array<{ menuId: number; modifierGroupId: number; name: string; minSelect: number; maxSelect: number; isRequired: boolean; defaultOptionId: number | null; modifierOptionId: number; optionName: string; qrDescription?: string; priceDelta: string; groupSortOrder: number; optionSortOrder: number; source: "MENU_ADDON" | "OPTION" }> };
 type CatalogError = { kind: "http"; status: number } | { kind: "network" | "invalid" } | null;
 
 function won(value: number, locale: QrLocale = "ko") {
@@ -29,10 +32,27 @@ function won(value: number, locale: QrLocale = "ko") {
   return new Intl.NumberFormat(numberLocale, { style: "currency", currency: "KRW", maximumFractionDigits: 0 }).format(Math.round(value));
 }
 
+function menuCardPrice(value: number, locale: QrLocale) {
+  if (locale === "ko") return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.round(value))}원`;
+  return won(value, locale);
+}
+
+function QrDoubleDivider({ fullBleed = false }: { fullBleed?: boolean }) {
+  return <div aria-hidden="true" className={`relative h-4 bg-slate-50 ${fullBleed ? "left-1/2 z-[2] w-screen -translate-x-1/2" : "w-full"}`}>
+    <span className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-px bg-[#D0D8E2]" style={{ boxShadow: "0 3px 3px rgba(0, 0, 0, 0.2)" }} />
+    <span className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[#E5EAF0]" />
+  </div>;
+}
+
+function qrOptionLabel(option: { optionName: string; qrDescription?: string }, locale: QrLocale) {
+  const description = locale === "ko" ? option.qrDescription?.trim() : "";
+  return description ? `${option.optionName} (${description})` : option.optionName;
+}
+
 function hosDefaultSelections(groups: QrMenu["groups"]) {
   const selections = defaultQrSelections(groups);
   for (const group of groups) {
-    if (group.defaultOptionId === null && group.name !== "매운맛") continue;
+    if (group.defaultOptionId === null && !isQrSpiceGroupName(group.name)) continue;
     const choice = getMenuChoice(group.options.map(option => ({ modifierGroupId: group.modifierGroupId,
       groupName: group.name, modifierOptionId: option.modifierOptionId, optionName: option.optionName,
       optionSortOrder: option.optionSortOrder, choiceDefaultOptionId: group.defaultOptionId })));
@@ -41,7 +61,8 @@ function hosDefaultSelections(groups: QrMenu["groups"]) {
   return selections;
 }
 
-export default function QrMenuClient({ waitingMode = false, initialTitleData, notices = [] }: { waitingMode?: boolean; initialTitleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
+export default function QrMenuClient({ waitingMode = false, tableOrderMode = false, initialTitleData, notices = [] }: { waitingMode?: boolean; tableOrderMode?: boolean; initialTitleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
+  const router = useRouter();
   const [catalog, setCatalog] = useState<QrCatalog | null>(null);
   const [locale, setLocale] = useState<QrLocale>("ko");
   const [catalogError, setCatalogError] = useState<CatalogError>(null);
@@ -49,24 +70,67 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [cart, setCart] = useState<QrCartLine[]>([]);
   const [cartReady, setCartReady] = useState(false);
+  const [quickAddFeedback, setQuickAddFeedback] = useState("");
+  const quickAddFeedbackTimerRef = useRef<number | null>(null);
   const [view, setView] = useState<{ type: "menu"; menuId: number } | null>(null);
+  const viewRef = useRef<{ type: "menu"; menuId: number } | null>(null);
+  const viewHistoryRef = useRef(false);
+  const viewBackPendingRef = useRef(false);
+  const queuedMenuRef = useRef<QrMenu | null>(null);
+  const viewCloseTimerRef = useRef<number | null>(null);
+  const viewClosingRef = useRef(false);
+  const [viewOffsetX, setViewOffsetX] = useState(100);
+  const [viewDragActive, setViewDragActive] = useState(false);
+  const [detailImageIndex, setDetailImageIndex] = useState(0);
+  const [detailGalleryOpen, setDetailGalleryOpen] = useState(false);
+  const detailGalleryOpenRef = useRef(false);
+  const detailGalleryHistoryRef = useRef(false);
+  const [galleryScale, setGalleryScale] = useState(1);
+  const [galleryOffset, setGalleryOffset] = useState({ x: 0, y: 0 });
+  const galleryPointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const galleryGestureRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number; distance: number; scale: number; pointerType: string; mode: "pan" | "swipe" | "pinch" } | null>(null);
+  const galleryLastTapRef = useRef(0);
+  const suppressDetailImageClickRef = useRef(false);
+  const galleryViewportRef = useRef<HTMLDivElement>(null);
+  const galleryImageRef = useRef<HTMLImageElement>(null);
+  const [originSheetOpen, setOriginSheetOpen] = useState(false);
+  const [originSheetVisible, setOriginSheetVisible] = useState(false);
+  const originSheetOpenRef = useRef(false);
+  const originHistoryRef = useRef(false);
+  const originSheetCloseTimerRef = useRef<number | null>(null);
+  const originSheetFrameRef = useRef<number | null>(null);
+  const [spiceSheetOpen, setSpiceSheetOpen] = useState(false);
+  const [spiceSheetVisible, setSpiceSheetVisible] = useState(false);
+  const spiceSheetOpenRef = useRef(false);
+  const spiceHistoryRef = useRef(false);
+  const spiceSheetCloseTimerRef = useRef<number | null>(null);
+  const spiceSheetFrameRef = useRef<number | null>(null);
+  const detailGestureRef = useRef<{ x: number; y: number; startedAt: number; width: number; carousel: boolean; edge: boolean; cancelled: boolean } | null>(null);
+  const originDragStartRef = useRef<number | null>(null);
+  const addSubmittedRef = useRef(false);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [selections, setSelections] = useState<Record<number, number[]>>({});
+  const [addonQuantities, setAddonQuantities] = useState<Record<number, number>>({});
   const [quantity, setQuantity] = useState(1);
   const [selectionError, setSelectionError] = useState("");
   const [qrSource] = useState<QrCartEventSource>(() => waitingMode ? "WAITING" :
     typeof window === "undefined" ? "FRONT" : qrCartEventSourceFromSearch(window.location.search));
   const [waitOrder, setWaitOrder] = useState<WaitOrder | null>(null);
   const [waitBusy, setWaitBusy] = useState(false);
+  const [tableOrderBusy, setTableOrderBusy] = useState(false);
   const [waitError, setWaitError] = useState("");
   const [editingWaitOrder, setEditingWaitOrder] = useState<{ id: number; version: number } | null>(null);
   const [titleData] = useState(initialTitleData);
   const qrVisitorReady = useRef(false);
   const catalogSnapshotRef = useRef<QrCatalog | null>(null);
   const catalogRefreshInFlightRef = useRef(false);
-  const categoryPageChangeRef = useRef(false);
   const categoryTabNavRef = useRef<HTMLElement>(null);
   const categoryTabRefs = useRef(new Map<number, HTMLButtonElement>());
+  const menuRowRefs = useRef(new Map<number, HTMLElement>());
+  const titleSnapHandlerRef = useRef<((detail: QrTitleSnapDetail) => void) | null>(null);
+  const menuBottomSpacerRef = useRef<HTMLDivElement>(null);
+  const categoryScrollProgrammaticRef = useRef(false);
+  const categoryScrollSettleTimerRef = useRef<number | null>(null);
   const cartSheetOpenRef = useRef(false);
   const cartSheetHistoryRef = useRef(false);
   const sheetTouchStartY = useRef<number | null>(null);
@@ -234,7 +298,9 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeCartSheet();
     };
-    const onPopState = () => {
+    const onPopState = (event: PopStateEvent) => {
+      // A nested QR notice sheet may pop back to this still-open cart entry.
+      if (event.state?.tdkQrCartSheet) return;
       if (cartSheetOpenRef.current) closeCartSheet(true);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -246,6 +312,18 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
       window.removeEventListener("popstate", onPopState);
     };
   }, [cartSheetOpen, closeCartSheet]);
+
+  useEffect(() => {
+    if (!view) return;
+    const frame = window.requestAnimationFrame(() => setViewOffsetX(0));
+    return () => window.cancelAnimationFrame(frame);
+  }, [view]);
+
+  useEffect(() => () => {
+    if (viewCloseTimerRef.current !== null) window.clearTimeout(viewCloseTimerRef.current);
+    if (originSheetCloseTimerRef.current !== null) window.clearTimeout(originSheetCloseTimerRef.current);
+    if (originSheetFrameRef.current !== null) window.cancelAnimationFrame(originSheetFrameRef.current);
+  }, []);
 
   useEffect(() => {
     if (!view) return;
@@ -332,11 +410,12 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
       const menus: QrMenu[] = data.menus.map(menu => ({ ...menu,
         groups: groupQrModifiers(data.modifierGroups ?? [], menu.menuId) }));
       const next = { categories: data.categories, menus };
+      const firstAvailableCategoryId = next.categories.find(category => next.menus.some(menu => menu.categoryId === category.categoryId))?.categoryId ?? null;
       catalogSnapshotRef.current = next;
       setCatalog(next);
       setCatalogError(null);
-      setSelectedCategoryId(current => current !== null && next.categories.some(category => category.categoryId === current)
-        ? current : next.categories[0]?.categoryId ?? null);
+      setSelectedCategoryId(current => current !== null && next.menus.some(menu => menu.categoryId === current)
+        ? current : firstAvailableCategoryId);
     } catch {
       if (!silent) setCatalogError({ kind: "network" });
     } finally {
@@ -384,6 +463,9 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     return () => window.clearTimeout(timer);
   }, [qrSource, flushAnalytics]);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  useEffect(() => () => {
+    if (quickAddFeedbackTimerRef.current !== null) window.clearTimeout(quickAddFeedbackTimerRef.current);
+  }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const languages = navigator.languages?.length ? [...navigator.languages] : [navigator.language];
@@ -396,7 +478,7 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     const timer = window.setTimeout(() => {
       try {
         const raw = localStorage.getItem(QR_CART_STORAGE_KEY);
-        setCart(normalizeQrCart(raw ? JSON.parse(raw) : [], catalog));
+        setCart(splitQrCartAddonLines(normalizeQrCart(raw ? JSON.parse(raw) : [], catalog), catalog));
       } catch { setCart([]); }
       setCartReady(true);
     }, 0);
@@ -420,30 +502,165 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
   }, [cart, cartReady]);
 
   const currentMenu = view?.type === "menu" ? catalog?.menus.find(menu => menu.menuId === view.menuId) ?? null : null;
-  const currentCategory = catalog?.categories.find(category => category.categoryId === selectedCategoryId) ?? null;
-  const currentCategoryMenus = catalog?.menus.filter(menu => menu.categoryId === selectedCategoryId) ?? [];
+  const currentDetailImages = currentMenu?.detailImages?.length ? currentMenu.detailImages : currentMenu?.imageUrl ? [currentMenu.imageUrl] : [];
+  const originTextRuns = currentMenu?.originDescription ? qrOriginTextRuns(currentMenu.originDescription) : [];
+  const hasOriginDescription = qrOriginHasDisplayText(currentMenu?.originDescription);
+  const spiceGroup = currentMenu?.groups.find(group => isQrSpiceGroupName(group.name)) ?? null;
+  const selectedSpiceOption = spiceGroup
+    ? spiceGroup.options.find(option => (selections[spiceGroup.modifierGroupId] ?? []).includes(option.modifierOptionId)) ?? null
+    : null;
+  const otherRequiredGroups = currentMenu?.groups.filter(group => group !== spiceGroup && (group.isRequired || group.minSelect > 0)) ?? [];
+  const menuAddonGroups = currentMenu ? qrMenuAddonGroups(currentMenu.groups) : [];
+  const addonOptionById = new Map(menuAddonGroups.flatMap(group => group.options.map(option => [option.modifierOptionId, option] as const)));
+  const addonDisplayEntries = currentMenu?.addonDisplayEntries ?? menuAddonGroups.flatMap(group => group.options.map(option => ({
+    type: "menu" as const, entryId: option.modifierOptionId, menuId: currentMenu?.menuId ?? 0,
+    name: option.optionName, price: option.priceDelta, isQrVisible: true,
+  })));
+  const otherOptionalGroups = currentMenu ? qrOtherOptionalGroups(currentMenu.groups) : [];
+  const keepSpiceBottomBorder = addonDisplayEntries.length === 0 || otherRequiredGroups.length > 0 || otherOptionalGroups.length > 0;
+  const categoryMenuGroups = useMemo(() => (catalog?.categories ?? []).flatMap(category => {
+    const menus = catalog?.menus.filter(menu => menu.categoryId === category.categoryId) ?? [];
+    return menus.length ? [{ category, menus }] : [];
+  }), [catalog]);
   const itemCount = cart.reduce((sum, line) => sum + line.qty, 0);
+  const cartHasItems = itemCount > 0;
+  const cartPeekHeight = cartHasItems ? 57.6 : 17.28;
   const total = catalog ? qrCartTotal(cart, catalog.menus) : 0;
+  const openDetailGallery = () => {
+    if (detailGalleryOpenRef.current || !currentDetailImages.length) return;
+    detailGalleryOpenRef.current = true;
+    setGalleryScale(1);
+    setGalleryOffset({ x: 0, y: 0 });
+    setDetailGalleryOpen(true);
+    window.history.pushState({ ...(window.history.state ?? {}), tdkQrDetailGallery: true }, "", window.location.href);
+    detailGalleryHistoryRef.current = true;
+  };
+  const closeDetailGallery = (fromHistory = false) => {
+    if (!detailGalleryOpenRef.current) return;
+    detailGalleryOpenRef.current = false;
+    setDetailGalleryOpen(false);
+    galleryPointersRef.current.clear();
+    galleryGestureRef.current = null;
+    if (detailGalleryHistoryRef.current) {
+      detailGalleryHistoryRef.current = false;
+      if (!fromHistory) window.history.back();
+    }
+  };
+  const changeGalleryImage = (direction: number) => {
+    setDetailImageIndex(index => Math.max(0, Math.min(currentDetailImages.length - 1, index + direction)));
+    setGalleryScale(1);
+    setGalleryOffset({ x: 0, y: 0 });
+  };
+  const toggleGalleryZoom = () => {
+    setGalleryScale(current => current > 1 ? 1 : 2);
+    setGalleryOffset({ x: 0, y: 0 });
+  };
+  const galleryOffsetLimits = (scale: number) => {
+    const viewport = galleryViewportRef.current;
+    const image = galleryImageRef.current;
+    const width = viewport?.clientWidth ?? window.innerWidth;
+    const height = viewport?.clientHeight ?? window.innerHeight;
+    return {
+      x: Math.max(0, ((image?.clientWidth ?? width) * scale - width) / 2),
+      y: Math.max(0, ((image?.clientHeight ?? height) * scale - height) / 2),
+    };
+  };
+  const galleryActionsRef = useRef({ closeDetailGallery, changeGalleryImage, toggleGalleryZoom });
+  useLayoutEffect(() => {
+    galleryActionsRef.current = { closeDetailGallery, changeGalleryImage, toggleGalleryZoom };
+  });
   const openMenu = (menu: QrMenu) => {
+    if (viewBackPendingRef.current) {
+      queuedMenuRef.current = menu;
+      return;
+    }
+    if (viewRef.current) return;
     queueCartEvent("MENU_VIEW", menu.menuId, [], 0, 0);
     setSelections(hosDefaultSelections(menu.groups));
+    setAddonQuantities({});
     setQuantity(1);
+    spiceSheetOpenRef.current = false;
+    spiceHistoryRef.current = false;
+    setSpiceSheetOpen(false);
+    setSpiceSheetVisible(false);
     setSelectionError("");
+    setDetailImageIndex(0);
+    setViewDragActive(false);
+    setOriginSheetOpen(false);
+    setOriginSheetVisible(false);
+    originSheetOpenRef.current = false;
+    originHistoryRef.current = false;
+    if (originSheetCloseTimerRef.current !== null) window.clearTimeout(originSheetCloseTimerRef.current);
+    if (originSheetFrameRef.current !== null) window.cancelAnimationFrame(originSheetFrameRef.current);
+    viewRef.current = { type: "menu", menuId: menu.menuId };
+    setViewOffsetX(100);
     setView({ type: "menu", menuId: menu.menuId });
+    window.history.pushState({ ...(window.history.state ?? {}), tdkQrMenuDetail: true }, "", window.location.href);
+    viewHistoryRef.current = true;
   };
-  const scrollCategoryHeaderToTop = useCallback(() => {
+  const quickAddMenu = (menu: QrMenu) => {
+    const line = qrImmediateAddLine(menu, hosDefaultSelections(menu.groups));
+    if (!line) {
+      openMenu(menu);
+      return;
+    }
+    const matchingLine = (candidate: QrCartLine) => candidate.menuId === line.menuId && JSON.stringify(candidate.options) === JSON.stringify(line.options);
+    const quantityBefore = cart.find(matchingLine)?.qty ?? 0;
+    setCart(current => addQrCartLine(current, line, menu));
+    queueCartEvent("ADD", menu.menuId, line.options.map(option => option.modifierOptionId), quantityBefore, Math.min(99, quantityBefore + 1));
+    const feedback = locale === "ko" ? `${menu.name} 장바구니에 담았습니다`
+      : locale === "en" ? `${menu.name} added to cart`
+        : locale === "ja" ? `${menu.name}をカートに追加しました`
+          : `${menu.name} 已加入购物车`;
+    setQuickAddFeedback(feedback);
+    if (quickAddFeedbackTimerRef.current !== null) window.clearTimeout(quickAddFeedbackTimerRef.current);
+    quickAddFeedbackTimerRef.current = window.setTimeout(() => {
+      quickAddFeedbackTimerRef.current = null;
+      setQuickAddFeedback("");
+    }, 1600);
+  };
+  useEffect(() => {
+    if (!catalog) return;
     const header = document.querySelector<HTMLElement>("[data-qr-header]");
     if (!header) return;
-    const top = Math.max(0, window.scrollY + header.getBoundingClientRect().top);
-    const main = header.closest<HTMLElement>("main");
-    if (main) main.style.minHeight = `${Math.max(main.offsetHeight, window.innerHeight + top)}px`;
-    window.scrollTo(0, top);
-  }, []);
-  useLayoutEffect(() => {
-    if (!categoryPageChangeRef.current) return;
-    categoryPageChangeRef.current = false;
-    scrollCategoryHeaderToTop();
-  }, [selectedCategoryId, scrollCategoryHeaderToTop]);
+    let frame = 0;
+    const updateSelectedFromTopRow = () => {
+      frame = 0;
+      if (categoryScrollProgrammaticRef.current) return;
+      const rowTop = header.getBoundingClientRect().bottom;
+      let topRowMenu = catalog.menus.find(menu => {
+        const element = menuRowRefs.current.get(menu.menuId);
+        return element && element.getBoundingClientRect().bottom > rowTop + 1;
+      });
+      if (!topRowMenu) topRowMenu = catalog.menus.at(-1);
+      if (topRowMenu?.categoryId !== null && topRowMenu?.categoryId !== undefined) {
+        setSelectedCategoryId(current => current === topRowMenu?.categoryId ? current : topRowMenu!.categoryId);
+      }
+    };
+    const requestUpdate = () => {
+      if (categoryScrollProgrammaticRef.current) {
+        if (categoryScrollSettleTimerRef.current !== null) window.clearTimeout(categoryScrollSettleTimerRef.current);
+        categoryScrollSettleTimerRef.current = window.setTimeout(() => {
+          categoryScrollProgrammaticRef.current = false;
+          categoryScrollSettleTimerRef.current = null;
+          updateSelectedFromTopRow();
+        }, 140);
+        return;
+      }
+      if (!frame) frame = window.requestAnimationFrame(updateSelectedFromTopRow);
+    };
+    updateSelectedFromTopRow();
+    window.addEventListener("scroll", requestUpdate, { passive: true });
+    window.addEventListener("resize", requestUpdate);
+    return () => {
+      window.removeEventListener("scroll", requestUpdate);
+      window.removeEventListener("resize", requestUpdate);
+      if (frame) window.cancelAnimationFrame(frame);
+      if (categoryScrollSettleTimerRef.current !== null) window.clearTimeout(categoryScrollSettleTimerRef.current);
+      categoryScrollSettleTimerRef.current = null;
+      categoryScrollProgrammaticRef.current = false;
+    };
+  }, [catalog]);
   useEffect(() => {
     const nav = categoryTabNavRef.current;
     const tab = selectedCategoryId === null ? null : categoryTabRefs.current.get(selectedCategoryId);
@@ -456,15 +673,192 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     else if (tabRect.right > navRect.right - margin) left += tabRect.right - navRect.right + margin;
     nav.scrollTo({ left: Math.max(0, left), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [catalog, selectedCategoryId]);
+  useEffect(() => {
+    const lastMenu = categoryMenuGroups.at(-1)?.menus[0];
+    if (!lastMenu) return;
+    const resizeBottomSpacer = () => {
+      const target = menuRowRefs.current.get(lastMenu.menuId);
+      const header = document.querySelector<HTMLElement>("[data-qr-header]");
+      const spacer = menuBottomSpacerRef.current;
+      if (!target || !header || !spacer) return;
+      const currentSpacerHeight = spacer.getBoundingClientRect().height;
+      const baseDocumentHeight = document.documentElement.scrollHeight - currentSpacerHeight;
+      const targetScrollTop = window.scrollY + target.getBoundingClientRect().top - header.offsetHeight;
+      const requiredSpacerHeight = Math.max(0, targetScrollTop - (baseDocumentHeight - window.innerHeight));
+      spacer.style.height = `${requiredSpacerHeight}px`;
+    };
+    resizeBottomSpacer();
+    window.addEventListener("resize", resizeBottomSpacer);
+    window.addEventListener("orientationchange", resizeBottomSpacer);
+    return () => {
+      window.removeEventListener("resize", resizeBottomSpacer);
+      window.removeEventListener("orientationchange", resizeBottomSpacer);
+    };
+  }, [categoryMenuGroups]);
   const selectCategory = (categoryId: number) => {
-    if (categoryId === selectedCategoryId) {
-      scrollCategoryHeaderToTop();
-      return;
-    }
-    categoryPageChangeRef.current = true;
+    const firstMenu = catalog?.menus.find(menu => menu.categoryId === categoryId);
+    const target = firstMenu ? menuRowRefs.current.get(firstMenu.menuId) : null;
+    const header = document.querySelector<HTMLElement>("[data-qr-header]");
+    if (!firstMenu || !target || !header) return;
     setSelectedCategoryId(categoryId);
+    const spacer = menuBottomSpacerRef.current;
+    const currentSpacerHeight = spacer?.getBoundingClientRect().height ?? 0;
+    const baseDocumentHeight = document.documentElement.scrollHeight - currentSpacerHeight;
+    const targetScrollTop = window.scrollY + target.getBoundingClientRect().top - header.offsetHeight;
+    const requiredSpacerHeight = Math.max(0, targetScrollTop - (baseDocumentHeight - window.innerHeight));
+    if (spacer) spacer.style.height = `${requiredSpacerHeight}px`;
+    if (Math.abs(targetScrollTop - window.scrollY) < 1) return;
+    categoryScrollProgrammaticRef.current = true;
+    if (categoryScrollSettleTimerRef.current !== null) window.clearTimeout(categoryScrollSettleTimerRef.current);
+    categoryScrollSettleTimerRef.current = window.setTimeout(() => {
+      categoryScrollProgrammaticRef.current = false;
+      categoryScrollSettleTimerRef.current = null;
+    }, 1200);
+    window.requestAnimationFrame(() => {
+      const targetTop = window.scrollY + target.getBoundingClientRect().top - header.offsetHeight;
+      window.scrollTo({ top: Math.max(0, targetTop), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    });
   };
-  const closeView = () => { setView(null); setSelectionError(""); };
+  const closeView = (fromHistory = false) => {
+    if (fromHistory) viewHistoryRef.current = false;
+    if (!viewRef.current || viewClosingRef.current) return;
+    viewClosingRef.current = true;
+    setViewDragActive(false);
+    setViewOffsetX(100);
+    if (viewCloseTimerRef.current !== null) window.clearTimeout(viewCloseTimerRef.current);
+    viewCloseTimerRef.current = window.setTimeout(() => {
+      viewCloseTimerRef.current = null;
+      viewRef.current = null;
+      viewClosingRef.current = false;
+      addSubmittedRef.current = false;
+      setView(null);
+      setSelectionError("");
+      setViewOffsetX(100);
+      if (viewHistoryRef.current) {
+        viewHistoryRef.current = false;
+        viewBackPendingRef.current = true;
+        window.history.back();
+      }
+    }, 250);
+  };
+  const closeOriginSheet = (fromHistory = false) => {
+    if (!originSheetOpenRef.current) return;
+    originSheetOpenRef.current = false;
+    setOriginSheetVisible(false);
+    if (originHistoryRef.current) {
+      originHistoryRef.current = false;
+      if (!fromHistory) window.history.back();
+    }
+    if (originSheetCloseTimerRef.current !== null) window.clearTimeout(originSheetCloseTimerRef.current);
+    originSheetCloseTimerRef.current = window.setTimeout(() => {
+      originSheetCloseTimerRef.current = null;
+      setOriginSheetOpen(false);
+    }, 250);
+  };
+  const openOriginSheet = () => {
+    if (originSheetOpenRef.current) return;
+    if (originSheetCloseTimerRef.current !== null) {
+      window.clearTimeout(originSheetCloseTimerRef.current);
+      originSheetCloseTimerRef.current = null;
+    }
+    if (originSheetFrameRef.current !== null) window.cancelAnimationFrame(originSheetFrameRef.current);
+    originSheetOpenRef.current = true;
+    setOriginSheetOpen(true);
+    setOriginSheetVisible(false);
+    window.history.pushState({ ...(window.history.state ?? {}), tdkQrMenuOrigin: true }, "", window.location.href);
+    originHistoryRef.current = true;
+    originSheetFrameRef.current = window.requestAnimationFrame(() => {
+      originSheetFrameRef.current = null;
+      if (originSheetOpenRef.current) setOriginSheetVisible(true);
+    });
+  };
+  const closeSpiceSheet = (fromHistory = false) => {
+    if (!spiceSheetOpenRef.current) return;
+    spiceSheetOpenRef.current = false;
+    setSpiceSheetVisible(false);
+    if (spiceHistoryRef.current) {
+      spiceHistoryRef.current = false;
+      if (!fromHistory) window.history.back();
+    }
+    if (spiceSheetCloseTimerRef.current !== null) window.clearTimeout(spiceSheetCloseTimerRef.current);
+    spiceSheetCloseTimerRef.current = window.setTimeout(() => {
+      spiceSheetCloseTimerRef.current = null;
+      setSpiceSheetOpen(false);
+    }, 300);
+  };
+  const openSpiceSheet = () => {
+    if (spiceSheetOpenRef.current) return;
+    if (spiceSheetCloseTimerRef.current !== null) {
+      window.clearTimeout(spiceSheetCloseTimerRef.current);
+      spiceSheetCloseTimerRef.current = null;
+    }
+    spiceSheetOpenRef.current = true;
+    setSpiceSheetOpen(true);
+    setSpiceSheetVisible(false);
+    window.history.pushState({ ...(window.history.state ?? {}), tdkQrMenuSpiceSheet: true }, "", window.location.href);
+    spiceHistoryRef.current = true;
+    if (spiceSheetFrameRef.current !== null) window.cancelAnimationFrame(spiceSheetFrameRef.current);
+    spiceSheetFrameRef.current = window.requestAnimationFrame(() => {
+      spiceSheetFrameRef.current = null;
+      if (spiceSheetOpenRef.current) setSpiceSheetVisible(true);
+    });
+  };
+  const viewHistoryActionsRef = useRef({ openMenu, closeView, closeOriginSheet, closeSpiceSheet, closeDetailGallery });
+  useLayoutEffect(() => {
+    viewHistoryActionsRef.current = { openMenu, closeView, closeOriginSheet, closeSpiceSheet, closeDetailGallery };
+  });
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (detailGalleryOpenRef.current) {
+        if (event.state?.tdkQrDetailGallery) return;
+        viewHistoryActionsRef.current.closeDetailGallery(true);
+        return;
+      }
+      if (spiceSheetOpenRef.current) {
+        if (event.state?.tdkQrMenuSpiceSheet) return;
+        viewHistoryActionsRef.current.closeSpiceSheet(true);
+        return;
+      }
+      if (originSheetOpenRef.current) {
+        if (event.state?.tdkQrMenuOrigin) return;
+        viewHistoryActionsRef.current.closeOriginSheet(true);
+        return;
+      }
+      if (viewBackPendingRef.current) {
+        viewBackPendingRef.current = false;
+        const queuedMenu = queuedMenuRef.current;
+        queuedMenuRef.current = null;
+        if (queuedMenu) viewHistoryActionsRef.current.openMenu(queuedMenu);
+        return;
+      }
+      if (!viewHistoryRef.current || event.state?.tdkQrMenuDetail || event.state?.tdkQrMenuOrigin) return;
+      viewHistoryActionsRef.current.closeView(true);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    if (!spiceSheetOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") viewHistoryActionsRef.current.closeSpiceSheet();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [spiceSheetOpen]);
+  useEffect(() => {
+    if (!detailGalleryOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") galleryActionsRef.current.closeDetailGallery();
+      else if (event.key === "ArrowLeft") galleryActionsRef.current.changeGalleryImage(-1);
+      else if (event.key === "ArrowRight") galleryActionsRef.current.changeGalleryImage(1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detailGalleryOpen]);
+  useEffect(() => () => {
+    if (spiceSheetCloseTimerRef.current !== null) window.clearTimeout(spiceSheetCloseTimerRef.current);
+    if (spiceSheetFrameRef.current !== null) window.cancelAnimationFrame(spiceSheetFrameRef.current);
+  }, []);
   const toggleOption = (groupId: number, optionId: number, multi: boolean, max: number) => {
     setSelectionError("");
     setSelections(current => {
@@ -476,19 +870,65 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
       return { ...current, [groupId]: [...existing, optionId] };
     });
   };
+  const getCurrentSelections = () => Object.fromEntries((currentMenu?.groups ?? []).map(group => [group.modifierGroupId,
+    group.source === "MENU_ADDON"
+      ? group.options.filter(option => (addonQuantities[option.modifierOptionId] ?? 0) > 0).map(option => option.modifierOptionId)
+      : selections[group.modifierGroupId] ?? [],
+  ]));
+  const toggleAddon = (optionId: number) => {
+    setSelectionError("");
+    setAddonQuantities(current => current[optionId]
+      ? Object.fromEntries(Object.entries(current).filter(([id]) => Number(id) !== optionId))
+      : { ...current, [optionId]: 1 });
+  };
+  const changeAddonQty = (optionId: number, delta: number) => {
+    setAddonQuantities(current => {
+      const qty = current[optionId] ?? 0;
+      if (!qty) return current;
+      const next = qty + delta;
+      if (next <= 0) return Object.fromEntries(Object.entries(current).filter(([id]) => Number(id) !== optionId));
+      if (next > 99) return current;
+      return { ...current, [optionId]: next };
+    });
+  };
   const addCurrentMenu = () => {
-    if (!currentMenu || !validQrSelections(currentMenu.groups, selections)) {
+    if (addSubmittedRef.current) return;
+    const currentSelections = getCurrentSelections();
+    if (!currentMenu || !validQrSelections(currentMenu.groups, currentSelections)) {
       setSelectionError("필수 옵션을 선택해 주세요.");
       return;
     }
-    const options = selectedQrOptions(currentMenu.groups, selections);
-    setCart(current => addQrCartLine(current, { menuId: currentMenu.menuId, qty: quantity, options }));
+    const options = selectedQrOptions(currentMenu.groups, currentSelections, addonQuantities);
+    const baseOptions = options.filter(option => !addonOptionById.has(option.modifierOptionId));
+    const selectedAddons = options.filter(option => addonOptionById.has(option.modifierOptionId)).map(option => {
+      const entry = currentMenu.addonDisplayEntries?.find(candidate => candidate.type === "menu" && candidate.entryId === option.modifierOptionId);
+      const menu = entry?.type === "menu" ? catalog?.menus.find(candidate => candidate.menuId === entry.menuId) : undefined;
+      return menu ? { menu, line: { menuId: menu.menuId, qty: option.qty, options: [] } satisfies QrCartLine } : null;
+    });
+    if (selectedAddons.some(addon => addon === null)) {
+      setSelectionError("추가메뉴 정보를 불러오지 못했습니다. 메뉴를 새로고침해 주세요.");
+      return;
+    }
+    addSubmittedRef.current = true;
+    const baseLine: QrCartLine = { menuId: currentMenu.menuId, qty: quantity, options: baseOptions };
+    setCart(current => {
+      let next = addQrCartLine(current, baseLine, currentMenu);
+      for (const addon of selectedAddons) {
+        if (addon) next = addQrCartLine(next, addon.line, addon.menu);
+      }
+      return next;
+    });
     const sameOptions = (candidate: QrCartLine) => candidate.menuId === currentMenu.menuId &&
-      JSON.stringify(candidate.options) === JSON.stringify(options);
+      JSON.stringify(candidate.options) === JSON.stringify(baseOptions);
     const quantityBefore = cart.find(sameOptions)?.qty ?? 0;
     const quantityAfter = Math.min(99, quantityBefore + quantity);
-    queueCartEvent("ADD", currentMenu.menuId, options.map(option => option.modifierOptionId), quantityBefore, quantityAfter);
-    setView(null);
+    queueCartEvent("ADD", currentMenu.menuId, baseOptions.map(option => option.modifierOptionId), quantityBefore, quantityAfter);
+    for (const addon of selectedAddons) {
+      if (!addon) continue;
+      const addonBefore = cart.find(line => line.menuId === addon.menu.menuId && line.options.length === 0)?.qty ?? 0;
+      queueCartEvent("ADD", addon.menu.menuId, [], addonBefore, Math.min(99, addonBefore + addon.line.qty));
+    }
+    closeView();
   };
   const changeCartQty = (line: QrCartLine, delta: number) => {
     const nextQty = Math.max(0, Math.min(99, line.qty + delta));
@@ -562,10 +1002,27 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     } finally { setWaitBusy(false); }
   };
 
+  const submitTableOrder = async () => {
+    if (!tableOrderMode || tableOrderBusy || !cart.length) return;
+    setTableOrderBusy(true);
+    setWaitError("");
+    try {
+      const requestId = crypto.randomUUID();
+      const response = await fetch("/api/qr/table-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "same-origin", body: JSON.stringify({ requestId, cart }) });
+      const result = await response.json() as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "주문을 전송하지 못했습니다.");
+      setCart([]);
+      setCartSheetOpen(false);
+      router.push("/qrorder");
+    } catch (error) { setWaitError(error instanceof Error ? error.message : "주문을 전송하지 못했습니다."); }
+    finally { setTableOrderBusy(false); }
+  };
+
   const editWaitOrder = () => {
     if (!waitOrder || waitOrder.status !== "PENDING") return;
     const restored = waitOrder.items.map(item => ({ menuId: item.menuId, qty: item.quantity, options: item.options }));
-    setCart(restored);
+    setCart(catalog ? splitQrCartAddonLines(normalizeQrCart(restored, catalog), catalog) : restored);
     setEditingWaitOrder({ id: waitOrder.waitOrderId, version: waitOrder.version });
     setWaitError("");
     openCartSheet();
@@ -585,12 +1042,14 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
     finally { setWaitBusy(false); }
   };
 
-  return <main className="min-h-svh bg-white pb-28 text-slate-900" style={titleData.photos.length ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : undefined}>
+  return <main className="min-h-svh bg-white text-slate-900" style={{ paddingBottom: `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
+    {tableOrderMode && <QrOrderTitleBar fetchTableNo fixedImageOverlay snapHandlerRef={titleSnapHandlerRef} title="주문하기" />}
+    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 bottom-[69.6px] z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status">{quickAddFeedback}</div>}
     {titleData.photos.length > 0 && <QrTitleCarousel fixedHero photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>
     {titleData.photos.length > 0 && <span aria-hidden="true" className="absolute left-0 top-0 h-px w-px" data-qr-content-start />}
     <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-white top-[var(--qr-menu-backdrop-top,0px)]" data-qr-menu-backdrop />
-    <QrStoreTitle fixedHero={titleData.photos.length > 0} notices={notices} settings={titleData} />
+    <QrStoreTitle fixedHero={titleData.photos.length > 0} snapEnabled={titleData.photos.length > 0} notices={notices} settings={titleData} snapHandlerRef={titleSnapHandlerRef} />
     <header data-qr-header className="sticky top-0 z-20 border-b border-slate-200 bg-transparent px-3 py-2 data-[qr-stuck=true]:bg-white">
       <nav aria-label="메뉴 분류" className="mx-auto flex max-w-2xl gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={categoryTabNavRef}>
         {catalog?.categories.map(category => { const active = selectedCategoryId === category.categoryId; return <button aria-current={active ? "location" : undefined} aria-pressed={active} className={`min-h-10 shrink-0 rounded-lg px-3 text-center text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-800 ${active ? "bg-[#777777] text-white" : "bg-transparent text-[#777777]"}`} key={category.categoryId} onClick={() => selectCategory(category.categoryId)} ref={element => {
@@ -612,51 +1071,299 @@ export default function QrMenuClient({ waitingMode = false, initialTitleData, no
 
     {loading ? <div aria-live="polite" className="mx-auto max-w-2xl px-4 py-16 text-center text-slate-500">{t.loading}</div>
       : catalogError ? <div className="mx-auto max-w-2xl px-4 py-16 text-center"><p className="mb-1 text-slate-600" role="alert">{catalogError.kind === "http" ? `${t.error} (HTTP ${catalogError.status})` : catalogError.kind === "network" ? t.networkError : t.invalidError}</p><button className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white" onClick={() => void loadCatalog()} type="button">{t.retry}</button></div>
-        : <div aria-label={currentCategory?.name ?? "메뉴"} className="mx-auto min-h-[calc(100dvh-10rem)] max-w-2xl px-3 py-2" data-qr-menu-page>
-          {currentCategoryMenus.length === 0 ? <p className="px-2 py-8 text-center text-sm text-slate-500">{t.noMenus}</p> : <div className="divide-y divide-slate-200 rounded-2xl bg-white px-3">{currentCategoryMenus.map(menu => <button className="flex min-h-32 w-full items-stretch gap-3 py-4 text-left active:bg-slate-50" key={menu.menuId} onClick={() => openMenu(menu)} type="button"><span className="flex min-w-0 flex-1 flex-col items-start"><strong className="line-clamp-2 text-[18px] font-extrabold leading-snug">{menu.name}</strong><span className="mt-auto pt-2 text-[18px] font-bold tabular-nums">{won(Number(menu.price), locale)}</span></span>{menu.imageUrl ? <Image alt={menu.name} className="h-28 w-28 shrink-0 rounded-xl bg-slate-100 object-cover" height={112} loading="lazy" src={menu.imageUrl} unoptimized width={112} /> : <span aria-label={t.noImage} className="flex h-28 w-28 shrink-0 flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-amber-50 to-slate-100 text-3xl" role="img"><span aria-hidden="true">{"\uD83C\uDF72"}</span><span className="text-[10px] font-medium text-slate-500">{t.noImage}</span></span>}</button>)}</div>}
+        : <div aria-label="메뉴" className="min-h-[calc(100dvh-10rem)] py-2" data-qr-menu-page>
+          {categoryMenuGroups.length === 0 ? <p className="px-2 py-8 text-center text-sm text-slate-500">{t.noMenus}</p> : categoryMenuGroups.map(({ category, menus }, categoryIndex) => <section aria-label={category.name} data-qr-category={category.categoryId} key={category.categoryId}>
+            {categoryIndex > 0 && <QrDoubleDivider fullBleed />}
+            <div className="mx-auto max-w-2xl px-3">
+              <div className="divide-y divide-slate-200 rounded-2xl bg-white px-3">{menus.map(menu => {
+                const shortDescription = locale === "ko" ? menu.shortDescription ?? "" : "";
+                return <article className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_7rem] gap-x-3 py-3 text-left" key={menu.menuId} onClick={event => {
+                  if (event.target instanceof Element && event.target.closest("button")) return;
+                  openMenu(menu);
+                }} ref={element => {
+                  if (element) menuRowRefs.current.set(menu.menuId, element);
+                  else menuRowRefs.current.delete(menu.menuId);
+                }}>
+                  <div className="grid min-h-28 min-w-0 grid-rows-[minmax(2.25rem,auto)_minmax(1.5rem,auto)_minmax(2.125rem,auto)] p-[3%]">
+                    <button aria-label={`${menu.name} ${t.title}`} className="min-h-0 text-left active:opacity-70" onClick={() => openMenu(menu)} type="button">
+                      <strong className="line-clamp-2 break-words text-[clamp(0.875rem,4.6vw,1.125rem)] font-extrabold leading-5">{menu.name}</strong>
+                    </button>
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <button aria-label={`${menu.name} ${t.title}`} className="min-w-0 truncate text-left text-[clamp(0.875rem,4.4vw,1.125rem)] font-bold tabular-nums active:opacity-70" onClick={() => openMenu(menu)} type="button">{menuCardPrice(Number(menu.price), locale)}</button>
+                    </div>
+                    <span className="line-clamp-2 min-h-0 break-words whitespace-pre-line text-[12px] font-normal leading-[1.375] text-slate-500">{shortDescription}</span>
+                  </div>
+                  <div aria-label={`${menu.name} ${t.title}`} className="relative h-28 w-28 overflow-hidden rounded-xl bg-slate-100 text-left active:opacity-70" onClick={event => { event.stopPropagation(); openMenu(menu); }} onKeyDown={event => {
+                    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openMenu(menu); }
+                  }} role="button" tabIndex={0}>
+                    {menu.imageUrl ? <Image alt="" className="h-full w-full object-cover" height={112} loading="lazy" src={menu.imageUrl} unoptimized width={112} /> : <span aria-label={t.noImage} className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl bg-gradient-to-br from-amber-50 to-slate-100 text-3xl" role="img"><span aria-hidden="true">{"\uD83C\uDF72"}</span><span className="text-[10px] font-medium text-slate-500">{t.noImage}</span></span>}
+                    {!waitingMode && <button aria-label={`${menu.name} ${t.add}`} className="absolute bottom-[1px] right-[1px] grid h-11 w-11 place-items-center rounded-full border-0 bg-transparent p-0 shadow-none transition active:scale-95 disabled:opacity-50" disabled={!cartReady} onClick={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      quickAddMenu(menu);
+                    }} type="button"><svg aria-hidden="true" className="pointer-events-none h-[25px] w-[25px] overflow-visible" fill="none" viewBox="0 0 256 256">
+                      <g stroke="#FFFFFF" strokeLinecap="round" strokeLinejoin="round" strokeWidth="44"><path d="M34 58h22c8 0 14 5 16 13l20 92c2 8 9 14 17 14h79c8 0 15-6 17-14l17-71" /><path d="M145 78v58M116 107h58" /><circle cx="116" cy="207" r="14" /><circle cx="184" cy="207" r="14" /></g>
+                      <g stroke="#1769D2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"><path d="M34 58h22c8 0 14 5 16 13l20 92c2 8 9 14 17 14h79c8 0 15-6 17-14l17-71" /><path d="M145 78v58M116 107h58" /><circle cx="116" cy="207" r="14" /><circle cx="184" cy="207" r="14" /></g>
+                    </svg></button>}
+                  </div>
+                </article>;
+              })}</div>
+            </div>
+          </section>)}
+          <div aria-hidden="true" className="bg-white" ref={menuBottomSpacerRef} style={{ height: 0 }} />
         </div>}
     </div>
 
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
-    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-blue-700 pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : "translate-y-[calc(100%-72px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
-      <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className="flex min-h-[72px] shrink-0 flex-col items-center px-4 pb-3 pt-2 text-left" onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
-        <span aria-hidden="true" className="mb-2 h-1 w-10 rounded-full bg-white/90" />
-        <span className="flex w-full max-w-xl items-center justify-between gap-3">
+    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-blue-700 pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
+      <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex shrink-0 flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${cartHasItems ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
+        <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHasItems ? "mb-[6.4px]" : ""}`} />
+        {cartHasItems && <span className="flex w-full max-w-xl items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2 font-extrabold"><svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 1.9-1.4L22 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span>{t.cart}</span><span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{itemCount}{t.count}</span></span>
-          <span className="flex shrink-0 items-center gap-2 font-bold tabular-nums">{won(total, locale)}<svg aria-hidden="true" className={`h-5 w-5 transition-transform duration-300 motion-reduce:transition-none ${cartSheetOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span>
-        </span>
+          <span className="flex shrink-0 items-center gap-2 font-bold tabular-nums">{formatQrCartPrice(total)}<svg aria-hidden="true" className={`h-5 w-5 transition-transform duration-300 motion-reduce:transition-none ${cartSheetOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span>
+        </span>}
       </button>
       <div className="flex min-h-0 flex-1 flex-col bg-slate-50 text-slate-900" inert={!cartSheetOpen}>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
           {cart.length === 0 ? <p className="py-10 text-center text-slate-500">{t.empty}</p> : <div className="divide-y divide-slate-100">{cart.map((line, index) => {
             const menu = catalog?.menus.find(item => item.menuId === line.menuId);
             if (!menu) return null;
-            const optionNames = line.options.map(selected => menu.groups.flatMap(group => group.options).find(option => option.modifierOptionId === selected.modifierOptionId)?.optionName).filter(Boolean);
-            return <div className="py-3" key={line.menuId + "-" + line.options.map(option => option.modifierOptionId).join("-") + "-" + index}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate">{menu.name}</strong>{optionNames.length > 0 && <p className="mt-1 text-xs text-slate-500">{optionNames.join("\u00b7")}</p>}<p className="mt-1 text-sm font-bold tabular-nums">{won(qrLineUnitPrice(menu, line.options) * line.qty, locale)}</p></div><div className="flex shrink-0 items-center gap-2"><button aria-label={menu.name + " " + t.qty + " -"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, -1)} type="button">-</button><span className="min-w-5 text-center tabular-nums">{line.qty}</span><button aria-label={menu.name + " " + t.qty + " +"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, 1)} type="button">+</button><button aria-label={menu.name + " " + t.remove} className="ml-1 px-2 py-2 text-xs font-semibold text-red-600" onClick={() => removeCartLine(line)} type="button">{t.remove}</button></div></div></div>;
+            const optionNames = line.options.map(selected => { const group = menu.groups.find(candidate => candidate.options.some(option => option.modifierOptionId === selected.modifierOptionId)); const option = group?.options.find(candidate => candidate.modifierOptionId === selected.modifierOptionId); return option ? `${option.optionName}${group?.source === "MENU_ADDON" ? ` ×${selected.qty}` : ""}` : ""; }).filter(Boolean);
+            return <div className="py-3" key={line.menuId + "-" + line.options.map(option => option.modifierOptionId).join("-") + "-" + index}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate">{menu.name}</strong>{optionNames.length > 0 && <p className="mt-1 text-xs text-slate-500">{optionNames.join("\u00b7")}</p>}<p className="mt-1 text-sm font-bold tabular-nums">{formatQrCartPrice(qrLineTotal(menu, line.options, line.qty))}</p></div><div className="flex shrink-0 items-center gap-2"><button aria-label={menu.name + " " + t.qty + " -"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, -1)} type="button">-</button><span className="min-w-5 text-center tabular-nums">{line.qty}</span><button aria-label={menu.name + " " + t.qty + " +"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, 1)} type="button">+</button><button aria-label={menu.name + " " + t.remove} className="ml-1 px-2 py-2 text-xs font-semibold text-red-600" onClick={() => removeCartLine(line)} type="button">{t.remove}</button></div></div></div>;
           })}</div>}
         </div>
-        <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl"><div className="flex items-center justify-between text-lg font-extrabold"><span>{t.total}</span><span className="tabular-nums">{won(total, locale)}</span></div><p className="mt-2 text-xs leading-relaxed text-slate-500">{t.estimate}</p>
+        <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl"><div className="flex items-center justify-between text-lg font-extrabold"><span>{t.total}</span><span className="tabular-nums">{formatQrCartPrice(total)}</span></div>
           {waitingMode && <>{waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}<button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50" disabled={!cart.length || waitBusy || Boolean(waitOrder && ["PENDING", "ASSIGNED"].includes(waitOrder.status) && !editingWaitOrder)} onClick={() => void submitWaitOrder()} type="button">{waitBusy ? "\uCC98\uB9AC \uC911..." : editingWaitOrder ? "\uB300\uAE30 \uC8FC\uBB38 \uC218\uC815 \uC800\uC7A5" : "\uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</button></>}
-          {!waitingMode && <a className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-amber-50 text-sm font-bold text-amber-900" href="/qr/wait">{"\uB300\uAE30 QR\uC5D0\uC11C \uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</a>}
+          {tableOrderMode && <>{waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}<button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50" disabled={!cart.length || tableOrderBusy} onClick={() => void submitTableOrder()} type="button">{tableOrderBusy ? "처리 중..." : "주문 전송"}</button></>}
+          {!waitingMode && !tableOrderMode && <a className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-amber-50 text-sm font-bold text-amber-900" href="/qr/wait">{"\uB300\uAE30 QR\uC5D0\uC11C \uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</a>}
         </div></div>
       </div>
     </section>
 
-    {view && currentMenu && <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-2 sm:items-center" onClick={closeView}>
-      <section aria-label={currentMenu.name ?? t.title} aria-modal="true" className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
-        <div className="mb-4 flex items-center justify-between gap-3"><h2 className="min-w-0 truncate text-lg font-extrabold">{currentMenu.name}</h2><button aria-label={t.close} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-100 text-xl" onClick={closeView} type="button">?</button></div>
-        {view.type === "menu" && currentMenu && <>
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3"><span className="font-bold text-slate-600">{t.qty}</span><div className="flex items-center gap-4"><button aria-label="−" className="h-10 w-10 rounded-full bg-slate-100 text-xl font-bold" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><span className="min-w-5 text-center text-lg font-bold tabular-nums">{quantity}</span><button aria-label="+" className="h-10 w-10 rounded-full bg-slate-100 text-xl font-bold" onClick={() => setQuantity(value => Math.min(99, value + 1))} type="button">+</button></div></div>
-          {currentMenu.groups.map(group => <fieldset className="border-b border-slate-100 py-4" key={group.modifierGroupId}><legend className="mb-2 flex w-full items-center justify-between gap-2 font-extrabold">{group.name}<span className="text-xs font-semibold text-slate-500">{group.isRequired || group.minSelect > 0 ? t.required : t.optional}{group.maxSelect > 1 ? ` · ${group.minSelect}–${group.maxSelect}` : ""}</span></legend><div className="space-y-1">{group.maxSelect <= 1 && !group.isRequired && group.minSelect === 0 && <label className="flex min-h-12 items-center gap-3 rounded-xl bg-slate-50 px-3"><input checked={(selections[group.modifierGroupId] ?? []).length === 0} className="h-5 w-5 accent-blue-600" name={`group-${group.modifierGroupId}`} onChange={() => setSelections(current => ({ ...current, [group.modifierGroupId]: [] }))} type="radio" /><span className="font-semibold">{t.none}</span></label>}{group.options.map(option => {
-            const selected = (selections[group.modifierGroupId] ?? []).includes(option.modifierOptionId);
-            return <label className={`flex min-h-12 items-center gap-3 rounded-xl px-3 ${selected ? "bg-blue-50 text-blue-800" : "bg-slate-50"}`} key={option.modifierOptionId}><input checked={selected} className="h-5 w-5 accent-blue-600" name={`group-${group.modifierGroupId}`} onChange={() => toggleOption(group.modifierGroupId, option.modifierOptionId, group.maxSelect > 1, group.maxSelect)} type={group.maxSelect > 1 ? "checkbox" : "radio"} /><span className="min-w-0 flex-1 font-semibold">{option.optionName}</span>{Number(option.priceDelta) !== 0 && <span className="shrink-0 text-sm tabular-nums text-slate-600">{Number(option.priceDelta) > 0 ? "+" : "−"}{won(Math.abs(Number(option.priceDelta)))}</span>}</label>;
-          })}</div></fieldset>)}
-          {selectionError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{selectionError}</p>}
-          <button className="mt-4 flex min-h-14 w-full items-center justify-between rounded-xl bg-blue-600 px-4 font-extrabold text-white" onClick={addCurrentMenu} type="button"><span>{t.add}</span><span>{won(qrLineUnitPrice(currentMenu, selectedQrOptions(currentMenu.groups, selections)) * quantity, locale)}</span></button>
-        </>}
+    {view && currentMenu && <section aria-label={currentMenu.name ?? t.title} aria-modal="true" className={`fixed inset-y-0 left-1/2 z-50 flex h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white transition-transform ${viewDragActive ? "duration-0" : "duration-[250ms] ease-out"} motion-reduce:duration-0`} onPointerDown={event => {
+      const target = event.target as HTMLElement;
+      const isTouchPointer = event.pointerType === "touch" || event.pointerType === "pen";
+      detailGestureRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        startedAt: performance.now(),
+        width: event.currentTarget.getBoundingClientRect().width,
+        carousel: Boolean(target.closest("[data-menu-detail-carousel]")),
+        edge: isTouchPointer && event.clientX <= 24,
+        cancelled: false,
+      };
+    }} onPointerMove={event => {
+      const start = detailGestureRef.current;
+      if (!start?.edge || start.carousel || start.cancelled) return;
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.abs(dy) > 16 && Math.abs(dy) > Math.abs(dx)) {
+        start.cancelled = true;
+        setViewDragActive(false);
+        setViewOffsetX(0);
+        return;
+      }
+      if (dx <= 0 || Math.abs(dx) < Math.abs(dy)) return;
+      setViewDragActive(true);
+      setViewOffsetX(Math.min(100, dx / Math.max(1, start.width) * 100));
+    }} onPointerUp={event => {
+      const start = detailGestureRef.current;
+      detailGestureRef.current = null;
+      setViewDragActive(false);
+      if (!start) return;
+      const dx = event.clientX - start.x, dy = event.clientY - start.y;
+      if (start.carousel) {
+        if (Math.abs(dx) >= 70 && Math.abs(dy) <= Math.abs(dx) * 0.8) {
+          setDetailImageIndex(index => Math.max(0, Math.min(currentDetailImages.length - 1, index + (dx < 0 ? 1 : -1))));
+          suppressDetailImageClickRef.current = true;
+          window.setTimeout(() => { suppressDetailImageClickRef.current = false; }, 300);
+        }
+        setViewOffsetX(0);
+        return;
+      }
+      const elapsed = Math.max(1, performance.now() - start.startedAt);
+      const velocity = dx / elapsed;
+      if (start.edge && !start.cancelled && dx >= 70 && Math.abs(dy) <= Math.abs(dx) * 0.8 && velocity >= 0.25) closeView();
+      else setViewOffsetX(0);
+    }} onPointerCancel={() => {
+      detailGestureRef.current = null;
+      setViewDragActive(false);
+      setViewOffsetX(0);
+    }} role="dialog" style={{ transform: `translateX(calc(-50% + ${viewOffsetX}%))`, touchAction: "pan-y" }}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-5">
+        <div className="relative w-full bg-slate-100" data-menu-detail-carousel style={{ aspectRatio: "2 / 1", maxHeight: 240 }}>
+          {currentDetailImages.length ? <Image alt={`${currentMenu.name} ${detailImageIndex + 1}`} className="h-full w-full cursor-zoom-in object-cover" height={360} onClick={event => {
+            event.stopPropagation();
+            if (suppressDetailImageClickRef.current) { suppressDetailImageClickRef.current = false; return; }
+            openDetailGallery();
+          }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetailGallery(); } }} priority role="button" tabIndex={0} src={currentDetailImages[Math.min(detailImageIndex, currentDetailImages.length - 1)]} unoptimized width={720} /> : <div className="grid h-full w-full place-items-center text-sm text-slate-400">{t.noImage}</div>}
+          <button aria-label="닫기" className="absolute right-4 top-4 z-10 grid h-12 w-12 place-items-center rounded-full text-white shadow-md" onClick={() => spiceSheetOpenRef.current ? closeSpiceSheet() : originSheetOpenRef.current ? closeOriginSheet() : closeView()} style={{ backgroundColor: "rgba(60, 64, 70, 0.75)" }} type="button"><svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+          {currentDetailImages.length > 1 && <div className="absolute bottom-3 right-3 flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs text-white"><span>{currentDetailImages.map((_, index) => <button aria-label={`이미지 ${index + 1}`} className={`mx-0.5 inline-block h-2 w-2 rounded-full ${index === detailImageIndex ? "bg-white" : "bg-white/50"}`} key={index} onClick={() => setDetailImageIndex(index)} type="button" />)}</span><span>{detailImageIndex + 1} / {currentDetailImages.length}</span></div>}
+        </div>
+        <div className="px-4 pt-5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2">
+              <h2 className="min-w-0 max-w-full break-words text-xl font-extrabold">{currentMenu.name}</h2>
+              {hasOriginDescription && <button className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-lg px-1 text-sm font-semibold leading-6 text-slate-600" onClick={openOriginSheet} type="button">
+                <span>{locale === "ko" ? "원산지정보" : locale === "en" ? "Origin" : locale === "ja" ? "原産地" : "原产地"}</span>
+                <span aria-hidden="true">&gt;</span>
+              </button>}
+            </div>
+            <strong className="shrink-0 whitespace-nowrap text-base font-bold tabular-nums">{menuCardPrice(Number(currentMenu.price), locale)}</strong>
+          </div>
+          {currentMenu.detailDescription?.trim() && <p className="mt-3 w-full break-words whitespace-pre-line text-sm leading-6 text-slate-600">{currentMenu.detailDescription}</p>}
+          <div className="mt-4 border-y border-slate-200 py-3"><div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"><span className="font-semibold text-slate-600">{t.qty}</span><div className="flex items-center justify-self-center gap-2"><button aria-label="−" className="h-10 w-10 rounded-full bg-slate-100 text-xl font-bold" onClick={() => setQuantity(value => Math.max(1, value - 1))} type="button">−</button><span className="min-w-5 text-center text-lg font-bold tabular-nums">{quantity}</span><button aria-label="+" className="h-10 w-10 rounded-full bg-slate-100 text-xl font-bold" onClick={() => setQuantity(value => Math.min(99, value + 1))} type="button">+</button></div><strong className="justify-self-end whitespace-nowrap text-right text-base font-bold tabular-nums">{menuCardPrice(Number(currentMenu.price) * quantity, locale)}</strong></div></div>
+          {spiceGroup && <button aria-expanded={spiceSheetOpen} aria-haspopup="dialog" className={`flex min-h-11 w-full items-center justify-between gap-3 py-3 text-left ${keepSpiceBottomBorder ? "border-b border-slate-100" : ""}`} onClick={openSpiceSheet} type="button"><span className="whitespace-nowrap font-bold">맵기 선택</span><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 truncate text-base font-semibold text-slate-600">{selectedSpiceOption ? qrOptionLabel(selectedSpiceOption, locale) : "선택해 주세요"}</span><svg aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span></button>}
+          {view.type === "menu" && currentMenu && <>
+            {otherRequiredGroups.map(group => <fieldset className="border-b border-slate-100 py-4" key={group.modifierGroupId}><legend className="mb-2 flex w-full items-center justify-between gap-2 font-extrabold">{group.name}{group.maxSelect > 1 ? <span className="text-xs font-semibold text-slate-500">{group.minSelect}–{group.maxSelect}</span> : null}</legend><div className="space-y-1">{group.options.map(option => {
+              const selected = (selections[group.modifierGroupId] ?? []).includes(option.modifierOptionId);
+              return <label className={`flex min-h-12 items-center gap-3 rounded-xl px-3 ${selected ? "bg-blue-50 text-blue-800" : "bg-slate-50"}`} key={option.modifierOptionId}><input checked={selected} className="h-5 w-5 accent-blue-600" name={`group-${group.modifierGroupId}`} onChange={() => toggleOption(group.modifierGroupId, option.modifierOptionId, group.maxSelect > 1, group.maxSelect)} type={group.maxSelect > 1 ? "checkbox" : "radio"} /><span className="min-w-0 flex-1 font-semibold">{qrOptionLabel(option, locale)}</span>{Number(option.priceDelta) !== 0 && <span className="shrink-0 text-sm tabular-nums text-slate-600">{Number(option.priceDelta) > 0 ? "+" : "−"}{won(Math.abs(Number(option.priceDelta)), locale)}</span>}</label>;
+            })}</div></fieldset>)}
+            {otherOptionalGroups.length > 0 && <section className="py-4"><h3 className="mb-2 font-extrabold">기타 옵션</h3>{otherOptionalGroups.map(group => <fieldset className="border-b border-slate-100 py-3" key={group.modifierGroupId}><legend className="mb-2 flex w-full items-center justify-between gap-2 font-bold">{group.name}{group.maxSelect > 1 ? <span className="text-xs font-semibold text-slate-500">최대 {group.maxSelect}개</span> : null}</legend><div className="space-y-1">{group.maxSelect <= 1 && <label className="flex min-h-12 items-center gap-3 rounded-xl bg-slate-50 px-3"><input checked={(selections[group.modifierGroupId] ?? []).length === 0} className="h-5 w-5 accent-blue-600" name={`group-${group.modifierGroupId}`} onChange={() => setSelections(current => ({ ...current, [group.modifierGroupId]: [] }))} type="radio" /><span className="font-semibold">{t.none}</span></label>}{group.options.map(option => { const selected = (selections[group.modifierGroupId] ?? []).includes(option.modifierOptionId); return <label className={`flex min-h-12 items-center gap-3 rounded-xl px-3 ${selected ? "bg-blue-50 text-blue-800" : "bg-slate-50"}`} key={option.modifierOptionId}><input checked={selected} className="h-5 w-5 accent-blue-600" name={`group-${group.modifierGroupId}`} onChange={() => toggleOption(group.modifierGroupId, option.modifierOptionId, group.maxSelect > 1, group.maxSelect)} type={group.maxSelect > 1 ? "checkbox" : "radio"} /><span className="min-w-0 flex-1 font-semibold">{qrOptionLabel(option, locale)}</span>{Number(option.priceDelta) !== 0 && <span className="shrink-0 text-sm tabular-nums text-slate-600">{Number(option.priceDelta) > 0 ? "+" : "−"}{won(Math.abs(Number(option.priceDelta)), locale)}</span>}</label>; })}</div></fieldset>)}</section>}
+            {addonDisplayEntries.length > 0 && (
+  <section className={spiceGroup ? "pb-4" : "py-4"}>
+    {spiceGroup && <div className="-mx-4 flex h-6 items-center"><QrDoubleDivider /></div>}
+    <h3 className="mt-3 mb-2 font-extrabold">{"\uCD94\uAC00\uBA54\uB274"}</h3>
+    <div className="space-y-1">
+      {addonDisplayEntries.map(entry => {
+        if (entry.type === "divider") return <div aria-orientation="horizontal" className="mx-3 my-2 border-t border-slate-200" key={entry.entryId} role="separator" />;
+        if (entry.type === "spacer") return <div aria-hidden="true" className="h-5" key={entry.entryId} />;
+        const option = addonOptionById.get(entry.entryId);
+        if (!option) return null;
+        const addonQty = addonQuantities[option.modifierOptionId] ?? 0;
+        const selected = addonQty > 0;
+        const displayPrice = Number(entry.price) * (selected ? addonQty : 1);
+        return (
+          <div
+            className={`grid min-h-12 grid-cols-[minmax(0,1fr)_5.25rem_minmax(4.5rem,auto)] items-center gap-2 rounded-xl px-3 ${selected ? "bg-blue-50 text-blue-800" : "bg-slate-50"}`}
+            key={entry.entryId}
+          >
+            <label className="flex min-w-0 items-center gap-2">
+              <input
+                aria-label={option.optionName}
+                checked={selected}
+                className="h-5 w-5 shrink-0 accent-blue-600"
+                onChange={() => toggleAddon(option.modifierOptionId)}
+                type="checkbox"
+              />
+              <span className="min-w-0 truncate font-semibold">{qrOptionLabel(option, locale)}</span>
+            </label>
+            <div className="flex items-center justify-center gap-1" role="group" aria-label={selected ? `Quantity ${addonQty}` : undefined}>
+              {selected && <>
+                <button aria-label={`Decrease ${option.optionName} quantity`} className="h-7 w-7 shrink-0 rounded-full bg-white font-bold" onClick={() => changeAddonQty(option.modifierOptionId, -1)} type="button">−</button>
+                <span className="min-w-4 text-center font-bold tabular-nums">{addonQty}</span>
+                <button aria-label={`Increase ${option.optionName} quantity`} className="h-7 w-7 shrink-0 rounded-full bg-white font-bold" onClick={() => changeAddonQty(option.modifierOptionId, 1)} type="button">+</button>
+              </>}
+            </div>
+            <span className="whitespace-nowrap text-right text-sm tabular-nums text-slate-600">{menuCardPrice(displayPrice, "ko")}</span>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+)}
+            {selectionError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{selectionError}</p>}
+          </>}
+        </div>
+      </div>
+      <footer className="shrink-0 border-t border-slate-200 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"><button className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between rounded-xl bg-blue-600 px-4 font-extrabold text-white" onClick={addCurrentMenu} type="button"><span>{t.add} ({qrLineItemCount(currentMenu, quantity, selectedQrOptions(currentMenu.groups, getCurrentSelections(), addonQuantities))}{t.count})</span><span>{formatQrCartPrice(qrLineTotal(currentMenu, selectedQrOptions(currentMenu.groups, getCurrentSelections(), addonQuantities), quantity))}</span></button></footer>
+    </section>}
+
+    {spiceSheetOpen && spiceGroup && <div aria-label="맵기 선택" className={`fixed inset-0 z-[70] flex items-end justify-center bg-black/45 transition-opacity duration-300 motion-reduce:transition-none ${spiceSheetVisible ? "opacity-100" : "opacity-0"}`} onClick={() => closeSpiceSheet()}>
+      <section aria-labelledby="qr-spice-sheet-title" aria-modal="true" className={`flex max-h-[78dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${spiceSheetVisible ? "translate-y-0" : "translate-y-full"}`} onClick={event => event.stopPropagation()} role="dialog">
+        <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-slate-100 px-5">
+          <h2 className="text-lg font-extrabold" id="qr-spice-sheet-title">맵기 선택</h2>
+          <button aria-label="맵기 선택 닫기" className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-xl font-bold text-slate-600" onClick={() => closeSpiceSheet()} type="button">×</button>
+        </header>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4">
+          {spiceGroup.options.map(option => {
+            const selected = (selections[spiceGroup.modifierGroupId] ?? []).includes(option.modifierOptionId);
+            return <button aria-pressed={selected} className={`flex min-h-14 w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${selected ? "border-blue-600 bg-blue-50 text-blue-800" : "border-slate-200 bg-slate-50 text-slate-800"}`} key={option.modifierOptionId} onClick={() => {
+              if (!selected) toggleOption(spiceGroup.modifierGroupId, option.modifierOptionId, spiceGroup.maxSelect > 1, spiceGroup.maxSelect);
+              closeSpiceSheet();
+            }} type="button">
+              <span aria-hidden="true" className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border ${selected ? "border-blue-600" : "border-slate-400"}`}>{selected && <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />}</span>
+              <span className="min-w-0 flex-1 break-words font-semibold leading-snug">{qrOptionLabel(option, locale)}</span>
+              {Number(option.priceDelta) !== 0 && <span className="shrink-0 text-sm tabular-nums text-slate-600">{Number(option.priceDelta) > 0 ? "+" : "−"}{won(Math.abs(Number(option.priceDelta)), locale)}</span>}
+            </button>;
+          })}
+        </div>
       </section>
     </div>}
+    {originSheetOpen && currentMenu && <div className={`fixed inset-0 z-[60] flex items-end justify-center bg-black/40 transition-opacity duration-[250ms] ease-out motion-reduce:transition-none ${originSheetVisible ? "opacity-100" : "opacity-0"}`} onClick={() => closeOriginSheet()}><section aria-label="원산지 정보" aria-modal="true" className={`flex max-h-[70dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-white pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-xl transition-transform duration-[250ms] ease-out motion-reduce:transition-none ${originSheetVisible ? "translate-y-0" : "translate-y-full"}`} onClick={event => event.stopPropagation()} role="dialog">
+      <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-slate-100 px-5" onPointerDown={event => { originDragStartRef.current = event.clientY; }} onPointerUp={event => { const start = originDragStartRef.current; originDragStartRef.current = null; if (start !== null && event.clientY - start > 55) closeOriginSheet(); }}>
+        <h2 className="text-lg font-extrabold">원산지 정보</h2>
+        <button aria-label="원산지 정보 닫기" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700" onClick={() => closeOriginSheet()} type="button"><svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pt-4">
+        {hasOriginDescription
+          ? <p className="mt-0 whitespace-pre-wrap break-words pb-3 pt-1 text-left text-sm leading-6 text-slate-700">{originTextRuns.map((run, index) => run.bold ? <strong className="font-bold" key={index}>{run.text}</strong> : <span key={index}>{run.text}</span>)}</p>
+          : <p className="py-6 text-center text-sm text-slate-500">등록된 원산지 정보가 없습니다.</p>}
+      </div>
+    </section></div>}
 
     </div>
+    {detailGalleryOpen && currentMenu && currentDetailImages.length > 0 && <div aria-label={`${currentMenu.name} 이미지 갤러리`} aria-modal="true" className="fixed inset-0 z-[100] flex h-[100dvh] w-full touch-none select-none flex-col items-center justify-center bg-black text-white" onClick={event => event.stopPropagation()} role="dialog" onWheel={event => {
+      event.preventDefault();
+      const nextScale = Math.max(1, Math.min(4, galleryScale * (event.deltaY < 0 ? 1.15 : 0.87)));
+      const limits = galleryOffsetLimits(nextScale);
+      setGalleryScale(nextScale);
+      setGalleryOffset(current => ({ x: Math.max(-limits.x, Math.min(limits.x, current.x)), y: Math.max(-limits.y, Math.min(limits.y, current.y)) }));
+    }}>
+      <button aria-label="이미지 갤러리 닫기" className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 grid h-12 w-12 place-items-center rounded-full bg-slate-800/85 text-white shadow-lg" onClick={() => closeDetailGallery()} type="button"><svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+      <div className="relative flex h-full w-full items-center justify-center overflow-hidden" onPointerDown={event => {
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const points = galleryPointersRef.current;
+        points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (points.size === 1) galleryGestureRef.current = { x: event.clientX, y: event.clientY, offsetX: galleryOffset.x, offsetY: galleryOffset.y, distance: 0, scale: galleryScale, pointerType: event.pointerType, mode: galleryScale > 1 ? "pan" : "swipe" };
+        else if (points.size >= 2) {
+          const pair = [...points.values()].slice(0, 2);
+          galleryGestureRef.current = { x: 0, y: 0, offsetX: galleryOffset.x, offsetY: galleryOffset.y, distance: Math.hypot(pair[1].x - pair[0].x, pair[1].y - pair[0].y), scale: galleryScale, pointerType: event.pointerType, mode: "pinch" };
+        }
+      }} onPointerMove={event => {
+        const points = galleryPointersRef.current;
+        if (!points.has(event.pointerId)) return;
+        points.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const gesture = galleryGestureRef.current;
+        if (!gesture) return;
+        if (points.size >= 2) {
+          const pair = [...points.values()].slice(0, 2);
+          const distance = Math.hypot(pair[1].x - pair[0].x, pair[1].y - pair[0].y);
+          const nextScale = Math.max(1, Math.min(4, gesture.scale * distance / Math.max(1, gesture.distance)));
+          setGalleryScale(nextScale);
+          const { x: limitX, y: limitY } = galleryOffsetLimits(nextScale);
+          setGalleryOffset(current => ({ x: Math.max(-limitX, Math.min(limitX, current.x)), y: Math.max(-limitY, Math.min(limitY, current.y)) }));
+          return;
+        }
+        if (gesture.mode !== "pan") return;
+        const dx = event.clientX - gesture.x;
+        const dy = event.clientY - gesture.y;
+        const { x: limitX, y: limitY } = galleryOffsetLimits(galleryScale);
+        setGalleryOffset({ x: Math.max(-limitX, Math.min(limitX, gesture.offsetX + dx)), y: Math.max(-limitY, Math.min(limitY, gesture.offsetY + dy)) });
+      }} onPointerUp={event => {
+        const gesture = galleryGestureRef.current;
+        const dx = event.clientX - (gesture?.x ?? event.clientX);
+        const dy = event.clientY - (gesture?.y ?? event.clientY);
+        galleryPointersRef.current.delete(event.pointerId);
+        if (galleryPointersRef.current.size === 1) {
+          const remaining = [...galleryPointersRef.current.values()][0];
+          galleryGestureRef.current = { x: remaining.x, y: remaining.y, offsetX: galleryOffset.x, offsetY: galleryOffset.y, distance: 0, scale: galleryScale, pointerType: event.pointerType, mode: galleryScale > 1 ? "pan" : "swipe" };
+          return;
+        }
+        galleryGestureRef.current = null;
+        if (gesture?.mode === "swipe" && galleryScale === 1) {
+          if (Math.abs(dx) >= 55 && Math.abs(dy) <= Math.abs(dx) * 0.8) changeGalleryImage(dx < 0 ? 1 : -1);
+          else if (gesture.pointerType !== "mouse" && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+            const now = performance.now();
+            if (now - galleryLastTapRef.current < 320) toggleGalleryZoom();
+            galleryLastTapRef.current = now;
+          }
+        }
+      }} onPointerCancel={event => { galleryPointersRef.current.delete(event.pointerId); galleryGestureRef.current = null; }} ref={galleryViewportRef}>
+        <Image alt={`${currentMenu.name} ${detailImageIndex + 1}`} className="max-h-full max-w-full object-contain transition-transform duration-150 ease-out" draggable={false} height={1200} onDoubleClick={toggleGalleryZoom} ref={galleryImageRef} src={currentDetailImages[Math.min(detailImageIndex, currentDetailImages.length - 1)]} style={{ transform: `translate(${galleryOffset.x}px, ${galleryOffset.y}px) scale(${galleryScale})`, touchAction: "none" }} unoptimized width={2400} />
+      </div>
+      {currentDetailImages.length > 1 && <div className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] rounded-full bg-slate-800/75 px-4 py-2 text-sm font-semibold tabular-nums">{Math.min(detailImageIndex, currentDetailImages.length - 1) + 1} / {currentDetailImages.length}</div>}
+    </div>}
   </main>;
 }

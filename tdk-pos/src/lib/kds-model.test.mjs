@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildKdsTableCompletionTaskSnapshot, canRecoverKdsTableCompletionCancellation, honorQueuedKdsTableCompletionCancel, isKdsTableDoubleClick } from "./kds-model.ts";
 import { parseKdsMenuConfig } from "./kds-menu-config.ts";
-import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canRequestKdsTaskCompletionDuringStartWindow, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, resolveKdsIndividualButtonIntent, transitionKdsState } from "./kds-model.ts";
+import { buildKdsTaskDrafts, canAcceptKdsQueuedUndo, canCancelKdsTableCompletion, canFinalizeKdsTableCompletion, canJoinKdsCookingGroup, canRequestKdsTaskCompletionDuringStartWindow, canUndoKdsStatusStart, canUseKdsMenuAction, cancelKdsTaskCompletionRequests, clearCancelledKdsTableCompletionRequests, DEFAULT_KDS_COOKING_SETTINGS, findKdsRecentMenuGroup, formatKdsMenuNameWithQuantity, formatKdsTaskDisplay, getKdsTableButtonAction, isKdsCompletionCountdownSeconds, isKdsCompletedTimeShrinkStartMinutes, isKdsCookingSettings, isKdsPostCookTimerMinutes, isKdsSelectedPotTasks, kdsCompletedElapsedMinutes, kdsCompletedElapsedSeconds, kdsCompletedTimeShrinkStage, kdsCompletedTimerDisplay, kdsTableCompletionFinalizeAtMs, kdsTimeNumberColor, matchesKdsTableStartBatch, needsNewCookingGroup, remainingKdsCompletionSeconds, remainingKdsQuantity, remainingKdsStartUndoSeconds, remainingKdsStartUndoSecondsFromClick, resolveKdsIndividualButtonIntent, transitionKdsState } from "./kds-model.ts";
 
 const item = (itemId, kdsKind, overrides = {}) => ({
   itemId, parentItemId: null, menuId: itemId, itemType: "NORMAL",
@@ -20,12 +20,37 @@ test("menu configuration preserves explicit completion elapsed display OFF", () 
   assert.equal(parseKdsMenuConfig("SOLO", null, undefined), null);
 });
 
+test("simple cook defaults off and cannot be combined with a post-cook timer", () => {
+  assert.equal(parseKdsMenuConfig("SOLO", null, false)?.kdsSimpleCook, false);
+  assert.equal(parseKdsMenuConfig("SOLO", null, false, true, false, true)?.kdsSimpleCook, true);
+  assert.equal(parseKdsMenuConfig("SOLO", null, false, true, true, true), null);
+});
+
+test("simple cook pots stay separate from regular pots and their addons", () => {
+  const drafts = buildKdsTaskDrafts(901, [
+    item(1, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "same", kdsSimpleCook: true }),
+    item(2, "POT", { kdsGroupKey: "STEW", cookOptionSignature: "same" }),
+    item(3, "ADDON", { kdsGroupKey: "STEW", cookOptionSignature: "same" }),
+  ]);
+  assert.equal(drafts.length, 2);
+  assert.deepEqual(drafts[0].members.map(member => [member.itemId, member.kind, member.simpleCook ?? false]), [[1, "POT", true]]);
+  assert.deepEqual(drafts[1].members.map(member => [member.itemId, member.kind]), [[2, "POT"], [3, "ADDON"]]);
+});
+
 test("KDS waiting, elapsed, and active countdown numbers use their own colors", () => {
   assert.equal(kdsTimeNumberColor("WAITING", false), "#111827");
   assert.equal(kdsTimeNumberColor("WAITING", true), "#7C3AED");
   assert.equal(kdsTimeNumberColor("COOKING", false), "#2563EB");
   assert.equal(kdsTimeNumberColor("COOKING", true), "#7C3AED");
   assert.equal(kdsTimeNumberColor("DONE", false), "#111827");
+});
+
+test("KDS menu quantity labels append counts with a space and preserve menu-name hyphens", () => {
+  assert.equal(formatKdsMenuNameWithQuantity("계란말이", 1), "계란말이");
+  assert.equal(formatKdsMenuNameWithQuantity("계란말이", 2), "계란말이 2");
+  assert.equal(formatKdsMenuNameWithQuantity("계란말이", 3), "계란말이 3");
+  assert.equal(formatKdsMenuNameWithQuantity("흑돼지김치찌개", 2), "흑돼지김치찌개 2");
+  assert.equal(formatKdsMenuNameWithQuantity("삼겹-김치찌개", 2), "삼겹-김치찌개 2");
 });
 
 test("one persisted pot task keeps each stew's servings and real components once", () => {

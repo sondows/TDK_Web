@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RowDataPacket } from "mysql2";
 import { redirect } from "next/navigation";
 import { db, pool } from "@/db";
-import { customers, diningTables, discountRules, inventoryItems, orderItemCancellations, orderItemOptions, orderItems, orders, paymentSessionAllocations, payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
+import { customers, diningTables, discountRules, inventoryItems, modifierGroups, modifierOptions, orderItemCancellations, orderItemOptions, orderItems, orders, paymentSessionAllocations, payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { maskEmployeeLoginId } from "@/lib/employee-login-id";
 import PosShell from "./PosShell";
@@ -11,6 +11,7 @@ import { resolveTableLayout } from "@/lib/table-layout";
 import { calculateTableFinancials, summarizeSessionFinancials } from "@/lib/table-session-financials";
 import { toQrLanguageDisplayCode } from "@/lib/qr-language-code";
 import { loadPosMenuCatalog } from "@/lib/pos-menu-catalog";
+import { isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
 
 type QrOrderLocaleRow = RowDataPacket & { sessionId: number; languageCode: string | null };
 
@@ -86,18 +87,20 @@ export default async function PosPage() {
   const orderIds = sessionOrders.map((order) => order.orderId);
   const items = orderIds.length ? await db.select({ orderItemId: orderItems.orderItemId, orderId: orderItems.orderId, menuId: orderItems.menuId, parentOrderItemId: orderItems.parentOrderItemId, itemType: orderItems.itemType, actualComponentQty: orderItems.actualComponentQty, itemName: orderItems.itemName, qty: orderItems.qty, unitPrice: orderItems.unitPrice, discountAmount: orderItems.discountAmount, totalAmount: orderItems.totalAmount, status: orderItems.status }).from(orderItems).where(inArray(orderItems.orderId, orderIds)).orderBy(orderItems.orderItemId) : [];
   const itemIds = items.map(item => item.orderItemId);
-  const itemOptions = itemIds.length ? await db.select({ orderItemId: orderItemOptions.orderItemId, modifierOptionId: orderItemOptions.modifierOptionId, optionName: orderItemOptions.optionName, qty: orderItemOptions.qty, unitPrice: orderItemOptions.unitPrice }).from(orderItemOptions).where(inArray(orderItemOptions.orderItemId, itemIds)) : [];
+  const itemOptions = itemIds.length ? await db.select({ orderItemId: orderItemOptions.orderItemId, modifierOptionId: orderItemOptions.modifierOptionId, optionName: orderItemOptions.optionName, qty: orderItemOptions.qty, unitPrice: orderItemOptions.unitPrice, groupName: modifierGroups.posName }).from(orderItemOptions).leftJoin(modifierOptions, eq(orderItemOptions.modifierOptionId, modifierOptions.modifierOptionId)).leftJoin(modifierGroups, eq(modifierOptions.modifierGroupId, modifierGroups.modifierGroupId)).where(inArray(orderItemOptions.orderItemId, itemIds)) : [];
   const cancellations = itemIds.length ? await db.select({ cancellationId: orderItemCancellations.cancellationId, orderItemId: orderItemCancellations.orderItemId, cancelledQty: orderItemCancellations.cancelledQty, cancelledAmount: orderItemCancellations.cancelledAmount, cancellationReason: orderItemCancellations.cancellationReason, cancelledAt: orderItemCancellations.cancelledAt, cancelledByStaffId: orderItemCancellations.cancelledByStaffId }).from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, itemIds)).orderBy(orderItemCancellations.cancelledAt) : [];
   const orderSessionById = new Map(sessionOrders.map((order) => [order.orderId, order.sessionId]));
   const orderStatusById = new Map(sessionOrders.map((order) => [order.orderId, order.status]));
   const amountDueBySession = new Map<number, number>();
   const cancellationsByItem = new Map<number, typeof cancellations>(); cancellations.forEach(cancellation => cancellationsByItem.set(cancellation.orderItemId, [...(cancellationsByItem.get(cancellation.orderItemId) ?? []), cancellation]));
   const optionsByItem = new Map<number, typeof itemOptions>(); itemOptions.forEach(option => optionsByItem.set(option.orderItemId, [...(optionsByItem.get(option.orderItemId) ?? []), option]));
-  const orderDetails = sessionOrders.map(order => ({ orderId: order.orderId, sessionId: order.sessionId, orderedAt: new Date(Number(order.orderedAtEpoch) * 1000).toISOString(), status: order.status, items: items.filter(item => item.orderId === order.orderId).map(item => { const itemCancellations = cancellationsByItem.get(item.orderItemId) ?? []; const cancelledQty = itemCancellations.reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0); const actualQty = item.actualComponentQty ?? item.qty; return { ...item, cancelledQty, effectiveQty: order.status === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, actualQty - cancelledQty), options: (optionsByItem.get(item.orderItemId) ?? []).map(option => ({ ...option })), cancellations: itemCancellations.map(cancellation => ({ ...cancellation, cancelledAt: cancellation.cancelledAt.toISOString() })) }; }) }));
+  const orderDetails = sessionOrders.map(order => ({ orderId: order.orderId, sessionId: order.sessionId, orderedAt: new Date(Number(order.orderedAtEpoch) * 1000).toISOString(), status: order.status, items: items.filter(item => item.orderId === order.orderId).map(item => { const itemCancellations = cancellationsByItem.get(item.orderItemId) ?? []; const cancelledQty = itemCancellations.reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0); const actualQty = item.actualComponentQty ?? item.qty; return { ...item, cancelledQty, effectiveQty: order.status === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, actualQty - cancelledQty), options: (optionsByItem.get(item.orderItemId) ?? []).map(({ groupName, ...option }) => ({ ...option, independentQty: isQrMenuAddonGroupName(groupName ?? "") })), cancellations: itemCancellations.map(cancellation => ({ ...cancellation, cancelledAt: cancellation.cancelledAt.toISOString() })) }; }) }));
   items.forEach((item) => {
     const sessionId = orderSessionById.get(item.orderId);
     const effectiveQty = orderStatusById.get(item.orderId) === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, item.qty - (cancellationsByItem.get(item.orderItemId) ?? []).reduce((sum, cancellation) => sum + cancellation.cancelledQty, 0));
-    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + (item.itemType === "SERVICE" ? 0 : Number(item.unitPrice) * effectiveQty));
+    const addonTotal = (optionsByItem.get(item.orderItemId) ?? []).filter(option => isQrMenuAddonGroupName(option.groupName ?? "")).reduce((sum, option) => sum + Number(option.unitPrice) * option.qty, 0);
+    const lineTotal = item.itemType === "SERVICE" ? 0 : (Number(item.totalAmount) - addonTotal) * effectiveQty / Math.max(1, item.qty) + addonTotal;
+    if (sessionId && effectiveQty > 0) amountDueBySession.set(sessionId, (amountDueBySession.get(sessionId) ?? 0) + lineTotal);
   });
   const prepaidBySessionId = new Map<number, number>();
   paymentAllocations.forEach(allocation => prepaidBySessionId.set(allocation.sessionId, (prepaidBySessionId.get(allocation.sessionId) ?? 0) + Number(allocation.amount)));

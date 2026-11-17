@@ -30,6 +30,9 @@ const navigation: NavigationItem[] = [
     children: [
       { label: "메뉴관리", href: "/tdkadm/menus" },
       { label: "메뉴분류", href: "/tdkadm/menus/categories" },
+      { label: "메뉴이미지", href: "/tdkadm/menus/images" },
+      { label: "메뉴설명", href: "/tdkadm/menus/descriptions" },
+      { label: "추가메뉴등록", href: "/tdkadm/menus/addons" },
     ],
   },
   {
@@ -39,6 +42,7 @@ const navigation: NavigationItem[] = [
     children: [
       { label: "타이틀설정", href: "/tdkadm/qr/title" },
       { label: "안내문", href: "/tdkadm/qr/notices" },
+      { label: "QR 발행·관리", href: "/tdkadm/qr-codes" },
     ],
   },
   {
@@ -134,6 +138,9 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
       children: [
         { label: "메뉴관리", href: "/tdkadm/menus" },
         { label: "메뉴분류", href: "/tdkadm/menus/categories" },
+        { label: "메뉴이미지", href: "/tdkadm/menus/images" },
+        { label: "메뉴설명", href: "/tdkadm/menus/descriptions" },
+        { label: "추가메뉴등록", href: "/tdkadm/menus/addons" },
       ],
     }]
     : menuOnly ? [] : navigation.filter(item => (canAccessSecurity || !isGroup(item) || item.id !== "security") &&

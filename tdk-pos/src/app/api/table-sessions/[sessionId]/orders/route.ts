@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/mysql-core";
 
 import { db } from "@/db";
 import { menuComponents, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemOptions, orderItems, orders, tableSessions } from "@/db/schema";
+import { isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
 import { getCurrentStaff } from "@/lib/auth";
 import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
@@ -86,7 +87,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ses
         priceDelta: modifierOptions.priceDelta,
       }).from(menuModifierGroups).innerJoin(modifierGroups, eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId)).innerJoin(modifierOptions, eq(modifierOptions.modifierGroupId, menuModifierGroups.modifierGroupId))
         .where(and(inArray(menuModifierGroups.menuId, menuIds), inArray(modifierOptions.modifierOptionId, optionIds), eq(modifierOptions.isActive, 1))) : [];
-      const optionByMenuAndId = new Map(availableOptions.map(option => [`${option.menuId}:${option.modifierOptionId}`, option]));
+      const optionByMenuAndId = new Map(availableOptions.filter(option => !isQrMenuAddonGroupName(option.groupName)).map(option => [`${option.menuId}:${option.modifierOptionId}`, option]));
 
       const componentMenu = alias(menus, "component_menu");
       const configuredComponents = await tx.select({

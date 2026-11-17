@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { pool } from "@/db";
+import { isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
 import { attachKdsOrderBundleAddons, buildKdsOrderBundleKeys, buildKdsTableOrderBundleKeys, groupKdsPotDisplayRows } from "@/lib/kds-party-grouping";
 import {
   buildKdsTaskDrafts, findKdsRecentMenuGroup, isKdsMenuEligible, kdsCookOptionSignature, needsNewCookingGroup, remainingKdsQuantity, transitionKdsState, transitionKdsLinkedAddonState,
@@ -18,7 +19,7 @@ type CursorRow = RowDataPacket & { initialOrderId: number; lastOrderId: number }
 type SourceRow = RowDataPacket & {
   itemId: number; parentItemId: number | null; menuId: number;
   itemType: "NORMAL" | "COMPONENT" | "SERVICE";
-  kdsKind: KdsMenuKind; kdsGroupKey: string | null; kdsCompletionTimer: number; printOnKitchen: number; kdsVisible: number;
+  kdsKind: KdsMenuKind; kdsGroupKey: string | null; kdsCompletionTimer: number; kdsSimpleCook: number; printOnKitchen: number; kdsVisible: number;
 };
 type TaskRow = RowDataPacket & {
   taskId: number; orderId: number; memberItems: string; kind: "POT" | "SOLO";
@@ -36,7 +37,7 @@ type ItemRow = RowDataPacket & {
   kdsGroupKey: string | null; kdsPostCookTimer: number;
 };
 type CancelRow = RowDataPacket & { itemId: number; cancelledQty: number };
-type OptionRow = RowDataPacket & { itemId: number; optionName: string; qty: number };
+type OptionRow = RowDataPacket & { itemId: number; optionName: string; qty: number; groupName?: string | null };
 type GroupRow = RowDataPacket & { groupId: number; startedAtMs: number };
 type MenuGroupCandidateRow = GroupRow & { lastStartAtMs: number; previousState: string | null };
 
@@ -108,7 +109,7 @@ async function linkedOrderBundleAddonTaskIds(connection: PoolConnection, potTask
     const addonBundle = orderBundles.get(`${addon.tableId}:${addon.orderId}`);
     if (!addonBundle || addonBundle !== potBundle || Number(pot.confirmedAtMs) > Number(addon.confirmedAtMs)) continue;
     const members = (JSON.parse(addon.memberItems) as KdsMember[]).filter(member => member.kind !== "COMPONENT");
-    if (!members.length || !members.every(member => liveMember(member.itemId) && configById.get(member.itemId)?.kdsKind === "ADDON")) continue;
+    if (!members.length || members.some(member => member.simpleCook) || !members.every(member => liveMember(member.itemId) && configById.get(member.itemId)?.kdsKind === "ADDON")) continue;
     const groupKeys = [...new Set(members.map(member => configById.get(member.itemId)?.kdsGroupKey?.trim() || null))];
     if (groupKeys.length !== 1) continue;
     const groupKey = groupKeys[0];
@@ -138,6 +139,7 @@ async function materializeOrder(connection: PoolConnection, orderId: number) {
     SELECT oi.order_item_id AS itemId, oi.parent_order_item_id AS parentItemId,
       oi.menu_id AS menuId, oi.item_type AS itemType, m.kds_kind AS kdsKind,
       m.kds_group_key AS kdsGroupKey, m.kds_completion_timer AS kdsCompletionTimer,
+      m.kds_simple_cook AS kdsSimpleCook,
       m.kds_visible AS kdsVisible,
       CASE WHEN oi.item_type='COMPONENT' THEN COALESCE(mc.print_on_kitchen,1) ELSE 1 END AS printOnKitchen
     FROM order_items oi
@@ -157,7 +159,7 @@ async function materializeOrder(connection: PoolConnection, orderId: number) {
   for (const task of buildKdsTaskDrafts(orderId, items.map(item => ({
     itemId: Number(item.itemId), parentItemId: number(item.parentItemId),
     menuId: Number(item.menuId), itemType: item.itemType, kdsKind: item.kdsKind,
-    kdsGroupKey: item.kdsGroupKey, kdsCompletionTimer: Boolean(item.kdsCompletionTimer),
+    kdsGroupKey: item.kdsGroupKey, kdsCompletionTimer: Boolean(item.kdsCompletionTimer), kdsSimpleCook: Boolean(item.kdsSimpleCook),
     printOnKitchen: Boolean(item.printOnKitchen), kdsVisible: Boolean(item.kdsVisible),
     cookOptionSignature: kdsCookOptionSignature((optionsByItem.get(Number(item.itemId)) ?? []).map(name => ({ name }))),
   })))) {
@@ -249,6 +251,7 @@ export type KdsViewTask = {
   taskId: number; orderId: number; sessionId: number; tableId: number | null; groupId: number | null;
   label: string; sessionKind: TaskRow["sessionKind"]; orderedAtMs: number; confirmedAtMs: number; orderBundleKey: string | null;
   kind: "POT" | "SOLO"; compatibilityKey: string; cookSignature: string; status: KdsTaskStatus; completionTimer: boolean;
+  simpleCook: boolean; simpleCookUndoUntilMs: number | null;
   postCookTimerEligible: boolean; postCookTimerMinutes: KdsPostCookTimerMinutes | null; postCookTimerStartedAtMs: number | null;
   completionRequestedAtMs: number | null; completionRequestId: string | null; completionRequestScope: "TASK" | "TABLE" | null;
   completionRequestCommand: "TABLE_DOUBLE_CLICK" | null;
@@ -277,6 +280,7 @@ type KdsPreviousState = KdsStateSnapshot & {
     command?: "TABLE_DOUBLE_CLICK";
   };
   completedTaskRequest?: { ownerTaskId: number; requestedAtMs: number };
+  simpleCookCompletion?: { completedAtMs: number; previousState: string | null };
   completionRequest?: {
     requestedAtMs: number; postCookTimerMinutes: number | null; completionCountdownSeconds?: number; requestId?: string;
     scope?: "TASK" | "TABLE"; sessionId?: number; ownerTaskId?: number; expectedStatus?: KdsTaskStatus; expectedChangedAtMs?: number | null;
@@ -346,8 +350,10 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
       WHERE oi.order_item_id IN (?)`, [ids]).then(([rows]) => rows),
     pool.query<CancelRow[]>(`SELECT order_item_id AS itemId,SUM(cancelled_qty) AS cancelledQty
       FROM order_item_cancellations WHERE order_item_id IN (?) GROUP BY order_item_id`, [ids]).then(([rows]) => rows),
-    pool.query<OptionRow[]>(`SELECT order_item_id AS itemId,option_name AS optionName,qty
-      FROM order_item_options WHERE order_item_id IN (?) ORDER BY order_item_id,modifier_option_id`, [ids]).then(([rows]) => rows),
+    pool.query<OptionRow[]>(`SELECT oio.order_item_id AS itemId,oio.option_name AS optionName,oio.qty,mg.pos_name AS groupName
+      FROM order_item_options oio LEFT JOIN modifier_options mo ON mo.modifier_option_id=oio.modifier_option_id
+      LEFT JOIN modifier_groups mg ON mg.modifier_group_id=mo.modifier_group_id
+      WHERE oio.order_item_id IN (?) ORDER BY oio.order_item_id,oio.modifier_option_id`, [ids]).then(([rows]) => rows),
   ]);
   const itemById = new Map(items.map(item => [Number(item.itemId), item]));
   const cancelledById = new Map(cancellations.map(row => [Number(row.itemId), Number(row.cancelledQty)]));
@@ -389,7 +395,8 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
         // Older tasks have no member snapshot, so keep their persisted task-level setting.
         completionTimer: member.completionTimer ?? Boolean(task.completionTimer), note: item.note,
         options: (optionsById.get(member.itemId) ?? []).map(option => ({
-          name: option.optionName, qty: Math.round(Number(option.qty) * qty / Math.max(1, originalQty)),
+          name: option.optionName, qty: isQrMenuAddonGroupName(option.groupName ?? "")
+            ? Number(option.qty) : Math.round(Number(option.qty) * qty / Math.max(1, originalQty)),
         })).filter(option => option.qty > 0) }];
     });
     if (!members.some(member => member.kind !== "COMPONENT" && eligibleMember(member))) continue;
@@ -404,6 +411,8 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
     }) : active;
     const previousState = parseKdsPreviousState(task.previousState);
     const completionRequest = pendingCompletion(previousState);
+    const activePrimaryMembers = active.filter(item => item.kind !== "COMPONENT").map(item => members.find(member => member.itemId === item.itemId));
+    const simpleCook = activePrimaryMembers.length > 0 && activePrimaryMembers.every(member => member?.simpleCook === true);
     result.push({
       taskId: Number(task.taskId), orderId: Number(task.orderId), sessionId: Number(task.sessionId),
       tableId: number(task.tableId), groupId: number(task.groupId),
@@ -413,8 +422,9 @@ export async function listKdsTasks(bundleWindowMs = 0): Promise<KdsViewTask[]> {
       compatibilityKey: task.compatibilityKey,
       cookSignature: task.kind === "POT" ? kdsCookOptionSignature(active
         .filter(item => item.kind === "POT").flatMap(item => item.options.map(option => ({ name: option.name })))) : "",
-      status: task.status, completionTimer: Boolean(task.completionTimer),
-      postCookTimerEligible: active.some(item => Boolean(itemById.get(item.itemId)?.kdsPostCookTimer)),
+      status: task.status, completionTimer: Boolean(task.completionTimer), simpleCook,
+      simpleCookUndoUntilMs: previousState?.simpleCookCompletion ? previousState.simpleCookCompletion.completedAtMs + 3000 : null,
+      postCookTimerEligible: !simpleCook && active.some(item => Boolean(itemById.get(item.itemId)?.kdsPostCookTimer)),
       postCookTimerMinutes: task.postCookTimerMinutes !== null && isKdsPostCookTimerMinutes(Number(task.postCookTimerMinutes)) ? Number(task.postCookTimerMinutes) as KdsPostCookTimerMinutes : null,
       postCookTimerStartedAtMs: number(task.postCookTimerStartedAtMs),
       completionRequestedAtMs: completionRequest?.requestedAtMs ?? null,
@@ -489,6 +499,9 @@ export async function updateKdsTask(
     const primaryIds = members.filter(member => member.kind !== "COMPONENT").map(member => member.itemId);
     const memberIds = members.map(member => member.itemId);
     if (!primaryIds.length) throw new KdsActionError("조리 항목을 찾을 수 없습니다.");
+    if (members.some(member => member.kind !== "COMPONENT" && member.simpleCook === true)) {
+      throw new KdsActionError("단순조리 메뉴는 일반 조리 상태 버튼으로 변경할 수 없습니다.");
+    }
     const [activeRows] = await connection.query<RowDataPacket[]>(`
       SELECT oi.order_item_id AS itemId,oi.parent_order_item_id AS parentItemId,oi.status,
         m.kds_post_cook_timer AS kdsPostCookTimer,m.kds_kind AS kdsKind,m.kds_visible AS kdsVisible,
@@ -689,6 +702,85 @@ function completionState(row: Pick<CompletionLockedTask,
     cookingStartedAtMs: number(row.cookingStartedAtMs), cookingCompletedAtMs: number(row.cookingCompletedAtMs),
     previousState: parseKdsPreviousState(row.previousState), changedAtMs: number(row.changedAtMs),
   };
+}
+
+export async function toggleSimpleCookTaskCompletion(taskId: number, expected: { status: KdsTaskStatus; changedAtMs: number | null }) {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [owners] = await connection.query<Array<RowDataPacket & { sessionId: number }>>(
+      "SELECT o.session_id AS sessionId FROM kds_tasks k INNER JOIN orders o ON o.order_id=k.order_id WHERE k.task_id=?", [taskId],
+    );
+    if (!owners[0]) throw new KdsActionError("조리 작업을 찾을 수 없습니다.", 404);
+    const [sessions] = await connection.query<Array<RowDataPacket & { status: string }>>(
+      "SELECT status FROM table_sessions WHERE session_id=? FOR UPDATE", [owners[0].sessionId],
+    );
+    if (sessions[0]?.status !== "OPEN") throw new KdsActionError("POS에서 종료된 주문입니다. 화면을 갱신해 주세요.");
+    const row = await lockCompletionTask(connection, taskId);
+    if (!row || row.status !== expected.status || number(row.changedAtMs) !== expected.changedAtMs) {
+      throw new KdsActionError("조리 상태가 변경되었습니다. 화면을 새로고침해 주세요.");
+    }
+    const previous = parseKdsPreviousState(row.previousState);
+    if (row.status === "DONE") {
+      const completion = previous?.simpleCookCompletion;
+      const now = Date.now();
+      if (!completion || now < completion.completedAtMs || now - completion.completedAtMs > 3000) {
+        throw new KdsActionError("단순조리 완료 취소 가능 시간이 지났습니다.");
+      }
+      const [updated] = await connection.execute<ResultSetHeader>(`
+        UPDATE kds_tasks SET status='WAITING',cooking_group_id=NULL,cooking_started_at_ms=NULL,
+          cooking_completed_at_ms=NULL,previous_state=?,changed_at_ms=?,
+          post_cook_timer_minutes=NULL,post_cook_timer_started_at_ms=NULL
+        WHERE task_id=? AND status='DONE' AND changed_at_ms <=> ?`,
+      [completion.previousState, now, taskId, expected.changedAtMs]);
+      if (updated.affectedRows !== 1) throw new KdsActionError("조리 상태가 변경되었습니다. 화면을 새로고침해 주세요.");
+      await connection.commit();
+      return { status: "WAITING" as const, changedAtMs: now, completedAtMs: null, undone: true };
+    }
+    if (row.status !== "WAITING" || row.previousState && pendingCompletion(previous)) {
+      throw new KdsActionError("현재 상태에서는 단순조리를 완료할 수 없습니다.");
+    }
+    const members = JSON.parse(row.memberItems) as KdsMember[];
+    const primaryIds = members.filter(member => member.kind !== "COMPONENT").map(member => member.itemId);
+    if (!primaryIds.length || members.some(member => member.kind !== "COMPONENT" && member.simpleCook !== true)) {
+      throw new KdsActionError("단순조리 메뉴만 즉시 완료할 수 있습니다.");
+    }
+    const [items] = await connection.query<Array<RowDataPacket & {
+      itemId: number; itemStatus: string; orderStatus: string; sessionStatus: string;
+      simpleCook: number; timer: number; kind: KdsMenuKind; visible: number; remaining: number;
+    }>>(`
+      SELECT oi.order_item_id AS itemId,oi.status AS itemStatus,o.status AS orderStatus,s.status AS sessionStatus,
+        m.kds_simple_cook AS simpleCook,m.kds_post_cook_timer AS timer,m.kds_kind AS kind,m.kds_visible AS visible,
+        COALESCE(oi.actual_component_qty,oi.qty)-COALESCE(c.cancelled_qty,0) AS remaining
+      FROM order_items oi INNER JOIN menus m ON m.menu_id=oi.menu_id
+      INNER JOIN orders o ON o.order_id=oi.order_id INNER JOIN table_sessions s ON s.session_id=o.session_id
+      LEFT JOIN (SELECT order_item_id,SUM(cancelled_qty) AS cancelled_qty FROM order_item_cancellations
+        WHERE order_item_id IN (?) GROUP BY order_item_id) c ON c.order_item_id=oi.order_item_id
+      WHERE oi.order_item_id IN (?)`, [members.map(member => member.itemId), members.map(member => member.itemId)]);
+    const activePrimary = items.filter(item => primaryIds.includes(Number(item.itemId)) && item.itemStatus !== "CANCELLED" &&
+      item.orderStatus !== "CANCELLED" && item.sessionStatus === "OPEN" && item.kind !== "NONE" && Boolean(item.visible) && Number(item.remaining) > 0);
+    if (!activePrimary.length || activePrimary.some(item => !Boolean(item.simpleCook) || Boolean(item.timer))) {
+      throw new KdsActionError("단순조리 설정이 변경되었거나 주문이 취소되었습니다. 화면을 새로고침해 주세요.");
+    }
+    const now = Date.now();
+    const nextPreviousState = JSON.stringify({
+      simpleCookCompletion: { completedAtMs: now, previousState: row.previousState },
+    });
+    const [updated] = await connection.execute<ResultSetHeader>(`
+      UPDATE kds_tasks SET status='DONE',cooking_group_id=NULL,cooking_started_at_ms=NULL,
+        cooking_completed_at_ms=?,previous_state=?,changed_at_ms=?,
+        post_cook_timer_minutes=NULL,post_cook_timer_started_at_ms=NULL
+      WHERE task_id=? AND status='WAITING' AND changed_at_ms <=> ?`,
+    [now, nextPreviousState, now, taskId, expected.changedAtMs]);
+    if (updated.affectedRows !== 1) throw new KdsActionError("조리 상태가 변경되었습니다. 화면을 새로고침해 주세요.");
+    await connection.commit();
+    return { status: "DONE" as const, changedAtMs: now, completedAtMs: now, undone: false };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function requestKdsTaskCompletion(
@@ -1569,7 +1661,9 @@ type LockedTableTask = RowDataPacket & {
 };
 
 async function getActivePrimaryTaskIds(connection: PoolConnection, rows: LockedTableTask[], lockItems = true) {
-  const itemIds = [...new Set(rows.flatMap(row =>
+  const regularRows = rows.filter(row => !(JSON.parse(row.memberItems) as KdsMember[])
+    .some(member => member.kind !== "COMPONENT" && member.simpleCook === true));
+  const itemIds = [...new Set(regularRows.flatMap(row =>
     (JSON.parse(row.memberItems) as KdsMember[]).filter(member => member.kind !== "COMPONENT").map(member => member.itemId),
   ))];
   if (!itemIds.length) return new Set<number>();

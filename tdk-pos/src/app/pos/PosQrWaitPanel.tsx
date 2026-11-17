@@ -1,13 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import PosQrTableOrderPanel from "./PosQrTableOrderPanel";
 
 type PosWaitItem = { menuId: number; itemName: string; quantity: number; options: Array<{ modifierOptionId: number; qty: number; optionName: string }>; estimatedUnitPrice: string; estimatedLineTotal: string };
 type PosWaitOrder = { waitOrderId: number; publicReference: string; status: "PENDING" | "ASSIGNED"; version: number;
   estimatedTotal: string; assignedSessionId: number | null; createdAt: string | Date; expiresAt: string | Date; items: PosWaitItem[] };
 type TableOption = { tableId: number; tableNo: string; sessionId: number | null };
 
-export default function PosQrWaitPanel({ tables, onChanged, onCountChange }: { tables: TableOption[]; onChanged: () => void; onCountChange: (count: number) => void }) {
+type PosQrWaitPanelProps = { tables: TableOption[]; onChanged: () => void; onCountChange: (count: number) => void };
+
+export default function PosQrWaitPanel(props: PosQrWaitPanelProps) {
+  const [orderType, setOrderType] = useState<"WALK_IN" | "TABLE">("WALK_IN");
+  return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <nav aria-label="QR 주문 종류" className="mx-3 mt-2 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+      <button aria-pressed={orderType === "WALK_IN"} className={`rounded-lg py-2 text-xs font-bold ${orderType === "WALK_IN" ? "bg-white shadow-sm" : "text-slate-500"}`} onClick={() => setOrderType("WALK_IN")} type="button">대기 QR</button>
+      <button aria-pressed={orderType === "TABLE"} className={`rounded-lg py-2 text-xs font-bold ${orderType === "TABLE" ? "bg-white shadow-sm" : "text-slate-500"}`} onClick={() => setOrderType("TABLE")} type="button">테이블 QR</button>
+    </nav>
+    {orderType === "WALK_IN" ? <PosQrWalkInPanel {...props} /> : <PosQrTableOrderPanel onChanged={props.onChanged} />}
+  </div>;
+}
+
+function PosQrWalkInPanel({ tables, onChanged, onCountChange }: PosQrWaitPanelProps) {
   const [orders, setOrders] = useState<PosWaitOrder[]>([]);
   const [tableIds, setTableIds] = useState<Record<number, number>>({});
   const [priceAcknowledgements, setPriceAcknowledgements] = useState<Record<number, { version: number; total: string }>>({});
@@ -98,7 +112,7 @@ export default function PosQrWaitPanel({ tables, onChanged, onCountChange }: { t
       const priceAck = priceAcknowledgements[order.waitOrderId];
       return <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm" key={order.waitOrderId}>
         <div className="flex items-start justify-between gap-2"><div><strong className="text-lg">#{order.publicReference}</strong><p className="text-xs text-slate-500">{new Date(order.createdAt).toLocaleString("ko-KR")} · {order.status === "PENDING" ? "배정 대기" : `테이블 ${assignedTable?.tableNo ?? "배정됨"}`}</p></div><strong className="shrink-0 tabular-nums">예상 {Number(order.estimatedTotal).toLocaleString("ko-KR")}원</strong></div>
-        <ul className="mt-2 space-y-1 text-sm">{order.items.map((item, index) => <li key={`${item.menuId}-${index}`}><span className="font-semibold">{item.itemName} × {item.quantity}</span>{item.options.length > 0 && <span className="ml-1 text-xs text-slate-500">({item.options.map(option => option.optionName).join(", ")})</span>}</li>)}</ul>
+        <ul className="mt-2 space-y-1 text-sm">{order.items.map((item, index) => <li key={`${item.menuId}-${index}`}><span className="font-semibold">{item.itemName} × {item.quantity}</span>{item.options.length > 0 && <span className="ml-1 text-xs text-slate-500">({item.options.map(option => `${option.optionName}${option.qty > 1 ? "\u00D7" + option.qty : ""}`).join(", ")})</span>}</li>)}</ul>
         {order.status === "PENDING" ? <div className="mt-3 flex gap-2"><select aria-label={`${order.publicReference} 테이블`} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm" onChange={event => setTableIds(current => ({ ...current, [order.waitOrderId]: Number(event.target.value) }))} value={tableIds[order.waitOrderId] ?? ""}><option value="">테이블 선택</option>{tables.filter(table => table.sessionId === null).map(table => <option key={table.tableId} value={table.tableId}>{table.tableNo}번</option>)}</select><button className="rounded-lg bg-blue-600 px-3 text-sm font-bold text-white disabled:opacity-50" disabled={busyId !== null || !tableIds[order.waitOrderId]} onClick={() => void assign(order)} type="button">{busyId === order.waitOrderId ? "처리 중" : "배정"}</button></div> : <div className="mt-3">
           {priceAck?.version === order.version && <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm"><p className="font-bold text-amber-900">가격 변경 확인</p><p className="mt-1">기존 예상 {Number(order.estimatedTotal).toLocaleString("ko-KR")}원 → 현재 {Number(priceAck.total).toLocaleString("ko-KR")}원</p></div>}
           <div className="flex gap-2"><button className="min-h-11 flex-1 rounded-lg bg-blue-600 font-bold text-white disabled:opacity-50" disabled={busyId !== null} onClick={() => void confirm(order)} type="button">{busyId === order.waitOrderId ? "처리 중..." : priceAck?.version === order.version ? "변경 금액 확인 후 주문 확정" : "직원 확인 후 주문 확정"}</button><button className="min-h-11 rounded-lg bg-red-50 px-3 text-sm font-bold text-red-700 disabled:opacity-50" disabled={busyId !== null} onClick={() => void cancel(order)} type="button">취소</button></div>

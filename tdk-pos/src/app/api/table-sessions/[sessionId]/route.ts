@@ -1,7 +1,7 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { tableSessionMerges, tableSessions } from "@/db/schema";
+import { diningTables, qrSessionInvites, qrSessions, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
@@ -14,13 +14,21 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
   if (!Number.isInteger(sessionId) || sessionId <= 0) return Response.json({ success: false, message: "유효한 테이블 세션 번호가 필요합니다." }, { status: 400 });
 
   try {
-    const [tableSession] = await db.select({ status: tableSessions.status, sessionKind: tableSessions.sessionKind }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).limit(1);
+    const [tableSession] = await db.select({ status: tableSessions.status, sessionKind: tableSessions.sessionKind, tableId: tableSessions.tableId }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).limit(1);
     if (!tableSession) return Response.json({ success: false, message: "테이블 세션을 찾을 수 없습니다." }, { status: 404 });
     if (tableSession.sessionKind !== "DINE_IN") return Response.json({ success: false, message: "포장 주문은 최종 결제완료로 종료해 주세요." }, { status: 409 });
     if (tableSession.status !== "OPEN") return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
     const closed = await db.transaction(async tx => {
+      if (tableSession.tableId !== null) await tx.select({ tableId: diningTables.tableId }).from(diningTables)
+        .where(eq(diningTables.tableId, tableSession.tableId)).for("update").limit(1);
       const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
       if (updateResult.affectedRows !== 1) return false;
+      const closedAt = new Date();
+      const customerSessionScope = tableSession.tableId === null
+        ? eq(qrSessions.sessionId, sessionId)
+        : or(eq(qrSessions.sessionId, sessionId), eq(qrSessions.tableId, tableSession.tableId));
+      await tx.update(qrSessions).set({ status: "CLOSED", closedAt }).where(and(customerSessionScope, eq(qrSessions.status, "ACTIVE")));
+      await tx.update(qrSessionInvites).set({ revokedAt: closedAt }).where(and(eq(qrSessionInvites.sessionId, sessionId), isNull(qrSessionInvites.revokedAt)));
       await cancelOrphanedUnpaidCheckouts(tx, [sessionId]);
       await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(and(
         eq(tableSessionMerges.status, "ACTIVE"),

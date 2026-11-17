@@ -29,17 +29,17 @@ export default function AdminWorkspaceShell({ children, userName, menuOnly = fal
     };
   }, [drawerOpen]);
 
-  return <div className={styles.shell}>
-    <header className={styles.header}>
+  return <div className={styles.shell} data-admin-workspace-shell>
+    <header className={styles.header} data-admin-shell-header>
       <button ref={menuButtonRef} type="button" className={styles.mobileMenuButton} aria-label="메뉴 열기" aria-expanded={drawerOpen} aria-controls="admin-mobile-drawer" onClick={() => setDrawerOpen(true)}>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
       <div className={styles.brand}>TDK <span>관리센터</span></div>
       <div className={styles.userArea}><span className={styles.userName}>{userName}</span>{showLogout && <AdminLogoutButton />}<AdminExitButton /></div>
     </header>
-    <div className={styles.workspace}>
+    <div className={styles.workspace} data-admin-workspace>
       <AdminSidebar canAccessSecurity={canAccessSecurity} canManageHosLayout={canManageHosLayout} canManageMenu={canManageMenu} menuOnly={menuOnly} />
-      <main className={styles.main} id="admin-main">{children}</main>
+      <main className={styles.main} data-admin-main id="admin-main">{children}</main>
     </div>
     {drawerOpen && <>
       <button type="button" className={styles.mobileOverlay} aria-label="메뉴 닫기" onClick={() => setDrawerOpen(false)} />

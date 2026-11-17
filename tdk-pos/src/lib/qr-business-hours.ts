@@ -350,7 +350,7 @@ export function getBusinessHoursStatus(weekly: readonly BusinessHours[], special
     if (interval.breakStart !== null && effectiveBreakEnd !== null && current.minute >= interval.breakStart && current.minute < effectiveBreakEnd) {
       const closesBeforeBreakEnds = interval.breakEnd !== null && interval.breakEnd > interval.end;
       const transitionAt = closesBeforeBreakEnds ? interval.end : effectiveBreakEnd;
-      const action = closesBeforeBreakEnds ? "영업 종료" : "영업 재개";
+      const action = closesBeforeBreakEnds ? "영업 종료" : "영업 시작";
       const message = "브레이크타임 · " + eventDateTimeLabel(transitionAt, current.date) + " " + action;
       return { state: "BREAK", message, detail: timeText(interval.breakStart) + "–" + timeText(effectiveBreakEnd) + " 브레이크타임" };
     }

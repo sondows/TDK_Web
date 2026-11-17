@@ -41,7 +41,7 @@ export function isQrDevelopmentHost(hostHeader: string | null, nodeEnv = process
 /** Only customer QR pages, QR APIs and the assets required to render them are exposed. */
 export function isQrDevelopmentPathAllowed(pathname: string, method: string): boolean {
   const verb = method.toUpperCase();
-  if ((pathname === "/qr" || pathname === "/qr/wait") && (verb === "GET" || verb === "HEAD")) return true;
+  if ((pathname === "/qr" || pathname === "/qr/wait" || pathname === "/qrorder" || pathname.startsWith("/qrorder/") || /^\/q\/[A-Za-z0-9_-]+(?:\/join)?$/.test(pathname) || /^\/q\/join\/[A-Za-z0-9_-]+$/.test(pathname)) && (verb === "GET" || verb === "HEAD")) return true;
   if ((pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title" || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname) || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)) &&
       ["GET", "HEAD"].includes(verb)) return true;
   if ((pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" ||
@@ -53,6 +53,7 @@ export function isQrDevelopmentPathAllowed(pathname: string, method: string): bo
     pathname === "/favicon.ico" || pathname === "/images/menu/no-image.png" ||
     /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname)
   )) return true;
+  if (isCustomerQrApiPathAllowed(pathname, verb)) return true;
   return false;
 }
 function isPathOrChild(pathname: string, root: string): boolean { return pathname === root || pathname.startsWith(`${root}/`); }
@@ -65,6 +66,20 @@ function isPublicAsset(pathname: string, method: string): boolean {
 }
 function isAdminPageOrApi(pathname: string): boolean {
   return isPathOrChild(pathname, "/admin") || isPathOrChild(pathname, "/api/admin") || isPathOrChild(pathname, "/api/admin-center");
+}
+function isCustomerQrApiPathAllowed(pathname: string, method: string): boolean {
+  if (method === "GET" || method === "HEAD") return pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title"
+    || pathname === "/api/qr/table-orders" || pathname === "/api/qr/visit"
+    || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname)
+    || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)
+    || /^\/api\/qr\/table-orders\/[1-9]\d*$/.test(pathname);
+  if (method === "POST") return pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-invites" || pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" || pathname === "/api/qr/cart-events";
+  return method === "PATCH" || method === "DELETE" ? /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname) : false;
+}
+function isCustomerQrPageAllowed(pathname: string, method: string): boolean {
+  if (!isReadOnly(method)) return false;
+  return pathname === "/qr" || pathname === "/qr/wait" || pathname === "/qrorder" || pathname.startsWith("/qrorder/")
+    || /^\/q\/[A-Za-z0-9_-]{16}$/.test(pathname) || /^\/q\/join\/[A-Za-z0-9_-]{40,64}$/.test(pathname);
 }
 export function isExternalPosPath(pathname: string): boolean {
   return pathname === "/login" || isPathOrChild(pathname, "/pos") || isPathOrChild(pathname, "/tdkpos")
@@ -90,6 +105,7 @@ export function isExternalHosPath(pathname: string): boolean {
 export function isExternalAdminPathAllowed(pathname: string, method: string): boolean {
   if (pathname === "/") return isReadOnly(method);
   if (isPublicAsset(pathname, method)) return true;
+  if (isCustomerQrPageAllowed(pathname, method) || isCustomerQrApiPathAllowed(pathname, method.toUpperCase())) return true;
   if (isExternalPosPath(pathname) || isExternalKdsPath(pathname)) return false;
   // Credential setup endpoints enforce their own one-time proof and origin checks.
   if (method.toUpperCase() === "POST" &&

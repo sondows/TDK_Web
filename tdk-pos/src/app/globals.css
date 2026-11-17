@@ -1121,18 +1121,6 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   pointer-events: none;
 }
 
-.pos-menu-number {
-  position: absolute;
-  z-index: 1;
-  top: 6px;
-  left: 8px;
-  color: #94a3b8;
-  font-size: 0.6875rem;
-  font-weight: 500;
-  line-height: 1;
-  pointer-events: none;
-}
-
 .pos-right-menu-panel.is-order-disabled .pos-category-button {
   cursor: not-allowed;
 }

@@ -14,6 +14,7 @@ export type SummarySourceItem = {
     optionName: string;
     qty: number;
     unitPrice: string;
+    independentQty?: boolean;
   }>;
 };
 
@@ -45,12 +46,15 @@ export type PartySummarySourceItem = SummarySourceItem & {
   }>;
 };
 
-const effectiveSourceAmount = (item: PartySummarySourceItem) => {
+const effectiveSourceAmount = (item: SummarySourceItem) => {
   if (item.itemType === "SERVICE") return 0;
   const sourceTotal = Number(item.totalAmount);
-  if (Number.isFinite(sourceTotal) && item.qty && item.qty > 0)
-    return sourceTotal * item.effectiveQty / item.qty;
-  return Number(item.unitPrice) * item.effectiveQty;
+  const independentAddons = (item.options ?? []).filter(option => option.independentQty)
+    .reduce((sum, option) => sum + Number(option.unitPrice) * option.qty, 0);
+  const baseTotal = Number.isFinite(sourceTotal) && item.qty && item.qty > 0
+    ? sourceTotal - independentAddons
+    : Number(item.unitPrice) * (item.qty ?? item.effectiveQty);
+  return baseTotal * item.effectiveQty / Math.max(1, item.qty ?? item.effectiveQty) + independentAddons;
 };
 
 /** Groups party display rows by menu identity and actual unit selling price. */
@@ -142,8 +146,9 @@ export function buildOrderSummaryRows(items: SummarySourceItem[]): SummaryRow[] 
     const sortedOptions = (item.options ?? []).slice().sort((left, right) =>
       (left.modifierOptionId ?? 0) - (right.modifierOptionId ?? 0) || left.optionName.localeCompare(right.optionName, "ko"),
     );
-    const optionLabel = sortedOptions.map(option => option.optionName).join(", ");
-    const optionSignature = sortedOptions.map(option => [option.modifierOptionId, option.optionName, Number(option.unitPrice), option.qty / Math.max(1, item.qty ?? item.effectiveQty)]);
+    const optionLabel = sortedOptions.map(option => `${option.optionName}${option.independentQty && option.qty > 1 ? ` ×${option.qty}` : ""}`).join(", ");
+    const optionSignature = sortedOptions.map(option => [option.modifierOptionId, option.optionName, Number(option.unitPrice),
+      option.independentQty ? option.qty : option.qty / Math.max(1, item.qty ?? item.effectiveQty)]);
     const rowKey = parentsWithComponents.has(item.orderItemId)
       ? `parent:${item.orderItemId}`
       : JSON.stringify([item.itemType, item.menuId, item.itemName, unitPrice, optionSignature]);
@@ -151,7 +156,7 @@ export function buildOrderSummaryRows(items: SummarySourceItem[]): SummaryRow[] 
     const row = rows.get(rowKey) ?? { rowKey, orderSequence: sequence, name: item.itemName, qty: 0, total: 0, unitPrice, itemType: item.itemType, components: [], optionLabel };
     if (compareOrderSequence(sequence, row.orderSequence) < 0) row.orderSequence = sequence;
     row.qty += item.effectiveQty;
-    row.total += (item.itemType === "SERVICE" ? 0 : unitPrice) * item.effectiveQty;
+    row.total += effectiveSourceAmount(item);
     rows.set(rowKey, row);
     parentRowKeys.set(item.orderItemId, rowKey);
   }

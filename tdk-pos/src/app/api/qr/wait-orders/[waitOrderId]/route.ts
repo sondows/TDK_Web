@@ -73,7 +73,7 @@ export async function PATCH(request: Request, { params }: Context) {
       await tx.delete(qrWaitOrderItems).where(eq(qrWaitOrderItems.waitOrderId, auth.order.waitOrderId));
       await tx.insert(qrWaitOrderItems).values(lines.map((entry, sortOrder) => ({ waitOrderId: auth.order.waitOrderId,
         menuId: entry.line.menuId, itemName: entry.itemName, quantity: entry.line.qty,
-        optionIdsJson: JSON.stringify(entry.line.options), estimatedUnitPrice: entry.unitPrice.toFixed(2),
+        optionIdsJson: JSON.stringify(entry.optionSnapshots), estimatedUnitPrice: entry.unitPrice.toFixed(2),
         estimatedLineTotal: entry.lineTotal.toFixed(2), sortOrder })));
       await tx.update(qrWaitOrders).set({ estimatedTotal: lines.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2),
         version: locked.version + 1, updatedAt: now }).where(eq(qrWaitOrders.waitOrderId, auth.order.waitOrderId));

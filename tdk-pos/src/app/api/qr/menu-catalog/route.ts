@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    return Response.json({ success: true, ...await loadQrMenuCatalog() }, {
+    return Response.json({ success: true, ...await loadQrMenuCatalog({ includeShortDescriptions: true }) }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

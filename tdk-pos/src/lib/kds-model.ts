@@ -32,7 +32,7 @@ export function isKdsOrderBundleSettings(value: unknown): value is KdsOrderBundl
     settings.minutes <= KDS_ORDER_BUNDLE_MINUTES_RANGE.max;
 }
 export type KdsMemberKind = "POT" | "ADDON" | "SOLO" | "COMPONENT";
-export type KdsMember = { itemId: number; kind: KdsMemberKind; completionTimer?: boolean };
+export type KdsMember = { itemId: number; kind: KdsMemberKind; completionTimer?: boolean; simpleCook?: boolean };
 
 /** A shared pot has one status control, while each cooked menu keeps its own display setting. */
 export function kdsCompletedTimerDisplay(items: Array<{ name: string; kind: KdsMemberKind; completionTimer: boolean }>, kind: "POT" | "SOLO") {
@@ -48,6 +48,11 @@ export type KdsDisplayItem = {
 
 export function kdsCookOptionSignature(options: Array<{ name: string }>) {
   return [...new Set(options.map(option => option.name.trim()).filter(Boolean))].sort().join("|");
+}
+
+/** Render a KDS menu label with its aggregated quantity, without changing the source name. */
+export function formatKdsMenuNameWithQuantity(name: string, qty: number) {
+  return qty > 1 ? `${name} ${qty}` : name;
 }
 
 /** Format only members already assigned to one persisted KDS task. */
@@ -84,6 +89,7 @@ export type KdsSourceItem = {
   kdsKind: KdsMenuKind;
   kdsGroupKey: string | null;
   kdsCompletionTimer: boolean;
+  kdsSimpleCook?: boolean;
   printOnKitchen: boolean;
   kdsVisible: boolean;
   cookOptionSignature?: string;
@@ -112,7 +118,7 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
   const potGroups = new Map<string, KdsSourceItem[]>();
   for (const pot of pots) {
     const groupKey = pot.kdsGroupKey?.trim() || "POT";
-    const key = `${groupKey}\u0000${pot.cookOptionSignature ?? ""}`;
+    const key = `${groupKey}\u0000${pot.cookOptionSignature ?? ""}\u0000${Boolean(pot.kdsSimpleCook) ? "SIMPLE" : "REGULAR"}`;
     potGroups.set(key, [...(potGroups.get(key) ?? []), pot]);
   }
   const potGroupKeys = [...potGroups.entries()];
@@ -121,11 +127,12 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
       ? potGroupKeys[0]?.[1][0].kdsGroupKey?.trim() || "POT" : null;
   const addonsByPot = new Map<string, KdsSourceItem[]>();
   for (const addon of addons) {
+    if (addon.kdsSimpleCook) continue;
     const addonKey = addon.kdsGroupKey?.trim() || defaultPotGroupKey;
     if (!addonKey) continue;
     const candidates = potGroupKeys.filter(([, group]) => {
       const groupKey = group[0].kdsGroupKey?.trim() || "POT";
-      return groupKey === addonKey && (addon.cookOptionSignature
+      return !group[0].kdsSimpleCook && groupKey === addonKey && (addon.cookOptionSignature
         ? group[0].cookOptionSignature === addon.cookOptionSignature
         : true);
     });
@@ -140,7 +147,7 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
     drafts.push({
       orderId,
       taskKey: `pot:${orderId}:${first.itemId}`,
-      members: [...group.map(item => ({ itemId: item.itemId, kind: "POT" as const, completionTimer: item.kdsCompletionTimer })),
+      members: [...group.map(item => ({ itemId: item.itemId, kind: "POT" as const, completionTimer: item.kdsCompletionTimer, ...(item.kdsSimpleCook ? { simpleCook: true } : {}) })),
         ...groupAddons.map(item => ({ itemId: item.itemId, kind: "ADDON" as const, completionTimer: item.kdsCompletionTimer }))].sort((a, b) => a.itemId - b.itemId),
       kind: "POT",
       compatibilityKey: key,
@@ -153,7 +160,7 @@ export function buildKdsTaskDrafts(orderId: number, source: KdsSourceItem[]): Kd
     drafts.push({
       orderId,
       taskKey: `item:${item.itemId}`,
-      members: [{ itemId: item.itemId, kind: item.kdsKind === "ADDON" ? "ADDON" : "SOLO", completionTimer: item.kdsCompletionTimer }],
+      members: [{ itemId: item.itemId, kind: item.kdsKind === "ADDON" ? "ADDON" : "SOLO", completionTimer: item.kdsCompletionTimer, ...(item.kdsSimpleCook ? { simpleCook: true } : {}) }],
       kind: "SOLO",
       compatibilityKey: item.kdsGroupKey?.trim() ? `SOLO:${item.kdsGroupKey.trim()}` : `MENU:${item.menuId}`,
       completionTimer: item.kdsCompletionTimer,

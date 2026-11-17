@@ -2032,3 +2032,118 @@ Constraints: preserve current quantity and transaction write/calculation behavio
 
 - Implementation: query bounds are derived from the current Asia/Seoul calendar date and converted from `+09:00` to the MySQL session time zone; returned row times are converted back to Seoul. Only adjustment history uses these bounds. A midnight timeout fetches the history-only endpoint and leaves current quantity untouched.
 - Verification: Seoul midnight/month/year boundary tests 2/2 PASS; scoped ESLint PASS; TypeScript PASS. A guarded read-only check confirmed `.env.local` targets `TDK_POS_TEST`, but the connection was blocked with `EACCES`; MariaDB `CONVERT_TZ` query execution remains unverified. No database data was read or changed.
+
+## TDKADM menu description and origin management (2026-11-14)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Confirm existing ADM menu authorization, catalog schema, DB target, and migration conventions | menus, ADM sidebar/pages/APIs, DB schema/config | PASS |
+| 2 | Add language-ready menu description and origin schema plus isolated migrations | Drizzle schema, TDK_POS_TEST and production migration files | IN_PROGRESS (test DB denied CREATE) |
+| 3 | Add authenticated read/write API with validation and atomic origin ordering | admin menu-description API and model tests | PASS (code/type; DB round-trip pending) |
+| 4 | Add `/tdkadm/menus/descriptions` management page and submenu | ADM page, client, sidebar | PASS (production build) |
+| 5 | Run model/API tests, type, lint, build, and guarded development DB checks | new feature files, `TDK_POS_TEST` only | IN_PROGRESS (DB permission blocks integration) |
+
+Constraints: preserve existing menu management and QR/POS order behavior; only `TDK_POS_TEST` may be used for schema verification or writes. Never connect to or modify `TDK_POS`, never deploy to NAS. Existing unrelated workspace changes remain untouched. No backup or Git branch is created.
+
+- Step 1 PASS: `/tdkadm/menus` and menu categories check `getCurrentAdminStaff` plus `canManageMenu`; protected admin APIs also call `requireAdminAccess`. `menus` has no description/origin fields; adding fields to the existing menu table is unnecessary. `.env.local` identifies `TDK_POS_TEST` (credential values were not printed). Migration convention uses explicit database pinning. Next.js app-router page/component and route-handler guidance reviewed.
+- Steps 2–4 implemented: three additive, locale-aware tables keep menu copy and origin translations separate from menu/order data. The write API checks the ADM session and menu role, validates all fields, locks the menu while saving, and atomically reconciles origin rows/order. The ADM page lists existing menu/category data and supports search, edit, dirty-switch confirmation, and save status.
+- Step 5 verification: model tests 4/4 PASS; TypeScript PASS; scoped ESLint PASS; production build PASS. The guarded DB connection confirmed `TDK_POS_TEST`, but CREATE returned `ER_TABLEACCESS_DENIED_ERROR`; read-only follow-up confirmed all three new tables are still missing. No DB changes occurred. DB-backed save/reload tests and authenticated browser interaction remain unverified until a DBA applies the test migration with a user granted CREATE/ALTER permissions. Production migration was only prepared and never run.
+
+## QR menu detail order page refresh (2026-11-14)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace current QR detail, cart pricing, menu descriptions/origins, image storage, and trusted table context | QR client, catalog, ADM image APIs/schema | PASS |
+| 2 | Build photo-first full-screen detail view with description/origin sheet, required and optional modifier groups, fixed total footer, and close gestures/history | shared `/qr` and `/qr/wait` client | PASS (code/type/lint; browser interaction not exercised) |
+| 3 | Support multiple QR detail images with ordering, replacement crop, and individual deletion | ADM image manager and existing `menu_images` storage | PASS (code/type/lint; DB upload roundtrip not exercised) |
+| 4 | Run cart/image/model tests and verify account/database safety boundaries | changed QR and image files | PASS (18 tests; TypeScript and ESLint) |
+| 5 | Connect rice/sari menu choices and table headcount only if an existing explicit relationship and trusted QR session exist | existing menu/session data paths | BLOCKED (no QR-to-table session context or explicit addon-menu mapping found) |
+
+Constraints: no schema migration or database writes, no production DB access, no NAS deployment. Do not infer menu addons from category membership or table identity from `source=table` analytics query.
+
+- Step 1 finding: Korean QR detail descriptions and origin translations already exist in `qr_menu_descriptions` and `qr_menu_origin_*`; `menu_images` supports ordered multiple QR_LARGE rows. `menu_modifier_groups` is an explicit per-menu source for optional add-on choices and is shown under “메뉴별 추가”. `table_sessions.person_count` exists, but public QR has no trusted session lookup/token route; `source=table` is only analytics attribution.
+- Step 2–3 implementation: detail UI uses QR_LARGE images (falls back to QR_THUMBNAIL), database descriptions and origins; origin sheet participates in history and closes first. QR_LARGE upload now appends; ADM supports ordering, re-cropping, and deleting individual detail images. QR_THUMBNAIL replacement remains single-image behavior.
+- Step 4 verification: QR cart, QR analytics, crop, and menu-description model tests 18/18 PASS using `node --experimental-strip-types --test`; TypeScript PASS; scoped ESLint PASS. Browser/mobile interaction and DB upload/API roundtrip were not run. No production or development database connection/write was attempted.
+- Step 5 remains unimplemented until a trusted table-session context and explicit menu-addon relation exist. No migration was added and no rice/sari category entries are guessed into the order.
+## QR short-description input and display truncation (2026-11-14)
+
+- Removed the two-line/manual-break validation that blocked ADM saves. The existing 1,000-character stability limit remains, and the server stores the submitted short-description string including manual line breaks and edge whitespace without trimming or truncating it.
+- Kept the ADM preview and customer QR card at the same 12px, 1.375 line-height, pre-line, two-line-clamp style. ADM now shows a neutral note that QR displays at most two lines and ellipsizes overflow; save is enabled for dirty values regardless of measured line count.
+- The existing PUT accepts short-only, detail-only, origin-only, and empty records; no database/schema/API changes were needed. Detailed-description behavior and maximum length were not changed.
+- Verification: QR menu-description model tests 6/6 PASS; TypeScript PASS; scoped ESLint PASS. No browser/mobile visual session or DB roundtrip was run.
+
+## ADM per-menu QR add-on management (2026-11-14)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace menu/modifier relations, linked-menu support, QR cart pricing, wait-order validation, and admin authorization | schema, ADM menu APIs, QR catalog/cart/order paths | PASS |
+| 2 | Select an isolated data model that preserves POS/KDS behavior and prepare only a development-pinned migration if needed | schema and migration | PASS (reuse existing relation; no migration) |
+| 3 | Implement authorized per-menu read/write, copy, add/remove, dedupe, and ordering APIs | ADM API/model | PASS (type/lint; DB round-trip pending) |
+| 4 | Add standalone ADM submenu and two-pane management UI | admin navigation/page/client | PASS (production build; browser interaction pending) |
+| 5 | Connect menu-specific add-ons, prices, order snapshots, and selection limits in QR without changing rice/sari choices | QR catalog/cart/wait-order paths | PASS (model/cart tests; DB order round-trip pending) |
+| 6 | Verify model/API, order totals, TypeScript, scoped ESLint, diff, and record DB/browser limitations | changed feature files | PASS (local checks complete; DB/browser integration explicitly deferred) |
+
+Constraints: preserve existing menu, modifier, POS, KDS, QR wait-order, and rice/sari behavior; do not change `TDK_POS`, apply migrations, deploy, or restart services. Existing unrelated workspace changes must remain untouched. Do not create a branch or backup.
+
+- Step 1 finding: `modifier_options.linked_menu_id` plus a per-base-menu `menu_modifier_groups` link already models a selectable existing menu, while `order_item_options` snapshots option name and unit price. QR cart serialization already carries modifier IDs; no extra order table is needed.
+- Step 2 decision: dedicate modifier groups with an internal QR-only name marker, derive addon label/price from the linked active menu, filter those groups from the POS catalog/order-option validation, and keep accepted order snapshots in the existing order option rows. No schema migration is planned.
+- Step 3–5 implementation: added authenticated ADM read/save/copy endpoints, the `/tdkadm/menus/addons` two-pane editor, ordered add/remove and copy-with-confirmation, QR menu-name/current-price projection from linked active menus (including QR-hidden menus), a maximum of four selected add-ons, and order-time option-name/price snapshots for QR wait orders. QR-only marker groups are omitted from POS catalogs and rejected by regular POS order validation; existing rice/sari relationships remain untouched. Schema and migration files were not changed.
+- Step 6 verification: add-on model and QR cart tests 8/8 PASS; TypeScript PASS; scoped ESLint PASS; production build PASS; `git diff --check` PASS (Git printed repository-wide LF/CRLF notices only). No `TDK_POS_TEST` database write, DB/API round-trip, authenticated ADM browser flow, or physical mobile QR order was performed. Existing build warnings in `menu-image-storage.ts` remain unrelated. Production DB/NAS were not accessed.
+
+## QR legacy add-on source duplication (2026-11-14)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace QR optional-group catalog/rendering and legacy/new relation creation | QR catalog/client, addon admin model, modifier foundation script | PASS (two independent groups confirmed in code) |
+| 2 | Restrict QR `메뉴별 추가` to ADM marker groups; isolate remaining optional groups and prevent legacy selection/pricing | QR catalog/client/cart validation | PASS |
+| 3 | Verify addon order identity, price/selection constraints, TypeScript, ESLint, diff; document unavailable live DB IDs | QR tests and static checks | PASS (static/model checks; live DB/browser IDs unavailable) |
+
+Constraints: do not alter legacy modifier rows or POS/KDS behavior; only the ADM-linked addon group may feed the QR `메뉴별 추가` area. Do not access `TDK_POS` or deploy/restart NAS. The earlier `TDK_POS_TEST` connection hit connection exhaustion; do not retry the DB in this task.
+
+- Step 1 finding: `scripts/apply-order-modifier-foundation.mjs` creates one shared group named `추가메뉴`, assigns its four menu-linked options to each person-menu, and attaches that group to five base menus. The ADM feature separately creates a group named `__TDKON_QR_ADDON__:<baseMenuId>` for each base menu. `loadQrMenuCatalog` returns both group sources, then `QrMenuClient` puts every optional group (`minSelect === 0`) into the same `메뉴별 추가` section. The repeated items are therefore distinct modifier-option IDs from the shared legacy group and the ADM-linked per-menu group; it is not a duplicate render of one group. Exact live numeric IDs are not readable without the unavailable development DB connection.
+- Step 2 implementation: `loadQrMenuCatalog` now excludes the known legacy `추가메뉴` group used by the modifier-foundation script. It tags remaining groups by source, verifies a QR add-on marker matches the current base menu ID, and emits only per-menu ADM-linked groups under `메뉴별 추가`. Other optional modifier groups remain available in a separate `기타 옵션` section. QR wait cart validation and totals use this same filtered catalog, so the hidden legacy option IDs cannot enter newly created or edited QR wait orders. POS catalog/order paths and existing stored orders are unchanged. ADM-linked duplicate connections are deduplicated by linked menu ID, not menu label.
+- Step 3 verification: add-on and QR cart model tests 9/9 PASS; TypeScript PASS; scoped ESLint PASS; production build PASS; `git diff --check` PASS (LF/CRLF notices only). The two existing menu-image storage tracing warnings remain. Browser interaction and actual order round-trip were not run. The `TDK_POS_TEST` connection was not retried due the previously recorded connection exhaustion, so live numeric group/option IDs and stored rows remain unverified. Production DB/NAS were not accessed.
+
+## QR add-on per-item quantities and cart total (2026-11-14)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace add-on quantity, cart price/count, QR wait create/edit, POS confirmation, and KDS display semantics | QR client/cart/order APIs, POS wait-order, KDS | PASS |
+| 2 | Implement independent add-on quantities and detail footer count/price without changing ordinary option pricing | QR client and cart model | PASS |
+| 3 | Preserve independent add-on quantities and totals through QR wait-order snapshots and POS/KDS order items | QR wait-order validation and confirmation | PASS |
+| 4 | Add targeted quantity/pricing/order tests; run TypeScript, scoped ESLint, build, and diff check | changed files | PASS |
+
+Constraints: only ADM-linked QR add-ons use independent quantities. Preserve ordinary modifier and rice/sari behavior, existing POS/KDS layout, and production data. Do not connect to either DB again in this task because the prior `TDK_POS_TEST` attempt exhausted connections; no production DB/NAS/deploy actions. Browser interaction and live DB round-trip must be reported as unverified if unavailable.
+
+## ADM QR add-on divider and spacer entries (2026-11-15)
+
+| Step | Goal | Scope | Status |
+| --- | --- | --- | --- |
+| 1 | Trace current ADM add-on ordered links, copy/save APIs, QR catalog projection, and order-option filtering | add-on model, APIs, QR catalog/client | PASS |
+| 2 | Define display-only ordered entries using existing modifier-option rows without changing schema | add-on model/service and tests | PASS |
+| 3 | Update ADM add/remove/move/copy/save/read flows for menu, divider, and spacer entries | add-on admin client/API/service | PASS (static checks; DB round-trip not run) |
+| 4 | Project ordered display entries to QR while keeping only actual menu entries selectable/orderable | QR catalog/client/cart | PASS (static checks; browser not run) |
+| 5 | Run model tests, TypeScript, scoped ESLint, build if applicable, diff check; record DB/browser limits | changed files | PASS |
+
+Constraints: do not modify production or development DB data, schema, NAS, deployment, POS/KDS design, or existing addon quantities/pricing. Display-only entries must never become cart/order options. Preserve unrelated working-tree changes.
+
+- Step 2 decision: persist divider/spacer as dedicated marker rows in the existing QR add-on `modifier_options` group, with null linked-menu IDs, generated option IDs, and the same sort-order sequence. This preserves repeated entries and copy position without a new table or migration.
+- Step 3 implementation: ADM read/save/copy APIs now exchange ordered tagged entries, preserve old `addonMenuIds` writes for compatibility, reuse or insert marker rows, and deactivate removed rows without deleting history. The editor can add, move, and remove repeated divider/spacer entries alongside menu rows.
+- Step 4 implementation: QR catalog projects a separate ordered display-entry list. Only linked-menu rows remain modifier options; marker rows render as a 1px divider or 20px spacer and never enter selection, price, cart quantity, or order snapshots.
+- Step 5 verification: add-on model, QR cart, and POS summary tests 18/18 PASS; TypeScript PASS; scoped ESLint PASS; Production build PASS; `git diff --check` PASS (LF/CRLF notices only). No DB round-trip or ADM/QR browser test was run; development and production DBs and NAS were not accessed.
+
+## TDKON menu-number removal — 2026-11-17
+
+| Step | Goal | Status |
+| --- | --- | --- |
+| 1 | Trace menu_number/menuNumber usages and DB objects; keep menu_code and menu_id | PASS |
+| 2 | Confirm sort order uses menus.sort_order and back up TDK_POS_TEST menus | PASS |
+| 3 | Remove menu-number UI, API, POS card, and schema references; add guarded DB migrations | PASS |
+| 4 | TypeScript, scoped ESLint, production build, and diff checks | PASS (full ESLint has unrelated repository errors) |
+| 5 | Drop menu_number in TDK_POS_TEST and verify retained rows/references | BLOCKED: tdk_pos has no ALTER privilege on TDK_POS_TEST; server denied DDL before changes |
+| 6 | Compare TDK_POS schema and prepare production change | PASS (read-only schema comparison); production backup/application pending development completion and explicit approval |
+
+- The verified local logical backup is `.codex-backups/menu-number-removal/TDK_POS_TEST_menus_pre_menu_number_drop_20261117.json` (41 menu rows, IDs, sort orders, and full menu row data; SHA-256 `d826147cd59807550d4af60daf10ea553566c13c280e248aef68da16bf388c8e`).
+- POS, ADM, and QR menu order already uses category/menu `sort_order` with menu ID tie-breaking. No menu_number index, foreign key, view, trigger, routine, or `ORDER BY` dependency was found. menu_id relationships and order tables were not modified.
+- TDK_POS has the same menus columns/indexes/menu_id references as TDK_POS_TEST; its menu count is 35 versus 41 in the development database. No production DDL or full backup was performed.
+- Focused ESLint and TypeScript pass; `next build` passes with two existing filesystem-tracing warnings. Full ESLint reports 33 errors and 2 warnings in unrelated existing files, including existing React Compiler findings in PosShell.

@@ -88,7 +88,7 @@ test("today-only scheduled early close and break override the public status with
 
   const earlyBreak = { businessDate: "2026-11-12", earlyClose: null, earlyBreak: { mode: "AT", startTime: "13:00", endTime: "15:00" } };
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:30:00Z"), [], [], earlyBreak).state, "BREAK");
-  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:30:00Z"), [], [], earlyBreak).message, "브레이크타임 · 오후 3:00 영업 재개");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:30:00Z"), [], [], earlyBreak).message, "브레이크타임 · 오후 3:00 영업 시작");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T06:00:00Z"), [], [], earlyBreak).state, "OPEN");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T06:30:00Z"), [], [], earlyBreak).message, "영업 중 · 오후 10:00 영업 종료");
   assert.deepEqual(weekly[4], hours("10:00", "22:00", "14:00", "17:00"));
@@ -138,10 +138,18 @@ test("status messages show the nearest open, break, resume, and close transition
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T00:59:00Z")).message, "영업 전 · 오전 10:00 영업 시작");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T01:00:00Z")).message, "영업 중 · 오후 2:30 브레이크타임");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T05:29:00Z")).message, "영업 중 · 오후 2:30 브레이크타임");
-  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T05:30:00Z")).message, "브레이크타임 · 오후 5:30 영업 재개");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T05:30:00Z")).message, "브레이크타임 · 오후 5:30 영업 시작");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T07:40:00Z")).message, "브레이크타임 · 오후 5:30 영업 시작");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T07:30:00Z")).message, "브레이크타임 · 오후 5:30 영업 시작");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T08:31:00Z")).message, "영업 중 · 오후 9:00 영업 종료");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T08:30:00Z")).state, "OPEN");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T08:30:00Z")).message, "영업 중 · 오후 9:00 영업 종료");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T11:59:00Z")).message, "영업 중 · 오후 9:00 영업 종료");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T12:00:00Z")).message, "영업 종료 · 내일 오전 10:00 영업 시작");
+
+  const shorterBreak = configuredWeek();
+  shorterBreak[4] = hours("10:00", "21:00", "14:30", "15:30");
+  assert.equal(getBusinessHoursStatus(shorterBreak, [], new Date("2026-11-12T07:40:00Z")).message, "영업 중 · 오후 9:00 영업 종료");
 });
 
 test("early break and close overrides announce whichever transition happens first", () => {
@@ -149,8 +157,9 @@ test("early break and close overrides announce whichever transition happens firs
   const override = { businessDate: "2026-11-12", earlyClose: { mode: "AT", closeTime: "18:00" },
     earlyBreak: { mode: "AT", startTime: "13:30", endTime: "15:30" } };
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:00:00Z"), [], [], override).message, "영업 중 · 오후 1:30 브레이크타임");
-  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:30:00Z"), [], [], override).message, "브레이크타임 · 오후 3:30 영업 재개");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T04:30:00Z"), [], [], override).message, "브레이크타임 · 오후 3:30 영업 시작");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T06:30:00Z"), [], [], override).message, "영업 중 · 오후 6:00 영업 종료");
+  assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T07:30:00Z"), [], [], override).state, "OPEN");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T07:00:00Z"), [], [], override).message, "영업 중 · 오후 6:00 영업 종료");
   const closeBeforeBreak = { ...override, earlyClose: { mode: "AT", closeTime: "13:00" } };
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-12T03:30:00Z"), [], [], closeBeforeBreak).message, "영업 중 · 오후 1:00 영업 종료");
@@ -163,6 +172,7 @@ test("temporary hours, closures, overnight, and 24-hour schedules use actual upc
   const weekly = configuredWeek(); weekly[4] = hours("10:00", "21:00"); weekly[5] = { ...EMPTY_BUSINESS_HOURS, closed: true };
   const special = [{ date: "2026-11-12", hours: hours("12:00", "18:00", "14:00", "15:00") }];
   assert.equal(getBusinessHoursStatus(weekly, special, new Date("2026-11-12T03:30:00Z")).message, "영업 중 · 오후 2:00 브레이크타임");
+  assert.equal(getBusinessHoursStatus(weekly, special, new Date("2026-11-12T07:30:00Z")).message, "영업 중 · 오후 6:00 영업 종료");
   assert.equal(getBusinessHoursStatus(weekly, special, new Date("2026-11-12T09:00:00Z")).message, "영업 종료 · 11/19 오전 10:00 영업 시작");
   weekly[3] = hours("22:00", "02:00"); weekly[4] = hours("10:00", "20:00");
   assert.equal(getBusinessHoursStatus(weekly, [], new Date("2026-11-11T16:30:00Z")).message, "영업 중 · 오전 2:00 영업 종료");

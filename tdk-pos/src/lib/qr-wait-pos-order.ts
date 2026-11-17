@@ -1,10 +1,11 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
-import { menuComponents, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemOptions, orderItems, orders } from "@/db/schema";
+import { menuCategories, menuComponents, menuModifierGroups, menus, modifierGroups, modifierOptions, orderItemOptions, orderItems, orders } from "@/db/schema";
 import { syncRiceOrderItemStock } from "@/lib/rice-stock";
 import { hasConsistentPotSpiciness } from "@/lib/pos-pot-spiciness";
+import { isQrMenuAddonGroupForMenu, isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
 
 type Tx = Parameters<Parameters<typeof import("@/db").db.transaction>[0]>[0];
 export type WaitOrderInputItem = { menuId: number; qty: number; options: Array<{ modifierOptionId: number; qty: number }> };
@@ -27,20 +28,43 @@ export async function buildWaitOrderSnapshots(tx: Tx, items: WaitOrderInputItem[
     throw new WaitOrderValidationError("대기 주문 메뉴 수량을 확인해 주세요.");
   }
   const menuIds = [...new Set(items.map(item => item.menuId))];
+  const addonParentMenu = alias(menus, "qr_wait_addon_parent_menu");
+  const registeredAddonRows = await tx.select({ parentMenuId: addonParentMenu.menuId,
+    groupName: modifierGroups.posName, addonMenuId: modifierOptions.linkedMenuId })
+    .from(menuModifierGroups)
+    .innerJoin(addonParentMenu, and(eq(addonParentMenu.menuId, menuModifierGroups.menuId),
+      eq(addonParentMenu.isActive, 1), eq(addonParentMenu.isQrVisible, 1)))
+    .innerJoin(menuCategories, and(eq(menuCategories.categoryId, addonParentMenu.categoryId), eq(menuCategories.isActive, 1)))
+    .innerJoin(modifierGroups, and(eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId), eq(modifierGroups.isActive, 1)))
+    .innerJoin(modifierOptions, and(eq(modifierOptions.modifierGroupId, modifierGroups.modifierGroupId), eq(modifierOptions.isActive, 1)))
+    .where(inArray(modifierOptions.linkedMenuId, menuIds));
+  const registeredAddonIds = new Set(registeredAddonRows.flatMap(row => row.addonMenuId &&
+    isQrMenuAddonGroupForMenu(row.groupName, row.parentMenuId) ? [row.addonMenuId] : []));
+  const addonMenu = alias(menus, "qr_wait_addon_menu");
   const menuRows = await tx.select({ menuId: menus.menuId, posName: menus.posName, price: menus.price,
     prepStationId: menus.prepStationId, kdsKind: menus.kdsKind, kdsGroupKey: menus.kdsGroupKey })
-    .from(menus).where(and(inArray(menus.menuId, menuIds), eq(menus.isActive, 1), eq(menus.isQrVisible, 1)));
+    .from(menus).where(and(inArray(menus.menuId, menuIds), eq(menus.isActive, 1), registeredAddonIds.size
+      ? or(eq(menus.isQrVisible, 1), inArray(menus.menuId, [...registeredAddonIds]))
+      : eq(menus.isQrVisible, 1)));
   if (menuRows.length !== menuIds.length) throw new WaitOrderValidationError("판매할 수 없는 메뉴가 대기 주문에 포함되어 있습니다.");
   const optionIds = [...new Set(items.flatMap(item => item.options.map(option => option.modifierOptionId)))];
-  const optionRows = optionIds.length ? await tx.select({ menuId: menuModifierGroups.menuId,
+  const rawOptionRows = optionIds.length ? await tx.select({ menuId: menuModifierGroups.menuId,
     modifierGroupId: modifierGroups.modifierGroupId, groupName: modifierGroups.posName,
     minSelect: modifierGroups.minSelect, maxSelect: modifierGroups.maxSelect, isRequired: modifierGroups.isRequired,
     modifierOptionId: modifierOptions.modifierOptionId, optionName: modifierOptions.posName,
-    priceDelta: modifierOptions.priceDelta })
+    priceDelta: modifierOptions.priceDelta, linkedMenuId: modifierOptions.linkedMenuId,
+    addonMenuName: addonMenu.posName, addonMenuPrice: addonMenu.price })
     .from(menuModifierGroups).innerJoin(modifierGroups, and(eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId), eq(modifierGroups.isActive, 1)))
     .innerJoin(modifierOptions, and(eq(modifierOptions.modifierGroupId, modifierGroups.modifierGroupId), eq(modifierOptions.isActive, 1)))
+    .leftJoin(addonMenu, and(eq(addonMenu.menuId, modifierOptions.linkedMenuId), eq(addonMenu.isActive, 1)))
     .where(and(inArray(menuModifierGroups.menuId, menuIds), inArray(modifierOptions.modifierOptionId, optionIds))) : [];
+  const optionRows = rawOptionRows.flatMap(option => {
+    if (!isQrMenuAddonGroupName(option.groupName)) return [{ ...option, groupName: option.groupName }];
+    if (!option.linkedMenuId || !option.addonMenuName || option.addonMenuPrice === null) return [];
+    return [{ ...option, optionName: option.addonMenuName, priceDelta: option.addonMenuPrice }];
+  });
   const configuredGroupRows = await tx.select({ menuId: menuModifierGroups.menuId, modifierGroupId: modifierGroups.modifierGroupId,
+    groupName: modifierGroups.posName,
     minSelect: modifierGroups.minSelect, maxSelect: modifierGroups.maxSelect, isRequired: modifierGroups.isRequired,
     active: modifierGroups.isActive }).from(menuModifierGroups)
     .innerJoin(modifierGroups, eq(modifierGroups.modifierGroupId, menuModifierGroups.modifierGroupId))
@@ -66,18 +90,21 @@ export async function buildWaitOrderSnapshots(tx: Tx, items: WaitOrderInputItem[
     for (const group of groups) {
       if (group.active !== 1) throw new WaitOrderValidationError("메뉴 옵션 구성이 변경되었습니다. 직원이 확인해 주세요.");
       const count = item.options.filter(selected => optionRows.some(option => option.menuId === menu.menuId && option.modifierGroupId === group.modifierGroupId && option.modifierOptionId === selected.modifierOptionId)).length;
-      if (count < Math.max(group.minSelect, group.isRequired ? 1 : 0) || count > group.maxSelect) throw new WaitOrderValidationError("메뉴 옵션 구성이 변경되었습니다. 직원이 확인해 주세요.");
+      if (count < Math.max(group.minSelect, group.isRequired ? 1 : 0) || (!isQrMenuAddonGroupName(group.groupName) && count > group.maxSelect)) throw new WaitOrderValidationError("메뉴 옵션 구성이 변경되었습니다. 직원이 확인해 주세요.");
     }
     const options = item.options.map(selected => {
       const option = optionRows.find(row => row.menuId === menu.menuId && row.modifierOptionId === selected.modifierOptionId);
-      if (!option || selected.qty !== 1) throw new WaitOrderValidationError("메뉴 옵션 구성이 변경되었습니다. 직원이 확인해 주세요.");
+      if (!option || (isQrMenuAddonGroupName(option.groupName) ? !Number.isInteger(selected.qty) || selected.qty < 1 || selected.qty > 99 : selected.qty !== 1)) throw new WaitOrderValidationError("메뉴 옵션 구성이 변경되었습니다. 직원이 확인해 주세요.");
       return { ...option, qty: selected.qty };
     });
     if (chosenIds.size !== item.options.length) throw new WaitOrderValidationError("중복 옵션이 포함되어 있습니다.");
-    const optionCents = options.reduce((sum, option) => sum + toCents(option.priceDelta) * BigInt(option.qty), BigInt(0));
-    const unitPriceCents = toCents(menu.price) + optionCents;
+    const regularOptionCents = options.filter(option => !isQrMenuAddonGroupName(option.groupName))
+      .reduce((sum, option) => sum + toCents(option.priceDelta) * BigInt(option.qty), BigInt(0));
+    const addonCents = options.filter(option => isQrMenuAddonGroupName(option.groupName))
+      .reduce((sum, option) => sum + toCents(option.priceDelta) * BigInt(option.qty), BigInt(0));
+    const unitPriceCents = toCents(menu.price) + regularOptionCents;
     if (unitPriceCents < 0) throw new WaitOrderValidationError("현재 옵션 금액을 확인해 주세요.");
-    const lineCents = unitPriceCents * BigInt(item.qty);
+    const lineCents = unitPriceCents * BigInt(item.qty) + addonCents;
     total += lineCents;
     const components = componentByMenu.get(menu.menuId) ?? [];
     if (components.some(component => component.active !== 1)) throw new WaitOrderValidationError("메뉴 구성 항목이 변경되었습니다. 직원이 확인해 주세요.");
@@ -104,8 +131,9 @@ export async function insertWaitOrderAsPosOrder(tx: Tx, sessionId: number, staff
     const parentId = Number(parent.insertId);
     if (snapshot.options.length) await tx.insert(orderItemOptions).values(snapshot.options.map(option => ({
       orderItemId: parentId, modifierOptionId: option.modifierOptionId, optionName: option.optionName,
-      qty: option.qty * snapshot.qty, unitPrice: option.priceDelta,
-      totalAmount: toDecimal(toCents(option.priceDelta) * BigInt(option.qty) * BigInt(snapshot.qty)),
+      qty: isQrMenuAddonGroupName(option.groupName) ? option.qty : option.qty * snapshot.qty, unitPrice: option.priceDelta,
+      totalAmount: toDecimal(toCents(option.priceDelta) * BigInt(option.qty) *
+        (isQrMenuAddonGroupName(option.groupName) ? BigInt(1) : BigInt(snapshot.qty))),
     })));
     await syncRiceOrderItemStock(tx, parentId, snapshot.menu.menuId, snapshot.qty, staffId, true);
     for (const component of snapshot.components) {
