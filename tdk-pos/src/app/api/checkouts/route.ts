@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
+import { checkoutItems, checkouts, customerPrepaidLedger, customers, diningTables, orderItemCancellations, orderItems, orders, paymentMethods, paymentMethodSettings, paymentOtherDetails, paymentSessionAllocations, payments, qrOrders, qrSessionInvites, qrSessions, staff, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { resolveQuantityOverage } from "@/lib/other-payment-cash-change";
 import { allocatePaymentAcrossSessions } from "@/lib/table-payment-allocation";
 import { summarizeSessionFinancials } from "@/lib/table-session-financials";
@@ -48,9 +48,27 @@ async function closeSessionsAndMerges(
   closedByStaffId: number | null,
 ) {
   if (!sessionIds.length) return;
+  const sessionRows = await tx.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId })
+    .from(tableSessions).where(inArray(tableSessions.sessionId, sessionIds));
+  const tableIds = [...new Set(sessionRows.flatMap(row => row.tableId === null ? [] : [Number(row.tableId)]))];
+  const qrSessionScope = tableIds.length
+    ? or(inArray(qrSessions.sessionId, sessionIds), inArray(qrSessions.tableId, tableIds))!
+    : inArray(qrSessions.sessionId, sessionIds);
+  const relatedQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId })
+    .from(qrSessions).where(qrSessionScope).for("update");
+  const qrSessionIds = relatedQrSessions.map(row => Number(row.qrSessionId));
+  if (qrSessionIds.length) {
+    const pendingQrOrders = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
+      .where(and(eq(qrOrders.status, "PENDING"), inArray(qrOrders.qrSessionId, qrSessionIds)));
+    if (pendingQrOrders.length) throw new CheckoutError(`미처리 QR 주문 ${pendingQrOrders.length}건을 먼저 승인하거나 거절한 뒤 계산을 완료해 주세요.`, 409);
+  }
   await tx.update(tableSessions)
     .set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId })
     .where(inArray(tableSessions.sessionId, sessionIds));
+  if (qrSessionIds.length) await tx.update(qrSessions).set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP` })
+    .where(and(inArray(qrSessions.qrSessionId, qrSessionIds), eq(qrSessions.status, "ACTIVE")));
+  await tx.update(qrSessionInvites).set({ revokedAt: sql`CURRENT_TIMESTAMP` })
+    .where(and(inArray(qrSessionInvites.sessionId, sessionIds), isNull(qrSessionInvites.revokedAt)));
   // Keep the merge row for history, but make every edge touching a closed
   // session inactive. Other still-open edges in a larger merge group survive.
   await tx.update(tableSessionMerges)

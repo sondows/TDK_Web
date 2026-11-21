@@ -23,6 +23,22 @@ test("partial base-menu cancellation preserves independently selected add-on amo
   assert.equal(row.total, 16000);
 });
 
+test("keeps orphan components identifiable without hiding separately ordered menus", () => {
+  const rows = buildOrderSummaryRows([
+    { orderId: 1, orderItemId: 10, parentOrderItemId: null, menuId: 7, itemType: "NORMAL", itemName: "Stew",
+      qty: 1, effectiveQty: 0, unitPrice: "12000.00", totalAmount: "12000.00", options: [] },
+    { orderId: 1, orderItemId: 11, parentOrderItemId: 10, menuId: 99, itemType: "COMPONENT", itemName: "Rice",
+      qty: 2, actualComponentQty: 2, effectiveQty: 2, unitPrice: "0.00", totalAmount: "0.00", options: [] },
+    { orderId: 1, orderItemId: 12, parentOrderItemId: null, menuId: 99, itemType: "NORMAL", itemName: "Rice",
+      qty: 1, effectiveQty: 1, unitPrice: "2000.00", totalAmount: "2000.00", options: [] },
+  ]);
+
+  assert.deepEqual(rows.map(row => [row.itemType, row.name, row.qty, row.total]), [
+    ["COMPONENT", "Rice", 2, 0],
+    ["NORMAL", "Rice", 1, 2000],
+  ]);
+});
+
 test("summary keeps different options separate without changing amounts", () => {
   const base = { parentOrderItemId: null, menuId: 7, itemType: "NORMAL", itemName: "찌개", unitPrice: "10000.00" };
   const rows = buildOrderSummaryRows([
@@ -35,6 +51,58 @@ test("summary keeps different options separate without changing amounts", () => 
     ["순한맛", 3, 30000],
     ["매운맛", 1, 10000],
   ]);
+});
+
+test("summary merges the same menu, option, price, and component recipe across orders", () => {
+  const base = { menuId: 7, itemType: "NORMAL", itemName: "찌개", unitPrice: "10000.00", totalAmount: "20000.00" };
+  const rows = buildOrderSummaryRows([
+    { ...base, orderId: 1, orderItemId: 11, parentOrderItemId: null, qty: 2, effectiveQty: 2,
+      options: [{ modifierOptionId: 3, optionName: "약간매운맛", qty: 2, unitPrice: "0.00" }] },
+    { ...base, orderId: 1, orderItemId: 12, parentOrderItemId: 11, menuId: 99, itemType: "COMPONENT", itemName: "공기밥",
+      qty: 4, actualComponentQty: 4, effectiveQty: 4, unitPrice: "0.00", totalAmount: "0.00", options: [] },
+    { ...base, orderId: 2, orderItemId: 21, parentOrderItemId: null, qty: 1, effectiveQty: 1, totalAmount: "10000.00",
+      options: [{ modifierOptionId: 3, optionName: "약간매운맛", qty: 1, unitPrice: "0.00" }] },
+    { ...base, orderId: 2, orderItemId: 22, parentOrderItemId: 21, menuId: 99, itemType: "COMPONENT", itemName: "공기밥",
+      qty: 2, actualComponentQty: 2, effectiveQty: 2, unitPrice: "0.00", totalAmount: "0.00", options: [] },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].qty, 3);
+  assert.equal(rows[0].total, 30000);
+  assert.equal(rows[0].components.length, 1);
+  assert.equal(rows[0].components[0].qty, 6);
+  assert.deepEqual(rows[0].sourceOrderItemIds, [11, 21]);
+  assert.deepEqual(rows[0].components[0].sourceOrderItemIds, [12, 22]);
+});
+
+test("summary keeps different component recipes in separate parent rows", () => {
+  const base = { menuId: 7, itemType: "NORMAL", itemName: "찌개", unitPrice: "10000.00", totalAmount: "10000.00" };
+  const rows = buildOrderSummaryRows([
+    { ...base, orderId: 1, orderItemId: 11, parentOrderItemId: null, qty: 1, effectiveQty: 1, options: [] },
+    { ...base, orderId: 1, orderItemId: 12, parentOrderItemId: 11, menuId: 99, itemType: "COMPONENT", itemName: "공기밥",
+      qty: 1, actualComponentQty: 1, effectiveQty: 1, unitPrice: "0.00", totalAmount: "0.00", options: [] },
+    { ...base, orderId: 2, orderItemId: 21, parentOrderItemId: null, qty: 1, effectiveQty: 1, options: [] },
+    { ...base, orderId: 2, orderItemId: 22, parentOrderItemId: 21, menuId: 99, itemType: "COMPONENT", itemName: "공기밥",
+      qty: 2, actualComponentQty: 2, effectiveQty: 2, unitPrice: "0.00", totalAmount: "0.00", options: [] },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(row => [row.qty, row.components[0]?.qty]), [[1, 1], [1, 2]]);
+});
+
+test("summary normalizes option order but separates different actual selling prices", () => {
+  const base = { parentOrderItemId: null, menuId: 7, itemType: "NORMAL", itemName: "찌개", unitPrice: "10000.00" };
+  const rows = buildOrderSummaryRows([
+    { ...base, orderId: 1, orderItemId: 11, qty: 1, effectiveQty: 1, totalAmount: "13000.00",
+      options: [{ modifierOptionId: 2, optionName: "곱빼기", qty: 1, unitPrice: "2000.00" }, { modifierOptionId: 1, optionName: "약간매운맛", qty: 1, unitPrice: "1000.00" }] },
+    { ...base, orderId: 2, orderItemId: 21, qty: 1, effectiveQty: 1, totalAmount: "13000.00",
+      options: [{ modifierOptionId: 1, optionName: "약간매운맛", qty: 1, unitPrice: "1000.00" }, { modifierOptionId: 2, optionName: "곱빼기", qty: 1, unitPrice: "2000.00" }] },
+    { ...base, orderId: 3, orderItemId: 31, qty: 1, effectiveQty: 1, totalAmount: "12500.00",
+      options: [{ modifierOptionId: 2, optionName: "곱빼기", qty: 1, unitPrice: "2000.00" }, { modifierOptionId: 1, optionName: "약간매운맛", qty: 1, unitPrice: "1000.00" }] },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(row => [row.qty, row.total]), [[2, 26000], [1, 12500]]);
 });
 
 test("party rows combine same menu and per-item options across separate orders", () => {

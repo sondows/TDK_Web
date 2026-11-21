@@ -3,7 +3,7 @@ import "server-only";
 import { asc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { systemSettings } from "@/db/schema";
-import { QR_TITLE_SETTING_PREFIX, QR_TITLE_SUBTITLE_SETTING_KEY, orderedQrTitlePhotos, parseQrTitlePhoto, qrTitlePhotoSettingKey, type QrTitlePhoto } from "@/lib/qr-title-model";
+import { QR_TITLE_SETTING_PREFIX, QR_TITLE_SUBTITLE_SETTING_KEY, defaultQrTitleScreenSettings, orderedQrTitlePhotos, parseQrTitlePhoto, qrTitlePhotoSettingKey, qrTitleScreenPhotosConfiguredKey, qrTitleScreenSettingKey, type QrTitlePhoto, type QrTitleScreenId, type QrTitleScreenSettingField, type QrTitleScreenSettings } from "@/lib/qr-title-model";
 import {
   businessHoursSettingKey, parseBusinessDateClosure, parseBusinessHolidayRule, parseBusinessHours, parseBusinessHoursMode,
   getBusinessOperatingDate, parseTodayBusinessOverride, QR_BUSINESS_CLOSURE_PREFIX, QR_BUSINESS_HOLIDAY_PREFIX,
@@ -20,8 +20,61 @@ export async function listQrTitlePhotos(executor: typeof db = db): Promise<QrTit
     .orderBy(asc(systemSettings.settingKey));
   return orderedQrTitlePhotos(rows.flatMap(row => {
     const photo = parseQrTitlePhoto(row.settingKey, row.settingValue);
+    return photo && !photo.screenId ? [photo] : [];
+  }));
+}
+
+export async function listAllQrTitlePhotos(executor: typeof db = db): Promise<QrTitlePhoto[]> {
+  const rows = await executor.select({ settingKey: systemSettings.settingKey, settingValue: systemSettings.settingValue })
+    .from(systemSettings)
+    .where(sql`LEFT(${systemSettings.settingKey}, ${QR_TITLE_SETTING_PREFIX.length}) = ${QR_TITLE_SETTING_PREFIX}`)
+    .orderBy(asc(systemSettings.settingKey));
+  return orderedQrTitlePhotos(rows.flatMap(row => {
+    const photo = parseQrTitlePhoto(row.settingKey, row.settingValue);
     return photo ? [photo] : [];
   }));
+}
+
+export async function qrTitleScreenPhotosAreConfigured(screenId: QrTitleScreenId, executor: typeof db = db): Promise<boolean> {
+  const [row] = await executor.select({ settingValue: systemSettings.settingValue }).from(systemSettings)
+    .where(eq(systemSettings.settingKey, qrTitleScreenPhotosConfiguredKey(screenId))).limit(1);
+  return row?.settingValue === "1";
+}
+
+export async function listQrTitleScreenPhotos(screenId: QrTitleScreenId, executor: typeof db = db): Promise<QrTitlePhoto[]> {
+  if (!await qrTitleScreenPhotosAreConfigured(screenId, executor)) return screenId === "order" ? listQrTitlePhotos(executor) : [];
+  const prefix = `${QR_TITLE_SETTING_PREFIX}${screenId}_`;
+  const rows = await executor.select({ settingKey: systemSettings.settingKey, settingValue: systemSettings.settingValue })
+    .from(systemSettings)
+    .where(sql`LEFT(${systemSettings.settingKey}, ${prefix.length}) = ${prefix}`)
+    .orderBy(asc(systemSettings.settingKey));
+  return orderedQrTitlePhotos(rows.flatMap(row => {
+    const photo = parseQrTitlePhoto(row.settingKey, row.settingValue);
+    return photo?.screenId === screenId ? [photo] : [];
+  }));
+}
+
+export async function getQrTitleScreenSettings(screenId: QrTitleScreenId, legacyStoreName = "", executor: typeof db = db): Promise<QrTitleScreenSettings> {
+  const fields: QrTitleScreenSettingField[] = ["title", "leftMode", "leftText", "rightMode", "rightText", "footerMode", "footerText"];
+  const defaults = defaultQrTitleScreenSettings(screenId, legacyStoreName);
+  const keys = fields.map(field => qrTitleScreenSettingKey(screenId, field));
+  const rows = await executor.select({ settingKey: systemSettings.settingKey, settingValue: systemSettings.settingValue }).from(systemSettings)
+    .where(inArray(systemSettings.settingKey, keys));
+  const saved = new Map(rows.map(row => [row.settingKey, row.settingValue]));
+  const title = saved.get(qrTitleScreenSettingKey(screenId, "title"));
+  const leftMode = saved.get(qrTitleScreenSettingKey(screenId, "leftMode"));
+  const rightMode = saved.get(qrTitleScreenSettingKey(screenId, "rightMode"));
+  const footerMode = saved.get(qrTitleScreenSettingKey(screenId, "footerMode"));
+  return {
+    ...defaults,
+    ...(title !== undefined ? { title } : {}),
+    ...(leftMode === "SHARE_QR" || leftMode === "TEXT" || leftMode === "HIDE" ? { leftMode } : {}),
+    ...(saved.has(qrTitleScreenSettingKey(screenId, "leftText")) ? { leftText: saved.get(qrTitleScreenSettingKey(screenId, "leftText"))! } : {}),
+    ...(rightMode === "TABLE_NO" || rightMode === "TEXT" || rightMode === "HIDE" ? { rightMode } : {}),
+    ...(saved.has(qrTitleScreenSettingKey(screenId, "rightText")) ? { rightText: saved.get(qrTitleScreenSettingKey(screenId, "rightText"))! } : {}),
+    ...(footerMode === "BUSINESS_HOURS" || footerMode === "TEXT" || footerMode === "HIDE" ? { footerMode } : {}),
+    ...(saved.has(qrTitleScreenSettingKey(screenId, "footerText")) ? { footerText: saved.get(qrTitleScreenSettingKey(screenId, "footerText"))! } : {}),
+  };
 }
 
 export async function getQrTitlePhoto(photoId: string, executor: typeof db = db): Promise<QrTitlePhoto | null> {
@@ -84,4 +137,21 @@ export async function getQrPublicTitleData(now = new Date()) {
     effectiveHolidayRules.push({ id: `kasi-${holiday.date}`, startDate: holiday.date, endDate: holiday.date, mode: "REGULAR", hours: { ...EMPTY_BUSINESS_HOURS } });
   }
   return { photos, storeName: storeInfo.storeName, subtitle, ...schedule, holidayRules: effectiveHolidayRules.sort((a, b) => a.startDate.localeCompare(b.startDate)), serverNow: now.toISOString() };
+}
+
+export async function getQrScreenTitleData(screenId: QrTitleScreenId, now = new Date()) {
+  const base = await getQrPublicTitleData(now);
+  const [screenSettings, photos] = await Promise.all([
+    getQrTitleScreenSettings(screenId, base.storeName),
+    listQrTitleScreenPhotos(screenId),
+  ]);
+  return {
+    ...base,
+    screenSettings,
+    photos: photos.filter(photo => photo.isActive).map(photo => ({
+      id: photo.photoId,
+      imageUrl: `/api/qr/title-images/${photo.assetId}?screen=${screenId}`,
+      alt: screenId === "order" ? "주문하기 타이틀 사진" : "주문내역 타이틀 사진",
+    })),
+  };
 }

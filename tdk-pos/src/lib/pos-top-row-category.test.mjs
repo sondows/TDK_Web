@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getAdjacentPosCategoryId, getPosCategoryCornerColor, getPosCategorySwipeDirection, getPosCategoryTextColor, getPosCategoryWheelDirection, getPosMenuCardBackground, getPosMenuCategoryBottomPadding, getPosTopRowCategoryId, groupPosMenusIntoCategoryRows } from "./pos-top-row-category.ts";
+import { getAdjacentPosCategoryId, getPosCategoryCornerColor, getPosCategorySwipeDirection, getPosCategoryTextColor, getPosCategoryWheelDirection, getPosKimchiCategoryCornerColor, getPosMenuCardBackground, getPosMenuCategoryBottomPadding, getPosTopRowCategoryId, groupPosMenusIntoCategoryRows } from "./pos-top-row-category.ts";
 
 test("POS menu card pastel keeps the ADM hue with 12% color and 88% white", () => {
   assert.equal(getPosMenuCardBackground("#a9d9c8", "#16A34A"), "#F5FAF8");
@@ -12,6 +12,11 @@ test("category corner marker uses an 18% same-hue darkening", () => {
   assert.equal(getPosCategoryCornerColor("#a9d9c8", "#16A34A"), "#8BB2A4");
   assert.equal(getPosCategoryCornerColor(null, "#16A34A"), "#12863D");
   assert.equal(getPosCategoryCornerColor("invalid", "#16A34A"), "#12863D");
+});
+
+test("QR order corner matches the kimchi category corner with fallback or configured color", () => {
+  assert.equal(getPosKimchiCategoryCornerColor(null), "#B41F1F");
+  assert.equal(getPosKimchiCategoryCornerColor("#AC1E1E"), getPosCategoryCornerColor("#AC1E1E", "#DC2626"));
 });
 
 test("active category text chooses the more legible neutral color", () => {

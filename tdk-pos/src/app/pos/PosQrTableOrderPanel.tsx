@@ -26,6 +26,7 @@ export default function PosQrTableOrderPanel({ onChanged }: { onChanged: () => v
   }, [refresh]);
 
   const decide = async (qrOrderId: number, action: "ACCEPT" | "REJECT") => {
+    if (action === "REJECT" && !window.confirm("이 QR 주문을 거절할까요? 고객 주문내역에 거절로 표시되고 주방에는 전달되지 않습니다.")) return;
     setBusyId(qrOrderId); setError("");
     try {
       const response = await fetch("/api/pos/qr-table-orders", { method: "PATCH", headers: { "Content-Type": "application/json" },

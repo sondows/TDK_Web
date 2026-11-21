@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, DrizzleQueryError, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { diningTables, orderItemCancellations, orderItems, orders, qrSessionInvites, qrSessions, staff, tableSessionMerges, tableSessions } from "@/db/schema";
+import { diningTables, orderItemCancellations, orderItems, orders, qrOrders, qrSessionInvites, qrSessions, staff, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff, verifyEmployeePin } from "@/lib/auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { isValidEmployeePin } from "@/lib/pin";
@@ -98,6 +98,19 @@ export async function POST(request: Request) {
         .from(tableSessions).innerJoin(diningTables, eq(tableSessions.tableId, diningTables.tableId)).where(inArray(tableSessions.sessionId, sessionIds)).for("update");
       if (sessions.length !== sessionIds.length || sessions.some(session => session.status !== "OPEN")) throw new Error("테이블 상태가 변경되었습니다. 다시 확인해 주세요.");
 
+      const tableIds = [...new Set(sessions.flatMap(session => session.tableId === null ? [] : [Number(session.tableId)]))];
+      const qrSessionScope = tableIds.length
+        ? or(inArray(qrSessions.sessionId, sessionIds), inArray(qrSessions.tableId, tableIds))!
+        : inArray(qrSessions.sessionId, sessionIds);
+      const relatedQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId }).from(qrSessions)
+        .where(qrSessionScope).for("update");
+      const qrSessionIds = relatedQrSessions.map(row => Number(row.qrSessionId));
+      if (qrSessionIds.length) {
+        const pendingQrOrders = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
+          .where(and(eq(qrOrders.status, "PENDING"), inArray(qrOrders.qrSessionId, qrSessionIds)));
+        if (pendingQrOrders.length) throw new Error("미처리 QR 주문 " + pendingQrOrders.length + "건을 먼저 승인하거나 거절해 주세요.");
+      }
+
       const scopeOrders = await tx.select({ orderId: orders.orderId, status: orders.status })
         .from(orders).where(inArray(orders.sessionId, sessionIds)).for("update");
       if (scopeOrders.some(order => order.status === "COMPLETED")) throw new Error("결제 완료 주문이 포함되어 테이블 취소를 처리할 수 없습니다.");
@@ -120,7 +133,6 @@ export async function POST(request: Request) {
       for (const orderId of orderIds) await tx.update(orders).set({ subtotalAmount: "0.00", totalAmount: "0.00", status: "CANCELLED" }).where(eq(orders.orderId, orderId));
       if (merges.length) await tx.update(tableSessionMerges).set({ status: "SEPARATED", separatedAt: new Date() }).where(inArray(tableSessionMerges.mergeId, merges.map(merge => merge.mergeId)));
       await tx.update(tableSessions).set({ status: "CANCELLED", closedAt: new Date(), closedByStaffId: checker.staffId }).where(inArray(tableSessions.sessionId, sessionIds));
-      const tableIds = sessions.flatMap(session => session.tableId === null ? [] : [session.tableId]);
       const customerSessions = tableIds.length ? or(inArray(qrSessions.sessionId, sessionIds), inArray(qrSessions.tableId, tableIds)) : inArray(qrSessions.sessionId, sessionIds);
       await tx.update(qrSessions).set({ status: "CLOSED", closedAt: new Date() }).where(and(customerSessions, eq(qrSessions.status, "ACTIVE")));
       await tx.update(qrSessionInvites).set({ revokedAt: new Date() }).where(and(inArray(qrSessionInvites.sessionId, sessionIds), isNull(qrSessionInvites.revokedAt)));
@@ -130,6 +142,16 @@ export async function POST(request: Request) {
     });
     return Response.json({ success: true, tableNos: result.tableNos });
   } catch (error) {
+    if (error instanceof DrizzleQueryError) {
+      const cause = error.cause as (Error & { code?: string; errno?: number; sqlState?: string; sqlMessage?: string }) | undefined;
+      console.error("[table-cancellations] Database operation failed", {
+        code: cause?.code,
+        errno: cause?.errno,
+        sqlState: cause?.sqlState,
+        message: cause?.sqlMessage ?? cause?.message,
+      });
+      return Response.json({ success: false, message: "테이블 취소 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." }, { status: 500 });
+    }
     return Response.json({ success: false, message: error instanceof Error ? error.message : "테이블 취소에 실패했습니다." }, { status: 409 });
   }
 }

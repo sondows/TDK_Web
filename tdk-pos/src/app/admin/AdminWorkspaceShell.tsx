@@ -7,7 +7,7 @@ import AdminExitButton from "./AdminExitButton";
 import AdminSidebar from "./AdminSidebar";
 import styles from "./admin.module.css";
 
-export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, canAccessSecurity = false, canManageHosLayout = false, canManageMenu = false }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; canManageMenu?: boolean }) {
+export default function AdminWorkspaceShell({ children, userName, menuOnly = false, showLogout = true, canAccessSecurity, canManageHosLayout, canManageMenu }: { children: ReactNode; userName: string; menuOnly?: boolean; showLogout?: boolean; canAccessSecurity: boolean; canManageHosLayout: boolean; canManageMenu: boolean }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);

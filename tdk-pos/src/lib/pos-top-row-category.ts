@@ -1,6 +1,7 @@
 export type PosMenuRowPosition = { top: number; bottom: number; firstCategoryId: number | null };
 export type PosCategoryDirection = "PREVIOUS" | "NEXT";
 export type PosMenuCategoryRow<T> = { categoryId: number | null; menus: T[] };
+export const POS_KIMCHI_CATEGORY_FALLBACK_COLOR = "#DC2626";
 
 function normalizedHex(value: unknown): string | null {
   return typeof value === "string" && /^#[\da-fA-F]{6}$/.test(value) ? value.toUpperCase() : null;
@@ -22,6 +23,10 @@ export function getPosMenuCardBackground(tabColor: unknown, fallbackAccent: stri
 export function getPosCategoryCornerColor(tabColor: unknown, fallbackAccent: string): string {
   const color = normalizedHex(tabColor) ?? normalizedHex(fallbackAccent) ?? "#64748B";
   return mixHex(color, "#000000", 0.18);
+}
+
+export function getPosKimchiCategoryCornerColor(tabColor: unknown): string {
+  return getPosCategoryCornerColor(tabColor, POS_KIMCHI_CATEGORY_FALLBACK_COLOR);
 }
 
 function relativeLuminance(hex: string): number {

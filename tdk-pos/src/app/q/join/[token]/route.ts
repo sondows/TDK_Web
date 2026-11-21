@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables, qrSessionInvites, qrSessions, tableSessions } from "@/db/schema";
 import { createQrAccessToken, hashQrToken, qrSessionCookieAttributes, QR_ORDER_ACCESS_MAX_AGE_SECONDS, resolveQrOrderRequest } from "@/lib/qr-order-auth";
+import { qrSessionCookieMaxAgeSeconds, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     const current = await resolveQrOrderRequest(request);
     const result = await db.transaction(async tx => {
       const [invite] = await tx.select({ inviteId: qrSessionInvites.inviteId, sessionId: qrSessionInvites.sessionId,
-        expiresAt: qrSessionInvites.expiresAt, redeemedAt: qrSessionInvites.redeemedAt, revokedAt: qrSessionInvites.revokedAt })
+        remainingSeconds: sql<number>`TIMESTAMPDIFF(SECOND, CURRENT_TIMESTAMP, ${qrSessionInvites.expiresAt})`,
+        redeemedAt: qrSessionInvites.redeemedAt, revokedAt: qrSessionInvites.revokedAt })
         .from(qrSessionInvites).where(eq(qrSessionInvites.tokenHash, tokenHash)).for("update").limit(1);
-      if (!invite || invite.revokedAt || invite.expiresAt <= now) return { kind: "INVALID" as const };
+      if (!invite || invite.revokedAt || Number(invite.remainingSeconds) <= 0) return { kind: "INVALID" as const };
       const [sessionSnapshot] = await tx.select({ tableId: tableSessions.tableId }).from(tableSessions)
         .where(and(eq(tableSessions.sessionId, invite.sessionId), eq(tableSessions.status, "OPEN"))).limit(1);
       if (!sessionSnapshot?.tableId) return { kind: "INVALID" as const };
@@ -27,6 +29,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         .from(tableSessions).innerJoin(diningTables, eq(diningTables.tableId, tableSessions.tableId))
         .where(and(eq(tableSessions.sessionId, invite.sessionId), eq(tableSessions.status, "OPEN"), eq(diningTables.isActive, 1))).for("update").limit(1);
       if (!session || Number(session.tableId) !== Number(sessionSnapshot.tableId)) return { kind: "INVALID" as const };
+      const sessionExpiry = qrTableSessionExpiresAtSql(invite.sessionId);
+      const [rootExpiry] = await tx.select({ remainingSeconds: sql<number>`TIMESTAMPDIFF(SECOND, CURRENT_TIMESTAMP, ${sessionExpiry})` })
+        .from(tableSessions).where(eq(tableSessions.sessionId, invite.sessionId)).limit(1);
+      if (!rootExpiry) return { kind: "INVALID" as const };
+      const effectiveRemainingSeconds = Math.min(Number(invite.remainingSeconds), Number(rootExpiry.remainingSeconds));
+      const cookieMaxAgeSeconds = qrSessionCookieMaxAgeSeconds(effectiveRemainingSeconds, QR_ORDER_ACCESS_MAX_AGE_SECONDS);
+      if (cookieMaxAgeSeconds <= 0) return { kind: "INVALID" as const };
       if (current?.sessionId === Number(session.sessionId)) return { kind: "EXISTING" as const };
       const [active] = await tx.select({ count: sql<number>`COUNT(*)` }).from(qrSessions)
         .where(and(eq(qrSessions.sessionId, invite.sessionId), eq(qrSessions.status, "ACTIVE")));
@@ -45,12 +54,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE")));
       await tx.insert(qrSessions).values({ sessionId: invite.sessionId, tableId: session.tableId, tokenHash: hashQrToken(accessToken), languageCode: "ko", status: "ACTIVE", lastActiveAt: now });
       if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
-      return { kind: "JOINED" as const, accessToken };
+      return { kind: "JOINED" as const, accessToken, cookieMaxAgeSeconds };
     });
     if (result.kind === "JOINED_TEST") return Response.redirect(new URL("/qrorder", request.url));
     if (result.kind !== "JOINED") return Response.redirect(new URL(result.kind === "EXISTING" ? "/qrorder" : result.kind === "FULL" ? "/qrorder/invite-full" : "/qrorder/invite-invalid", request.url));
     const response = Response.redirect(new URL("/qrorder", request.url));
-    response.headers.append("Set-Cookie", `tdkon_qr_session=${encodeURIComponent(result.accessToken)}; ${qrSessionCookieAttributes(request, QR_ORDER_ACCESS_MAX_AGE_SECONDS)}`);
+    response.headers.append("Set-Cookie", `tdkon_qr_session=${encodeURIComponent(result.accessToken)}; ${qrSessionCookieAttributes(request, result.cookieMaxAgeSeconds)}`);
     return response;
   } catch {
     return Response.redirect(new URL("/qrorder/invite-invalid", request.url));

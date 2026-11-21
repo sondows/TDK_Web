@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { menuCategories, menuComponents, menuImages, menus } from "@/db/schema";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { canManageMenu } from "@/lib/permissions";
+import { getAdminSidebarPermissions } from "@/lib/admin-sidebar-permissions";
 import { loadMenuChoiceConfigs } from "@/lib/menu-choice-options";
 import MenuManagementClient from "@/app/pos/admin/menus/MenuManagementClient";
 import AdminWorkspaceShell from "../AdminWorkspaceShell";
@@ -14,6 +15,7 @@ export default async function AdminMenuManagementPage() {
   const centerMember = await getCurrentAdminStaff();
   if (!centerMember) redirect("/tdkadm/login");
   if (!canManageMenu(centerMember.role)) redirect("/tdkadm");
+  const sidebarPermissions = await getAdminSidebarPermissions(centerMember);
   const componentMenu = alias(menus, "component_menu");
   const [categories, menuRows, componentMenuRows, componentRows, choiceConfigs] = await Promise.all([
     db.select({ categoryId: menuCategories.categoryId, name: menuCategories.posName, sortOrder: menuCategories.sortOrder }).from(menuCategories).where(eq(menuCategories.isActive, 1)).orderBy(menuCategories.sortOrder, menuCategories.categoryId),
@@ -25,7 +27,7 @@ export default async function AdminMenuManagementPage() {
   const componentsByMenu = new Map<number, typeof componentRows>();
   componentRows.forEach(component => componentsByMenu.set(component.parentMenuId, [...(componentsByMenu.get(component.parentMenuId) ?? []), component]));
   const menusWithComponents = menuRows.map(menu => ({ ...menu, components: componentsByMenu.get(menu.menuId) ?? [], optionConfig: choiceConfigs.get(menu.menuId) ?? { enabled: false, title: "", buttons: [], qrDescriptions: [], defaultIndex: 0 } }));
-  return <AdminWorkspaceShell userName={centerMember.name}>
+  return <AdminWorkspaceShell {...sidebarPermissions} userName={centerMember.name}>
     <div className={styles.content}>
         <div className={styles.pageHeading}><h1>메뉴 관리</h1><p className={styles.pageDescription}>POS 메뉴와 구성 메뉴를 관리합니다.</p></div>
         <MenuManagementClient categories={categories} initialMenus={menusWithComponents} componentMenus={componentMenuRows} showQrVisibility />

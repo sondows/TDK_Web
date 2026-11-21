@@ -1,13 +1,17 @@
-import { isQrTitleId } from "@/lib/qr-title-model";
+import { isQrTitleId, isQrTitleScreenId } from "@/lib/qr-title-model";
 import { readQrTitleImage } from "@/lib/qr-title-image-storage";
+import { listQrTitlePhotos, listQrTitleScreenPhotos } from "@/lib/qr-title-settings";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ assetId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ assetId: string }> }) {
   const { assetId } = await params;
   if (!isQrTitleId(assetId)) return new Response(null, { status: 404 });
   try {
-    const photos = await import("@/lib/qr-title-settings").then(({ listQrTitlePhotos }) => listQrTitlePhotos());
+    const rawScreenId = new URL(request.url).searchParams.get("screen");
+    const screenId = rawScreenId === null ? undefined : isQrTitleScreenId(rawScreenId) ? rawScreenId : null;
+    if (screenId === null) return new Response(null, { status: 404 });
+    const photos = screenId ? await listQrTitleScreenPhotos(screenId) : await listQrTitlePhotos();
     const photo = photos.find(item => item.assetId === assetId && item.isActive);
     if (!photo) return new Response(null, { status: 404 });
     const bytes = await readQrTitleImage(assetId);

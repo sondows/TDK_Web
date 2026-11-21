@@ -6,14 +6,15 @@ import { db, pool } from "@/db";
 import { customers, diningTables, orderItemCancellations, orderItems, orders, paymentSessionAllocations,
   payments, systemSettings, tableSessionDiscounts, tableSessionMerges, tableSessions } from "@/db/schema";
 import { calculateTableFinancials } from "@/lib/table-session-financials";
+import { countHosTablesWithOrders } from "@/lib/hos-nav-counts";
 import { parseHosTableLayout, resolveHosTableLayouts } from "@/lib/hos-table-layout";
 import { HOS_DIVIDER_SETTING_KEY, parseHosDividerPositions } from "@/lib/hos-section-layout";
+import { loadCurrentPendingQrOrderCount, loadQrTableIndicators } from "@/lib/qr-table-indicators";
 
-type QrSessionRow = RowDataPacket & { sessionId: number };
 type SessionCustomerRow = RowDataPacket & { sessionId: number; customerName: string | null; paidAt: Date; paymentId: number };
 
 export async function loadHosTables(includeHidden = false) {
-  const [tableRows, sessions, merges, dividerSettings] = await Promise.all([
+  const [tableRows, sessions, merges, dividerSettings, qrTableIndicators, qrPendingOrderCount] = await Promise.all([
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, tableName: diningTables.tableName,
       capacity: diningTables.capacity }).from(diningTables).where(eq(diningTables.isActive, 1)),
     db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, personCount: tableSessions.personCount,
@@ -26,6 +27,8 @@ export async function loadHosTables(includeHidden = false) {
       .from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE")),
     db.select({ settingValue: systemSettings.settingValue }).from(systemSettings)
       .where(eq(systemSettings.settingKey, HOS_DIVIDER_SETTING_KEY)).limit(1),
+    loadQrTableIndicators(),
+    loadCurrentPendingQrOrderCount(),
   ]);
   const settingKeys = tableRows.map(table => `hos.table-layout.${table.tableId}`);
   const settingRows = settingKeys.length
@@ -64,13 +67,6 @@ export async function loadHosTables(includeHidden = false) {
       customerNameBySessionId.set(Number(row.sessionId), row.customerName);
     }
   }
-  const qrRows: QrSessionRow[] = sessionIds.length
-    ? (await pool.query<QrSessionRow[]>(`SELECT DISTINCT qs.session_id AS sessionId
-        FROM qr_orders qo
-        INNER JOIN qr_sessions qs ON qs.qr_session_id = qo.qr_session_id
-        WHERE qs.session_id IN (?)`, [sessionIds]))[0]
-    : [];
-  const sessionsWithQrOrders = new Set(qrRows.map(row => Number(row.sessionId)));
   const orderRows = sessionIds.length ? await db.select({ orderId: orders.orderId, sessionId: orders.sessionId,
     status: orders.status }).from(orders).where(inArray(orders.sessionId, sessionIds)) : [];
   const orderIds = orderRows.map(row => row.orderId);
@@ -86,12 +82,16 @@ export async function loadHosTables(includeHidden = false) {
   const sessionByOrder = new Map(orderRows.map(row => [row.orderId, row.sessionId]));
   const statusByOrder = new Map(orderRows.map(row => [row.orderId, row.status]));
   const grossBySessionId = new Map<number, number>();
+  const sessionsWithConfirmedOrders = new Set<number>();
   for (const item of items) {
     const sessionId = sessionByOrder.get(item.orderId);
     const qty = statusByOrder.get(item.orderId) === "CANCELLED" || item.status === "CANCELLED"
       ? 0 : Math.max(0, item.qty - (cancelled.get(item.orderItemId) ?? 0));
-    if (sessionId && qty > 0) grossBySessionId.set(sessionId,
-      (grossBySessionId.get(sessionId) ?? 0) + (item.itemType === "SERVICE" ? 0 : Number(item.unitPrice) * qty));
+    if (sessionId && qty > 0) {
+      sessionsWithConfirmedOrders.add(sessionId);
+      grossBySessionId.set(sessionId,
+        (grossBySessionId.get(sessionId) ?? 0) + (item.itemType === "SERVICE" ? 0 : Number(item.unitPrice) * qty));
+    }
   }
   const sessionIdsWithTable = sessions.map(row => row.sessionId);
   const [discountRows, allocations] = sessionIdsWithTable.length ? await Promise.all([
@@ -131,10 +131,14 @@ export async function loadHosTables(includeHidden = false) {
     const sources = mergedSources.get(table.tableId) ?? [];
     const sourceMerge = session ? merges.find(merge => merge.sourceSessionId === session.sessionId) : undefined;
     const summary = financials.get(table.tableId);
+    const relatedSessionIds = [session?.sessionId, ...sources.map(source => source.sessionId)]
+      .filter((id): id is number => id !== undefined);
     return {
       ...table,
       sessionId: isMergedSource ? null : session?.sessionId ?? null,
-      hasQrOrder: !isMergedSource && session ? sessionsWithQrOrders.has(session.sessionId) : false,
+      hasActiveQrToken: !isMergedSource && (qrTableIndicators.get(Number(table.tableId))?.hasActiveQrToken ?? false),
+      hasPendingQrOrder: !isMergedSource && (qrTableIndicators.get(Number(table.tableId))?.hasPendingQrOrder ?? false),
+      hasQrOrderHistory: !isMergedSource && (qrTableIndicators.get(Number(table.tableId))?.hasQrOrderHistory ?? false),
       isMergedSource,
       mergedIntoTableNo: sourceMerge ? tableNoById.get(sourceMerge.destinationTableId) ?? null : null,
       personCount: isMergedSource ? null : session?.personCount ?? null,
@@ -143,13 +147,17 @@ export async function loadHosTables(includeHidden = false) {
       customerName: isMergedSource || !session ? null
         : session.pickupCustomerName ?? customerNameBySessionId.get(session.sessionId) ?? null,
       mergedSourceTableNos: sources.map(source => tableNoById.get(source.tableId!) ?? ""),
-      relatedSessionIds: isMergedSource ? [] : [session?.sessionId, ...sources.map(source => source.sessionId)]
-        .filter((id): id is number => id !== undefined),
+      relatedSessionIds: isMergedSource ? [] : relatedSessionIds,
+      hasConfirmedOrder: !isMergedSource && relatedSessionIds.some(id => sessionsWithConfirmedOrders.has(id)),
       amountDue: summary?.remaining ?? 0,
     };
   });
+  const storeOrderTableCount = countHosTablesWithOrders(visible);
   return {
     tables: includeHidden ? visible : visible.filter(table => table.isVisible),
+    qrOrderTables: [...qrTableIndicators.values()],
+    storeOrderTableCount,
+    qrPendingOrderCount,
     qrOrdersAvailable: false,
     dividerPositions: parseHosDividerPositions(dividerSettings[0]?.settingValue),
   };

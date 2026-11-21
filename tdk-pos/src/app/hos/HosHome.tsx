@@ -6,15 +6,22 @@ import { useRouter } from "next/navigation";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { clampHosRemainingQuantity, getHosCancellationQuantity } from "@/lib/hos-order-quantity";
 import { getHosMenuCategoryAtTop, getHosMenuTailSpacerHeight } from "@/lib/hos-menu-scroll";
-import { getMenuCategoryTabStyles } from "@/lib/menu-category-tab-color";
+import { initialAdultCountFromStewOrder } from "@/lib/initial-table-person-count";
+import { resolveHosPeopleCount, type HosPeopleCount } from "@/lib/hos-people-count";
 import { formatTradeBalance, tradeDescription, tradeTypeLabel, type CustomerTradeDetail, type CustomerTradeDetailResponse,
   type CustomerTradeResponse, type CustomerTradeRow } from "@/lib/customer-trade";
 import HosTableCanvas from "./HosTableCanvas";
+import QrMenuAddIcon from "@/components/QrMenuAddIcon";
+import HosQrPendingOrders from "./HosQrPendingOrders";
+import type { QrOrderTableListItem } from "@/lib/qr-orders-list-model";
+import { shouldOpenQrOrdersForTable } from "@/lib/qr-order-notification-model";
+import { POS_IDLE_RESET_ACTIVITY_EVENTS } from "@/lib/pos-idle-reset";
+import { formatHosNavBadge } from "@/lib/hos-nav-counts";
 
 type TableRow = {
   tableId: number; tableNo: string; tableName: string | null; positionX: number; positionY: number;
   layoutWidth: number; layoutHeight: number; isVisible: boolean; sessionId: number | null;
-  amountDue: number; personCount?: number | null; babyCount?: number | null; openedAt?: string | null; customerName?: string | null; hasQrOrder?: boolean; hasTableToken?: boolean; mergedSourceTableNos: string[];
+  amountDue: number; hasConfirmedOrder?: boolean; personCount?: number | null; babyCount?: number | null; openedAt?: string | null; customerName?: string | null; hasActiveQrToken?: boolean; hasPendingQrOrder?: boolean; hasQrOrderHistory?: boolean; hasTableToken?: boolean; mergedSourceTableNos: string[];
   isMergedSource: boolean; mergedIntoTableNo: string | null;
 };
 type OrderItem = {
@@ -24,7 +31,7 @@ type OrderItem = {
 };
 type TableDetail = {
   table: { tableId: number; tableNo: string; tableName: string | null };
-  session: { sessionId: number; relatedSessionIds: number[]; customerId: number | null; customerName: string | null } | null;
+  session: { sessionId: number; relatedSessionIds: number[]; customerId: number | null; customerName: string | null; personCount: number; babyCount: number } | null;
   orders: Array<{ orderId: number; status: string; orderedAt: string; totalAmount: string; items: OrderItem[] }>;
 };
 type HosCustomer = { customerId: number; name: string; isPaymentManaged: boolean; createdAt: string; tradeBalance?: number };
@@ -96,14 +103,19 @@ async function fetchHos(input: RequestInfo | URL, init?: RequestInit) {
   return response;
 }
 
-export default function HosHome({ staffLoginId }: { staffLoginId: string | null }) {
+export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLoginId: string | null; idleResetSeconds: number }) {
   const router = useRouter();
   const sessionRefreshRequestedRef = useRef(false);
   const [tables, setTables] = useState<TableRow[]>([]);
+  const [storeOrderTableCount, setStoreOrderTableCount] = useState<number | null>(null);
+  const [qrPendingOrderCount, setQrPendingOrderCount] = useState<number | null>(null);
+  const [qrOrderTables, setQrOrderTables] = useState<QrOrderTableListItem[]>([]);
+  const currentQrOrderTables = qrOrderTables;
+  const [qrOrdersBlockingUiOpen, setQrOrdersBlockingUiOpen] = useState(false);
   const [dividerPositions, setDividerPositions] = useState<number[]>([]);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [detail, setDetail] = useState<TableDetail | null>(null);
-  const [screen, setScreen] = useState<"tables" | "detail" | "menu" | "customer" | "balance" | "tradeDetail">("tables");
+  const [screen, setScreen] = useState<"tables" | "qrOrders" | "detail" | "menu" | "customer" | "balance" | "tradeDetail">("tables");
   const [hosCustomers, setHosCustomers] = useState<HosCustomer[]>([]);
   const [customersLoadedKey, setCustomersLoadedKey] = useState("");
   const [customerError, setCustomerError] = useState("");
@@ -120,6 +132,15 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [cancelMode, setCancelMode] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null);
   const [cartFlights, setCartFlights] = useState<CartFlight[]>([]);
+  const [cartSheetOpen, setCartSheetOpen] = useState(false);
+  const [detailSheet, setDetailSheet] = useState<"customer" | "people" | null>(null);
+  const [detailSheetClosing, setDetailSheetClosing] = useState(false);
+  const [detailSheetEntering, setDetailSheetEntering] = useState(false);
+  const customerDataLoadedKeysRef = useRef(new Set<string>());
+  const [peopleDraft, setPeopleDraft] = useState<HosPeopleCount>({ personCount: 0, babyCount: 0 });
+  const [peopleSavedOverride, setPeopleSavedOverride] = useState<{ sessionId: number } & HosPeopleCount | null>(null);
+  const [peopleBusy, setPeopleBusy] = useState(false);
+  const [peopleError, setPeopleError] = useState("");
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [choices, setChoices] = useState<Record<number, number>>({});
@@ -130,7 +151,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const [refreshing, setRefreshing] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
-  const [logoutMenuOpen, setLogoutMenuOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toastDuration, setToastDuration] = useState<number>(2);
   const [toastDurationLoaded, setToastDurationLoaded] = useState(false);
@@ -149,6 +171,11 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const fullCancelLockRef = useRef(false);
   const successToastTimerRef = useRef<number | null>(null);
   const sendLock = useRef(false);
+  const peopleSaveLockRef = useRef(false);
+  const logoutInFlightRef = useRef(false);
+  const detailSheetCloseTimerRef = useRef<number | null>(null);
+  const detailSheetEnterFrameRef = useRef<number | null>(null);
+  const detailSheetAfterCloseRef = useRef<"customer" | "people" | null>(null);
   const optionAddLockRef = useRef(false);
   const tableRequestRef = useRef<Promise<void> | null>(null);
   const detailRequestVersionRef = useRef(0);
@@ -156,8 +183,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const activeDetailTableIdRef = useRef<number | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
   const tableScreenRef = useRef<HTMLElement | null>(null);
-  const logoutMenuRef = useRef<HTMLDivElement | null>(null);
-  const logoutMenuHistoryRef = useRef(false);
   const menuTabsRef = useRef<HTMLDivElement | null>(null);
   const cartSummaryRef = useRef<HTMLSpanElement | null>(null);
   const cartPulseAnimationRef = useRef<Animation | null>(null);
@@ -171,14 +196,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   const programmaticMenuScrollRef = useRef(false);
   const keepMenuOpenAfterOptionRef = useRef(false);
   const optionFlightOriginRef = useRef<CartPoint | null>(null);
-  const closeLogoutMenu = useCallback(() => {
-    if (!logoutMenuOpen) return;
-    setLogoutMenuOpen(false);
-    if (logoutMenuHistoryRef.current) {
-      logoutMenuHistoryRef.current = false;
-      window.history.back();
-    }
-  }, [logoutMenuOpen]);
   const closeLeaveCartConfirmation = useCallback(() => {
     leaveCartConfirmRef.current = null;
     setLeaveCartConfirmTarget(null);
@@ -212,8 +229,11 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     setRefreshing(true);
     const request = (async () => {
       try {
-        const result = await readJson<{ tables: TableRow[]; dividerPositions?: number[] }>(await fetchHos("/api/hos/tables", { cache: "no-store" }));
+        const result = await readJson<{ tables: TableRow[]; qrOrderTables?: QrOrderTableListItem[]; dividerPositions?: number[]; storeOrderTableCount?: number; qrPendingOrderCount?: number }>(await fetchHos("/api/hos/tables", { cache: "no-store" }));
         setTables(result.tables);
+        setQrOrderTables(result.qrOrderTables ?? []);
+        if (Number.isSafeInteger(result.storeOrderTableCount) && Number(result.storeOrderTableCount) >= 0) setStoreOrderTableCount(Number(result.storeOrderTableCount));
+        if (Number.isSafeInteger(result.qrPendingOrderCount) && Number(result.qrPendingOrderCount) >= 0) setQrPendingOrderCount(Number(result.qrPendingOrderCount));
         setDividerPositions(Array.isArray(result.dividerPositions) ? result.dividerPositions : []);
         setError("");
       } catch (cause) {
@@ -236,7 +256,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, [loadTables]);
 
   useEffect(() => {
-    if (screen !== "tables") return;
+    if (screen !== "tables" && screen !== "qrOrders") return;
     const firstLoad = window.setTimeout(() => void loadTables(), 0);
     const timer = window.setInterval(() => void loadTables(), 6000);
     return () => {
@@ -246,29 +266,22 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, [loadTables, screen]);
 
   useEffect(() => {
-    if (!logoutMenuOpen) return;
-    window.history.pushState({ ...(window.history.state ?? {}), hosLogoutMenu: true }, "", window.location.href);
-    logoutMenuHistoryRef.current = true;
-    const onPopState = () => {
-      if (!logoutMenuHistoryRef.current) return;
-      logoutMenuHistoryRef.current = false;
-      setLogoutMenuOpen(false);
+    if (screen !== "qrOrders" || !Number.isInteger(idleResetSeconds) || idleResetSeconds <= 0 || busy || qrOrdersBlockingUiOpen || settingsOpen || exitConfirmOpen) return;
+    let timer: number | undefined;
+    const restartTimer = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setDetail(null);
+        setScreen("tables");
+      }, idleResetSeconds * 1000);
     };
-    const onPointerDown = (event: PointerEvent) => {
-      if (!logoutMenuRef.current?.contains(event.target as Node)) closeLogoutMenu();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeLogoutMenu();
-    };
-    window.addEventListener("popstate", onPopState);
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    POS_IDLE_RESET_ACTIVITY_EVENTS.forEach(eventName => window.addEventListener(eventName, restartTimer, { capture: true, passive: eventName !== "keydown" }));
+    restartTimer();
     return () => {
-      window.removeEventListener("popstate", onPopState);
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      if (timer !== undefined) window.clearTimeout(timer);
+      POS_IDLE_RESET_ACTIVITY_EVENTS.forEach(eventName => window.removeEventListener(eventName, restartTimer, { capture: true }));
     };
-  }, [logoutMenuOpen, closeLogoutMenu]);
+  }, [busy, exitConfirmOpen, idleResetSeconds, qrOrdersBlockingUiOpen, screen, settingsOpen]);
 
   useEffect(() => {
     if (screen !== "detail") return;
@@ -366,14 +379,14 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     let distance = 0;
     const pullThreshold = 64;
     const onTouchStart = (event: TouchEvent) => {
-      const atPageTop = window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
+      const atPageTop = container.scrollTop <= 0 && window.scrollY <= 0 && document.documentElement.scrollTop <= 0;
       if (!atPageTop || busy || event.touches.length !== 1) { startY = null; return; }
       startY = event.touches[0].clientY;
       distance = 0;
     };
     const onTouchMove = (event: TouchEvent) => {
       if (startY === null || event.touches.length !== 1) return;
-      if (window.scrollY > 0 || document.documentElement.scrollTop > 0) { startY = null; distance = 0; setPullDistance(0); return; }
+      if (container.scrollTop > 0 || window.scrollY > 0 || document.documentElement.scrollTop > 0) { startY = null; distance = 0; setPullDistance(0); return; }
       distance = Math.max(0, event.touches[0].clientY - startY);
       if (distance <= 0) { setPullDistance(0); return; }
       if (distance > 6 && event.cancelable) event.preventDefault();
@@ -485,7 +498,6 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, []);
 
   const activeTableId = detail?.table.tableId ?? null;
-  const canManageCustomer = Boolean(detail?.session?.sessionId);
   const activeCustomerId = detail?.session?.customerId ?? null;
   const activeCustomerName = detail?.session?.customerName ?? null;
   const activeCustomer = activeCustomerId && activeCustomerName
@@ -503,19 +515,24 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }, [activeTableId, refreshDetail, screen]);
 
   useEffect(() => {
-    if (screen !== "customer") return;
-    const controller = new AbortController();
+    const customerPickerOpen = screen === "detail" && detailSheet === "customer";
+    if (screen !== "customer" && screen !== "balance" && !customerPickerOpen) return;
     const key = balanceView ? "balance" : "plain";
+    if (customerPickerOpen && customerDataLoadedKeysRef.current.has(key)) {
+      setCustomersLoadedKey(key);
+      return;
+    }
+    const controller = new AbortController();
     void fetchHos(`/api/hos/customers${balanceView ? "?includeBalance=1" : ""}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const result = await response.json() as { success?: boolean; customers?: HosCustomer[]; message?: string };
         if (!response.ok || !result.success || !Array.isArray(result.customers)) throw new Error(result.message || "고객 목록을 불러오지 못했습니다.");
-        if (!controller.signal.aborted) { setHosCustomers(result.customers); setCustomersLoadedKey(key); setCustomerError(""); }
+        if (!controller.signal.aborted) { customerDataLoadedKeysRef.current.add(key); setHosCustomers(result.customers); setCustomersLoadedKey(key); setCustomerError(""); }
       })
       .catch(cause => { if (!controller.signal.aborted) setCustomerError(cause instanceof Error ? cause.message : "고객 목록을 불러오지 못했습니다."); })
       .finally(() => undefined);
     return () => controller.abort();
-  }, [balanceView, screen]);
+  }, [balanceView, detailSheet, screen]);
 
   useEffect(() => {
     if (screen !== "balance" || !balanceCustomerId) return;
@@ -576,6 +593,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }
 
   async function openMenuPicker() {
+    setCartSheetOpen(false);
     if (cancelMode) {
       setCancelMode(false);
       setCancellations([]);
@@ -724,6 +742,11 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (nextQuantity <= 0 && draft.length === 1 && !cancellations.length) setPendingTableId(null);
   }
 
+  function removeDraftItem(index: number) {
+    setDraft(rows => rows.filter((_, rowIndex) => rowIndex !== index));
+    if (draft.length === 1 && !cancellations.length) setPendingTableId(null);
+  }
+
   function showSuccessToast(message: string, position: "top" | "center" = "top") {
     if (successToastTimerRef.current !== null) window.clearTimeout(successToastTimerRef.current);
     setSuccessToast({ message, position });
@@ -752,7 +775,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }
 
   async function sendChanges(options?: { cancellationOverrides?: PendingCancel[]; orderItemsOverride?: Array<OrderItem & { orderStatus: string }>;
-    currentSessionIdOverride?: number; keepDetailOpenAfterCancel?: boolean }) {
+    currentSessionIdOverride?: number; keepDetailOpenAfterCancel?: boolean; returnToDetailAfterOrder?: boolean }) {
     const cancellationRows = options?.cancellationOverrides ?? cancellations;
     const cancellationSourceItems = options?.orderItemsOverride ?? orderItems;
     const cancellationRequests = cancellationRows.map(item => {
@@ -776,13 +799,18 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       } else {
         let sessionId = detail.session?.sessionId;
         if (!sessionId) {
+          const initialPersonCount = initialAdultCountFromStewOrder(
+            draft,
+            catalog?.menus ?? [],
+            catalog?.categories ?? [],
+          );
           const created = await readJson<{ sessionId: number }>(await fetchHos("/api/table-sessions", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tableId: detail.table.tableId, personCount: 0, babyCount: 0 }),
+            body: JSON.stringify({ tableId: detail.table.tableId, personCount: initialPersonCount, babyCount: 0 }),
           }));
           sessionId = created.sessionId;
           setDetail(current => current ? { ...current,
-            session: { sessionId: created.sessionId, relatedSessionIds: [created.sessionId], customerId: null, customerName: null } } : current);
+            session: { sessionId: created.sessionId, relatedSessionIds: [created.sessionId], customerId: null, customerName: null, personCount: initialPersonCount, babyCount: 0 } } : current);
         }
         await readJson(await fetchHos(`/api/table-sessions/${sessionId}/orders`, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -812,6 +840,29 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             setScreen("tables");
             await loadTables();
             setError("취소는 완료됐지만 최신 주문내역을 불러오지 못했습니다. 테이블을 다시 열어 확인해 주세요.");
+          }
+        }
+        return;
+      }
+      if (!submittingCancellations && options?.returnToDetailAfterOrder) {
+        const tableId = detail.table.tableId;
+        setDraft([]);
+        setCancellations([]);
+        setPendingTableId(null);
+        setCancelMode(false);
+        setCartSheetOpen(false);
+        setScreen("detail");
+        setError("");
+        const requestVersion = ++detailRequestVersionRef.current;
+        activeDetailTableIdRef.current = tableId;
+        try {
+          const latest = await readJson<TableDetail>(await fetchHos(`/api/hos/tables/${tableId}`, { cache: "no-store" }));
+          if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId && latest.table.tableId === tableId) {
+            setDetail(latest);
+          }
+        } catch {
+          if (requestVersion === detailRequestVersionRef.current && activeDetailTableIdRef.current === tableId) {
+            setError("주문은 전송되었지만 최신 주문내역을 불러오지 못했습니다. 주문내역을 새로고침해 주세요.");
           }
         }
         return;
@@ -946,19 +997,48 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
   }
 
   async function logout() {
+    if (logoutInFlightRef.current) return;
+    logoutInFlightRef.current = true;
+    setLogoutError("");
     setBusy(true);
     try {
       const response = await fetchHos("/api/hos/auth/logout", { method: "POST" });
+      if (response.status === 401) {
+        setLogoutConfirmOpen(false);
+        router.replace("/tdkhos");
+        return;
+      }
       if (!response.ok) throw new Error("로그아웃하지 못했습니다. 다시 시도해 주세요.");
+      setDetail(null);
+      setDraft([]);
+      setCancellations([]);
+      setScreen("tables");
+      setLogoutConfirmOpen(false);
       router.replace("/tdkhos");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "로그아웃하지 못했습니다.");
-    } finally { setBusy(false); }
+      setLogoutError(cause instanceof Error ? cause.message : "로그아웃하지 못했습니다.");
+    } finally {
+      logoutInFlightRef.current = false;
+      setBusy(false);
+    }
   }
 
   const orderItems = (detail?.orders ?? []).flatMap(order => order.items
     .filter(item => item.itemType !== "COMPONENT" && item.effectiveQty > 0)
     .map(item => ({ ...item, orderStatus: order.status })));
+  const stewOrderPeopleCount = initialAdultCountFromStewOrder(
+    orderItems.flatMap(item => item.menuId === null ? [] : [{ menuId: item.menuId, qty: item.effectiveQty }]),
+    catalog?.menus ?? [], catalog?.categories ?? [],
+  );
+  const storedPeopleOverride = detail?.session && peopleSavedOverride?.sessionId === detail.session.sessionId
+    && peopleSavedOverride.personCount === detail.session.personCount && peopleSavedOverride.babyCount === detail.session.babyCount
+    ? peopleSavedOverride : null;
+  const currentPeopleCount = resolveHosPeopleCount({
+    personCount: detail?.session?.personCount,
+    babyCount: detail?.session?.babyCount,
+    stewOrderCount: stewOrderPeopleCount,
+    savedOverride: storedPeopleOverride,
+  });
   const confirmedOrderAmount = detail?.orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0) ?? 0;
   const draftQuantityTotal = draft.reduce((sum, item) => sum + item.qty, 0);
   const draftOrderAmount = draft.reduce((sum, item) => {
@@ -967,6 +1047,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
     return sum + (Number(menu?.price ?? 0) + optionAmount) * item.qty;
   }, 0);
+  const cartHasItems = draftQuantityTotal > 0;
+  const cartPeekHeight = cartHasItems ? 57.6 : 17.28;
   const orderAmount = confirmedOrderAmount;
   const cancellableItems = orderItems.filter(item => ["OPEN", "ACCEPTED"].includes(item.orderStatus) && item.status !== "CANCELLED");
   const cancellationRequests = cancellations.map(item => {
@@ -1013,7 +1095,7 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updateMenuTailSpacer);
     };
-  }, [catalog, screen, updateMenuTailSpacer]);
+  }, [cartPeekHeight, catalog, screen, updateMenuTailSpacer]);
 
   function cancelProgrammaticMenuScroll() {
     if (menuScrollAnimationRef.current !== null) {
@@ -1116,7 +1198,8 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       });
       const result = await response.json() as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message || "고객 연결을 저장하지 못했습니다.");
-      setScreen("detail");
+      if (screen === "detail" && detailSheet === "customer") closeDetailSheet();
+      else setScreen("detail");
       await refreshDetail(detail.table.tableId);
       void loadTables();
     } catch (cause) {
@@ -1124,6 +1207,97 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     } finally {
       setBusy(false);
     }
+  }
+
+  async function savePeopleCount() {
+    const sessionId = detail?.session?.sessionId;
+    const tableId = detail?.table.tableId;
+    if (!sessionId || !tableId || peopleBusy || peopleSaveLockRef.current) return;
+    peopleSaveLockRef.current = true;
+    setPeopleBusy(true);
+    setPeopleError("");
+    try {
+      const response = await fetchHos(`/api/table-sessions/${sessionId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(peopleDraft),
+      });
+      const result = await response.json() as { success?: boolean; personCount?: number; babyCount?: number; message?: string };
+      if (!response.ok || !result.success || result.personCount === undefined || result.babyCount === undefined) {
+        throw new Error(result.message || "인원 정보를 저장하지 못했습니다.");
+      }
+      const saved = { sessionId, personCount: result.personCount, babyCount: result.babyCount };
+      setPeopleSavedOverride(saved);
+      setDetail(current => current?.session?.sessionId === sessionId
+        ? { ...current, session: { ...current.session, personCount: result.personCount!, babyCount: result.babyCount! } }
+        : current);
+      closeDetailSheet();
+      void refreshDetail(tableId);
+      void loadTables();
+    } catch (cause) {
+      setPeopleError(cause instanceof Error ? cause.message : "인원 정보를 저장하지 못했습니다.");
+    } finally {
+      peopleSaveLockRef.current = false;
+      setPeopleBusy(false);
+    }
+  }
+
+  function openDetailSheet(target: "customer" | "people") {
+    if (target === "customer") {
+      setBalanceView(false);
+      setManagedCustomersOnly(true);
+      customerDataLoadedKeysRef.current.delete("balance");
+    } else {
+      setPeopleDraft(currentPeopleCount);
+    }
+    setDetailSheet(target);
+    setDetailSheetClosing(false);
+    setDetailSheetEntering(true);
+    if (detailSheetEnterFrameRef.current !== null) window.cancelAnimationFrame(detailSheetEnterFrameRef.current);
+    detailSheetEnterFrameRef.current = window.requestAnimationFrame(() => {
+      setDetailSheetEntering(false);
+      detailSheetEnterFrameRef.current = null;
+    });
+  }
+
+  function closeDetailSheet(nextSheet: "customer" | "people" | null = null) {
+    if (!detailSheet) return;
+    if (detailSheetEnterFrameRef.current !== null) {
+      window.cancelAnimationFrame(detailSheetEnterFrameRef.current);
+      detailSheetEnterFrameRef.current = null;
+    }
+    setDetailSheetEntering(false);
+    if (detailSheetCloseTimerRef.current !== null) window.clearTimeout(detailSheetCloseTimerRef.current);
+    detailSheetAfterCloseRef.current = nextSheet;
+    setDetailSheetClosing(true);
+    detailSheetCloseTimerRef.current = window.setTimeout(() => {
+      const next = detailSheetAfterCloseRef.current;
+      detailSheetAfterCloseRef.current = null;
+      detailSheetCloseTimerRef.current = null;
+      if (next) openDetailSheet(next);
+      else {
+        setDetailSheet(null);
+        setDetailSheetClosing(false);
+      }
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 250);
+  }
+
+  function toggleDetailSheet(target: "customer" | "people") {
+    if (!detail?.session?.sessionId || busy || peopleBusy) return;
+    setCustomerError("");
+    setPeopleError("");
+    if (detailSheetClosing) {
+      detailSheetAfterCloseRef.current = target === detailSheet ? null : target;
+      return;
+    }
+    if (detailSheet === target) {
+      closeDetailSheet();
+      return;
+    }
+    if (detailSheet) {
+      closeDetailSheet(target);
+      return;
+    }
+    openDetailSheet(target);
   }
 
   function openTradeEntry(entry: CustomerTradeRow) {
@@ -1136,33 +1310,36 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
     if (menuScrollAnimationRef.current !== null) window.cancelAnimationFrame(menuScrollAnimationRef.current);
   }, []);
 
+  useEffect(() => () => {
+    if (detailSheetCloseTimerRef.current !== null) window.clearTimeout(detailSheetCloseTimerRef.current);
+    if (detailSheetEnterFrameRef.current !== null) window.cancelAnimationFrame(detailSheetEnterFrameRef.current);
+  }, []);
+
   useEffect(() => () => cartPulseAnimationRef.current?.cancel(), []);
 
-  return <main className={`flex flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900 ${screen === "menu" ? "h-dvh overflow-hidden" : "min-h-dvh"}`} ref={mainRef}>
-    {screen === "tables" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 pb-1 pt-[19px] text-slate-900">
-      <div className="flex min-w-0 flex-col items-start leading-tight">
-        <button aria-label="TDK HOS 앱 종료" className="bg-transparent p-0 text-left" onClick={() => { setExitMessage(""); setExitConfirmOpen(true); }} type="button"><strong className="shrink-0 text-lg font-extrabold text-[#2563EB]">TDK HOS</strong></button>
-        <span className="mt-0.5 max-w-full break-all text-xs leading-tight text-slate-400">{staffLoginId ?? ""}</span>
-      </div>
-      <div className="relative shrink-0" ref={logoutMenuRef}>
-        <button aria-expanded={logoutMenuOpen} aria-haspopup="menu" aria-label="메뉴" className="flex min-h-11 min-w-11 items-center justify-center bg-transparent p-0 text-2xl leading-none text-slate-600" disabled={busy} onClick={() => logoutMenuOpen ? closeLogoutMenu() : setLogoutMenuOpen(true)} type="button">⋮</button>
-        {logoutMenuOpen && <div className="absolute right-0 top-full z-30 mt-1 min-w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg" role="menu">
-          <button className="min-h-11 w-full px-4 text-left text-sm font-medium text-slate-700" onClick={() => { closeLogoutMenu(); setSettingsOpen(true); }} role="menuitem" type="button">설정</button>
-          <button className="min-h-11 w-full px-4 text-left text-sm font-medium text-slate-700" onClick={() => { closeLogoutMenu(); void logout(); }} role="menuitem" type="button">로그아웃</button>
-        </div>}
-      </div>
-    </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-white px-3 pt-[15px] text-slate-900">
-      <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
-        <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-0 shrink items-center gap-1.5 bg-transparent pr-1 text-2xl font-bold text-slate-700 disabled:opacity-50" disabled={busy} onClick={requestLeaveDetail} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>주문</span></button>
-        <div className="flex shrink-0 items-center gap-1">
-          {canManageCustomer && <button aria-label={activeCustomer ? `${activeCustomer.name} 고객 변경` : "고객 선택"} className="min-h-11 max-w-[34vw] min-w-8 truncate bg-transparent px-1 text-right text-sm font-semibold text-blue-700" disabled={busy} onClick={() => { setCustomerError(""); setBalanceView(false); setManagedCustomersOnly(true); setScreen("customer"); }} title={activeCustomer?.name ?? "고객"} type="button">{activeCustomer?.name ?? "고객"}</button>}
-          {draft.length > 0 && <button aria-label="장바구니 비우기" className="min-h-11 shrink-0 whitespace-nowrap bg-transparent px-1 text-[12px] font-semibold text-red-600 active:text-red-800 disabled:opacity-50" disabled={busy} onClick={clearDraftImmediately} type="button">장바구니 비우기</button>}
+  function openQrOrders() {
+    setScreen("qrOrders");
+  }
+
+  const storeOrderBadge = formatHosNavBadge(storeOrderTableCount);
+  const qrPendingOrderBadge = formatHosNavBadge(qrPendingOrderCount);
+
+  return <main className={screen === "menu" || screen === "tables" || screen === "qrOrders" ? "flex h-dvh flex-col overflow-hidden bg-white text-slate-900" : "flex min-h-dvh flex-col bg-white pb-[env(safe-area-inset-bottom)] text-slate-900"} ref={mainRef}>
+    {(screen === "tables" || screen === "qrOrders") ? <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 bg-[#F3F5F8] px-4 text-slate-900">
+      <button aria-label="TDKON HOS" className="min-w-0 truncate bg-transparent p-0 text-left" onClick={() => { setExitMessage(""); setExitConfirmOpen(true); }} type="button"><strong className="text-lg font-extrabold text-[#2563EB]">TDKON HOS</strong></button>
+      <button aria-label={"\uB85C\uADF8\uC544\uC6C3 \uD655\uC778"} className="min-h-11 max-w-[45%] shrink truncate bg-transparent px-1 text-right text-xs font-medium text-slate-500 disabled:opacity-60" disabled={busy} onClick={() => { setLogoutError(""); setLogoutConfirmOpen(true); }} title={staffLoginId ?? ""} type="button">{staffLoginId ?? ""}</button>
+    </header> : screen === "detail" ? <header className="sticky top-0 z-20 bg-[#F3F5F8] px-3 pt-[15px] text-slate-900">
+      <div className="flex min-h-12 items-center justify-between gap-2">
+        <div className="flex min-w-0 shrink items-center gap-2">
+          <button aria-label="테이블 배치로 돌아가기" className="flex min-h-11 min-w-0 shrink items-center gap-1.5 whitespace-nowrap bg-transparent pr-1 text-2xl font-bold text-slate-700 disabled:opacity-50" disabled={busy} onClick={requestLeaveDetail} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uC8FC\uBB38\uB0B4\uC5ED"}</span></button>
+          <span className="shrink-0 text-xs font-medium text-slate-400">No.{detail?.table.tableNo}</span>
+        </div>
+        <div className="flex min-w-0 shrink items-center justify-end gap-2">
+          {activeCustomerName && <span className="max-w-[25vw] truncate text-right text-sm font-semibold text-slate-700" title={activeCustomerName}>{activeCustomerName}</span>}
+          <strong className="shrink-0 text-sm font-bold text-blue-700">{currentPeopleCount.personCount}/{currentPeopleCount.babyCount}</strong>
         </div>
       </div>
-      <div className="flex min-h-10 items-center justify-between gap-3 border-b border-slate-200 py-1">
-        <span className="text-[17px] font-normal text-slate-500">T.<strong className="ml-1 font-extrabold text-slate-900">{detail?.table.tableNo}</strong></span>
-        <strong className="text-right text-[17px] font-extrabold text-slate-900">{money(orderAmount)}</strong>
-      </div>
+
     </header> : screen === "customer" ? <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3 pt-[15px]">
       <button aria-label="주문 화면으로 돌아가기" className="flex min-h-11 min-w-11 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>고객</span></button>
     </header> : screen === "balance" ? <header className="sticky top-0 z-20 flex min-h-14 items-center justify-between gap-1 border-b border-slate-200 bg-white px-2 pt-[15px]">
@@ -1170,10 +1347,9 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       <div aria-label="거래 조회기간" className="flex min-w-0 gap-1" role="group">{([ ["all", "전부"], ["90", "90"], ["30", "30"], ["month", "당월"] ] as const).map(([period, label]) => <button aria-pressed={tradePeriod === period} className={`min-h-9 min-w-9 rounded-lg px-2 text-xs font-bold ${tradePeriod === period ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700"}`} key={period} onClick={() => { setTradePeriod(period); setCustomerError(""); }} type="button">{label}</button>)}</div>
     </header> : screen === "tradeDetail" ? <header className="sticky top-0 z-20 flex min-h-14 items-center gap-2 border-b border-slate-200 bg-white px-3 pt-[15px]">
       <button aria-label="잔액관리로 돌아가기" className="flex min-h-11 items-center gap-1.5 bg-transparent pr-2 text-xl font-bold text-slate-700" onClick={() => { setCustomerError(""); setScreen("balance"); }} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>거래 상세</span></button>
-    </header> : <header className="sticky top-0 z-20 shrink-0 bg-white px-3 pt-[15px] text-slate-900">
-      <div className="flex min-h-12 items-center justify-between gap-2 border-b border-slate-200">
-        <button aria-label={"\uC8FC\uBB38\uB0B4\uC5ED\uC73C\uB85C \uB3CC\uC544\uAC00\uAE30"} className="flex min-h-11 min-w-0 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uBA54\uB274\uC120\uD0DD"}</span></button>
-        <span className="inline-block shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600" ref={cartSummaryRef}>{draft.length > 0 ? <>{"\uC7A5\uBC14\uAD6C\uB2C8"} {draft.length}/{draftQuantityTotal}</> : "\uC7A5\uBC14\uAD6C\uB2C8"}</span>
+    </header> : <header className={`sticky top-0 z-20 shrink-0 bg-[#F3F5F8] px-3 pt-[15px] text-slate-900 ${screen === "menu" ? "border-b border-[#DCE2EA]" : ""}`}>
+        <div className="flex min-h-12 items-center justify-start gap-2">
+        <button aria-label={"\uC8FC\uBB38\uD558\uAE30 \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC00\uAE30"} className="flex min-h-11 min-w-0 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uC8FC\uBB38\uD558\uAE30"}</span></button>
       </div>
     </header>}
     {error && <div className={`mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">{error}</div>}
@@ -1228,13 +1404,17 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
       </section>}
     </>}
 
-    {screen === "tables" && <section className="relative overscroll-y-contain p-3" ref={tableScreenRef}>
+    {screen === "tables" && <section className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]" ref={tableScreenRef}>
       <div aria-live="polite" className={`flex items-center justify-center gap-2 overflow-hidden text-xs text-slate-500 transition-[height] ${manualRefreshing || pullDistance > 0 ? "h-8" : "h-0"}`}>
         {manualRefreshing ? <><span aria-hidden="true" className="size-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />테이블 정보 갱신 중</>
           : pullDistance > 0 && <span>{pullDistance >= 64 ? "놓으면 갱신" : "아래로 당겨 갱신"}</span>}
       </div>
       {tables.length > 0
-        ? <HosTableCanvas tables={tables} dividerPositions={dividerPositions} disabled={busy} onSelect={table => {
+        ? <HosTableCanvas tables={tables.map(table => { const indicator = currentQrOrderTables.find(candidate => candidate.tableId === table.tableId); return { ...table,
+          hasActiveQrToken: indicator?.hasActiveQrToken ?? table.hasActiveQrToken,
+          hasPendingQrOrder: indicator?.hasPendingQrOrder ?? table.hasPendingQrOrder,
+          hasQrOrderHistory: indicator?.hasQrOrderHistory ?? table.hasQrOrderHistory }; })} dividerPositions={dividerPositions} disabled={busy} onSelect={table => {
+          if (shouldOpenQrOrdersForTable(table)) { openQrOrders(); return; }
           const destination = table.isMergedSource
             ? tables.find(candidate => candidate.tableNo === table.mergedIntoTableNo) : null;
           void openTable(destination ?? table);
@@ -1242,12 +1422,30 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         : !refreshing && <p className="mx-auto grid min-h-40 max-w-[900px] place-items-center rounded-xl border border-slate-300 bg-white text-sm text-slate-500">사용 가능한 테이블이 없습니다.</p>}
       <p className="mt-2 text-center text-xs text-slate-500">QR 주문 승인 기능은 아직 연결되어 있지 않습니다.</p>
     </section>}
+    {screen === "qrOrders" && <section className="flex min-h-0 flex-1 overflow-hidden px-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]"><HosQrPendingOrders onBlockingUiChange={setQrOrdersBlockingUiOpen} onChanged={() => void loadTables(true)} onPendingCountChange={setQrPendingOrderCount} /></section>}
+
+    {(screen === "tables" || screen === "qrOrders") && <nav aria-label={"\uC8FC\uC694 \uD654\uBA74"} className="fixed inset-x-0 bottom-0 z-30 bg-[#F3F5F8] pb-[env(safe-area-inset-bottom)]">
+      <div className="mx-auto flex min-h-[4.5rem] w-full max-w-3xl">
+        <button aria-current={screen === "tables" ? "page" : undefined} aria-label={"\uB9E4\uC7A5"} className={"flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent text-sm " + (screen === "tables" ? "text-blue-700" : "text-slate-500")} onClick={() => setScreen("tables")} type="button">
+          <span className="relative inline-flex size-6 items-center justify-center"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5M5.5 9v11h13V9M9 20v-6h6v6" /></svg>{storeOrderBadge && <span aria-hidden="true" className="absolute -right-2 -top-1 z-10 grid min-h-[17px] min-w-[17px] place-items-center rounded-full bg-blue-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#F3F5F8]">{storeOrderBadge}</span>}</span>
+          <span className="text-[11px] leading-tight">{"\uB9E4\uC7A5"}</span>
+        </button>
+        <button aria-current={screen === "qrOrders" ? "page" : undefined} aria-label={"QR\uC8FC\uBB38"} className={"flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent text-sm " + (screen === "qrOrders" ? "text-blue-700" : "text-slate-500")} onClick={() => setScreen("qrOrders")} type="button">
+          <span className="relative inline-flex size-6 items-center justify-center"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect height="7" rx="1" width="7" x="3" y="3"/><rect height="7" rx="1" width="7" x="14" y="3"/><rect height="7" rx="1" width="7" x="3" y="14"/><path d="M14 14h3v3h-3zM20 14v2m-3 4h3v-3"/></svg>{qrPendingOrderBadge && <span aria-hidden="true" className="absolute -right-2 -top-1 z-10 grid min-h-[17px] min-w-[17px] place-items-center rounded-full bg-blue-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#F3F5F8]">{qrPendingOrderBadge}</span>}</span>
+          <span className="text-[11px] leading-tight">QR{"\uC8FC\uBB38"}</span>
+        </button>
+        <div className="flex flex-1">
+          <button aria-expanded={settingsOpen} aria-haspopup="dialog" aria-pressed={settingsOpen} aria-label={"\uC124\uC815"} className={"flex min-h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 bg-transparent text-sm " + (settingsOpen ? "text-blue-700" : "text-slate-500")} disabled={busy} onClick={() => setSettingsOpen(true)} type="button">
+            <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg>
+            <span className="text-[11px] leading-tight">{"\uC124\uC815"}</span>
+          </button>
+        </div>
+      </div>
+    </nav>}
 
     {screen === "detail" && detail && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col p-3">
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-3">
-        {orderItems.length > 0 && <>
-        <section aria-labelledby="confirmed-orders-title">
-          <h2 className="mb-2 text-[17px] font-bold text-slate-500" id="confirmed-orders-title">기존 주문내역</h2>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[calc(4.5rem+env(safe-area-inset-bottom)+0.75rem)]">
+        <section aria-label="주문내역">
           {orderItems.length ? <div className="divide-y divide-slate-100">
             {orderItems.map(item => {
               const pending = cancellations.find(row => row.orderItemId === item.orderItemId);
@@ -1257,16 +1455,18 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
               const itemAmount = Number(item.unitPrice || 0) * displayQty;
               const optionNames = item.options.map(option => option.optionName);
               return <article className={`py-3 ${pending && keepQty < item.effectiveQty ? "bg-red-50" : ""}`} key={item.orderItemId}>
-                <div className="grid grid-cols-[minmax(0,1fr)_7rem_4.5rem] items-center gap-x-2">
-                  <strong className="min-w-0 truncate text-lg font-bold text-slate-900" title={item.itemName}>{item.itemName}</strong>
-                  <div aria-label={`${item.itemName} 남길 수량`} className="flex w-28 items-center justify-center gap-1.5">
+                <div className={`grid items-center gap-x-2 ${canCancel ? "grid-cols-[minmax(0,1fr)_7rem_4.5rem]" : "grid-cols-[minmax(0,1fr)_auto_4.5rem]"}`}>
+                  <div className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap">
+                    <strong className={`${optionNames.length > 0 ? "max-w-[55%]" : "max-w-full"} min-w-0 shrink-0 truncate text-lg font-bold text-slate-900`} title={item.itemName}>{item.itemName}</strong>
+                    {optionNames.length > 0 && <span className="min-w-0 flex-1 truncate text-[13px] leading-tight text-slate-400" title={optionNames.join(" · ")}>{optionNames.join(" · ")}</span>}
+                  </div>
+                  {canCancel ? <div aria-label={`${item.itemName} 남길 수량`} className="flex w-28 items-center justify-center gap-1.5">
                     <button aria-label={`${item.itemName} 남길 수량 감소`} aria-hidden={!canCancel} className={`size-9 shrink-0 rounded-lg bg-slate-100 text-[21px] font-bold disabled:opacity-40 ${canCancel ? "" : "invisible"}`} disabled={!canCancel || keepQty <= 0} onClick={() => changeKeepQuantity(item, -1)} tabIndex={canCancel ? 0 : -1} type="button">−</button>
                     <strong className="min-w-5 text-center text-[17px]">{money(displayQty)}</strong>
                     <button aria-label={`${item.itemName} 남길 수량 증가`} aria-hidden={!canCancel} className={`size-9 shrink-0 rounded-lg bg-slate-100 text-[21px] font-bold disabled:opacity-40 ${canCancel ? "" : "invisible"}`} disabled={!canCancel || keepQty >= item.effectiveQty} onClick={() => changeKeepQuantity(item, 1)} tabIndex={canCancel ? 0 : -1} type="button">+</button>
-                  </div>
+                  </div> : <strong className="shrink-0 whitespace-nowrap text-[15px] font-semibold text-slate-700">× {money(displayQty)}</strong>}
                   <strong className="min-w-[4.5rem] text-right text-[17px] font-semibold text-slate-800">{money(itemAmount)}</strong>
                 </div>
-                {optionNames.length > 0 && <p className="mt-0.5 break-words text-[13px] leading-tight text-slate-400">{optionNames.join(" · ")}</p>}
                 {pending && keepQty < item.effectiveQty && <p className="mt-0.5 text-[13px] font-medium text-red-600">{item.effectiveQty - keepQty}개 취소 예정</p>}
                 {cancelMode && !canCancel && <p className="mt-0.5 text-[13px] text-slate-400">취소 불가</p>}
               </article>;
@@ -1280,49 +1480,26 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             </label>
             {cancellationReason === "기타" && <input className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-[19px]" onChange={event => setCancellationDetail(event.target.value)} placeholder="취소 사유를 입력해 주세요" value={cancellationDetail} />}
           </div>}
+          {cancelMode && cancellableItems.length > 0 && <button className="mt-3 min-h-11 w-full rounded-xl border border-red-200 bg-[#FFF0F0] text-sm font-extrabold text-[#DC2626] disabled:opacity-50" disabled={busy || !cancellableItems.length} onClick={() => void cancelAllExistingOrders()} type="button">전체취소</button>}
         </section>
 
-        <div aria-hidden="true" className="my-4 h-[2px] w-full bg-[#D9DEE5]" />
-        </>}
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[17px] text-blue-700">
+          <span className="font-bold">{"\uC8FC\uBB38\uAE08\uC561"}</span>
+          <strong className="shrink-0 text-right font-extrabold">{money(orderAmount)}{"\uC6D0"}</strong>
+        </div>
 
-        <section aria-labelledby="cart-title">
-          <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
-            <h2 className="text-[17px] font-bold text-slate-700" id="cart-title">장바구니</h2>
-            {draft.length > 0 && <span className="shrink-0 whitespace-nowrap text-right text-[15px] text-slate-500">합계 {money(draftOrderAmount)}</span>}
-          </div>
-          {draft.length ? <div className="divide-y divide-slate-100">
-            {draft.map((item, index) => {
-              const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
-              const optionAmount = item.options.reduce((sum, option) => sum + Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
-              const itemAmount = (Number(menu?.price ?? 0) + optionAmount) * item.qty;
-              const optionNames = item.options.map(option => catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.optionName).filter(Boolean);
-              return <article className="py-3" key={`${item.menuId}-${index}`}>
-                <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <span className="inline-flex shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[13px] font-bold text-blue-700">신규</span>
-                    <strong className="min-w-0 truncate text-lg font-bold" title={item.name}>{item.name}</strong>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button aria-label={`${item.name} 장바구니 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold" onClick={() => changeDraftQuantity(index, -1)} type="button">−</button>
-                    <strong className="min-w-5 text-center text-[17px]">{money(item.qty)}</strong>
-                    <button aria-label={`${item.name} 장바구니 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold" disabled={item.qty >= 1000} onClick={() => changeDraftQuantity(index, 1)} type="button">+</button>
-                  </div>
-                  <strong className="min-w-[4.5rem] text-right text-[17px] font-semibold">{money(itemAmount)}</strong>
-                </div>
-                {optionNames.length > 0 && <p className="mt-0.5 break-words text-[13px] leading-tight text-slate-400">{optionNames.join(" · ")}</p>}
-              </article>;
-            })}
-          </div> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-[17px] text-slate-400">추가한 메뉴가 없습니다.</p>}
-        </section>
+
       </div>
-      <div className="sticky bottom-0 border-t border-slate-200 bg-white/95 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="grid grid-cols-[4fr_3fr_3fr] items-end gap-2">
-        <button className={`min-h-14 rounded-xl text-[17px] font-extrabold disabled:opacity-50 ${cancelMode ? "bg-[#EAF2FF] text-[#1855DF]" : "bg-blue-700 text-white"}`} disabled={busy} onClick={() => void openMenuPicker()} type="button">추가</button>
-        <button className="min-h-14 rounded-xl border border-violet-500 bg-violet-50 text-[17px] font-extrabold text-violet-700 disabled:opacity-50" disabled={busy} onClick={() => void completeOrder()} type="button">전송</button>
-        <div className="grid min-w-0 gap-2">
-        {cancelMode && cancellableItems.length > 0 && <button className="min-h-14 rounded-xl border border-red-200 bg-[#FFF0F0] text-[17px] font-extrabold text-[#DC2626] disabled:opacity-50" disabled={busy || !cancellableItems.length} onClick={() => void cancelAllExistingOrders()} type="button">전체취소</button>}
-        <button className={`min-h-14 rounded-xl border text-[17px] font-extrabold ${cancelMode ? "border-[#E60012] bg-[#E60012] text-white" : "border-red-500 bg-red-50 text-red-700"}`} disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
-          if (cancelMode) {
+      <nav aria-label="주문 작업" className={`fixed inset-x-0 bottom-0 ${detailSheet ? "z-50" : "z-30"} mx-auto w-full max-w-3xl border-t border-[#D1D5DB] bg-[#F3F5F8] pb-[env(safe-area-inset-bottom)]`}>
+        <div className="flex min-h-[4.5rem] w-full">
+        <button aria-label="주문추가" className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${busy ? "text-slate-400" : "text-slate-500"}`} disabled={busy} onClick={() => void openMenuPicker()} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
+          <span className="text-[11px] font-normal leading-tight">주문추가</span>
+        </button>
+        <button aria-label={cancelMode ? cancellationRequests.some(request => request.qty > 0) ? "취소 적용" : "주문취소 모드 닫기" : "주문취소"} className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${busy || (!cancelMode && !cancellableItems.length) ? "text-slate-400" : "text-slate-500"}`} disabled={busy || (!cancelMode && !cancellableItems.length)} onClick={() => {
+          if (cancelMode && cancellationRequests.some(request => request.qty > 0)) {
+            void completeOrder();
+          } else if (cancelMode) {
             setCancelMode(false); setCancellations([]);
             if (!draft.length) setPendingTableId(null);
           } else {
@@ -1330,31 +1507,134 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
             if (detail) setPendingTableId(detail.table.tableId);
           }
           setError("");
-        }} type="button">취소</button>
+        }} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m9 9 6 6m0-6-6 6" /></svg>
+          <span className="text-[11px] font-normal leading-tight">{cancelMode && cancellationRequests.some(request => request.qty > 0) ? "취소 적용" : cancelMode ? "취소모드 닫기" : "주문취소"}</span>
+        </button>
+        <button aria-pressed={detailSheet === "customer" && !detailSheetClosing} aria-label={"\uACE0\uAC1D \uC120\uD0DD"} className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${busy || !detail?.session?.sessionId ? "text-slate-400" : detailSheet === "customer" && !detailSheetClosing ? "text-blue-700" : "text-slate-500"}`} disabled={busy || !detail?.session?.sessionId} onClick={() => toggleDetailSheet("customer")} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.25" /><path d="M5.5 20v-1.2A5.3 5.3 0 0 1 10.8 13.5h2.4a5.3 5.3 0 0 1 5.3 5.3V20z" /></svg>
+          <span className="text-[11px] font-normal leading-tight">{"\uACE0\uAC1D"}</span>
+        </button>
+        <button aria-pressed={detailSheet === "people" && !detailSheetClosing} aria-label={"\uC778\uC6D0 \uAD00\uB9AC"} className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${peopleBusy || !detail?.session?.sessionId ? "text-slate-400" : detailSheet === "people" && !detailSheetClosing ? "text-blue-700" : "text-slate-500"}`} disabled={peopleBusy || !detail?.session?.sessionId} onClick={() => toggleDetailSheet("people")} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="9" cy="8" r="2.75" /><path d="M3.8 19v-1a4.2 4.2 0 0 1 4.2-4.2h2a4.2 4.2 0 0 1 4.2 4.2v1z" /><path d="M16 5.5a2.7 2.7 0 0 1 0 5.1m1.1 3.2a4 4 0 0 1 3.1 3.9V19h-2.3" /></svg>
+          <span className="text-[11px] font-normal leading-tight">{"\uC778\uC6D0"}</span>
+        </button>
         </div>
-        </div>
-      </div>
+      </nav>
     </section>}
 
+    {screen === "detail" && detail && detailSheet && <>
+      <button aria-label={"\uD328\uB110 \uB2EB\uAE30"} className={`fixed inset-0 z-40 bg-slate-950/35 transition-opacity duration-250 ease-out motion-reduce:duration-0 ${(detailSheetClosing || detailSheetEntering) ? "pointer-events-none opacity-0" : "opacity-100"}`} onClick={() => closeDetailSheet()} type="button" />
+      <section aria-label={detailSheet === "customer" ? "\uACE0\uAC1D \uC120\uD0DD" : "\uC778\uC6D0 \uAD00\uB9AC"} aria-modal="true" className={`fixed inset-x-0 z-[45] mx-auto flex w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-[0_-8px_28px_rgba(15,23,42,0.2)] transition-transform duration-250 ease-out motion-reduce:duration-0 ${detailSheetClosing || detailSheetEntering ? "pointer-events-none" : ""}`} role="dialog" style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))", height: "67dvh", maxHeight: "calc(100dvh - 4.5rem - env(safe-area-inset-bottom))", transform: detailSheetClosing || detailSheetEntering ? "translateY(100%)" : "translateY(0)" }}>
+        <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
+          <h2 className="text-base font-bold text-slate-900">{detailSheet === "customer" ? "\uACE0\uAC1D \uC120\uD0DD" : "\uC778\uC6D0"}</h2>
+          <div className="flex items-center gap-2">
+            {detailSheet === "people" && <button className="min-h-10 rounded-lg bg-blue-700 px-4 text-sm font-bold text-white disabled:opacity-50" disabled={peopleBusy} onClick={() => void savePeopleCount()} type="button">{peopleBusy ? "\uC800\uC7A5 \uC911" : "\uD655\uC778"}</button>}
+            <button aria-label={"\uB2EB\uAE30"} className="flex size-10 items-center justify-center rounded-full text-2xl text-slate-500 active:bg-slate-100" onClick={() => closeDetailSheet()} type="button">{"\u00D7"}</button>
+          </div>
+        </header>
+        {detailSheet === "customer" ? <>
+          <div aria-label={"\uACE0\uAC1D \uBAA9\uB85D"} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 pt-4" role="listbox" style={{ WebkitOverflowScrolling: "touch" }}>
+            {customerError && <p className="py-2 text-sm font-semibold text-red-700" role="alert">{customerError}</p>}
+            {customerLoading && !hosCustomers.length ? <p className="py-8 text-center text-sm text-slate-500">{"\uACE0\uAC1D \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4."}</p>
+              : !customerLoading && !customerError && hosCustomers.filter(customer => !managedCustomersOnly || customer.isPaymentManaged).length === 0
+                ? <p className="py-8 text-center text-sm text-slate-500">{"\uD45C\uC2DC\uD560 \uACE0\uAC1D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}</p>
+                : hosCustomers.filter(customer => !managedCustomersOnly || customer.isPaymentManaged).map(customer => <button aria-selected={activeCustomerId === customer.customerId} className={"mb-2 flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border px-3 text-left text-sm font-semibold " + (activeCustomerId === customer.customerId ? "border-blue-600 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-800")} disabled={busy} key={customer.customerId} onClick={() => void chooseHosCustomer(activeCustomerId === customer.customerId ? null : customer)} role="option" type="button"><span className="min-w-0 flex-1 truncate">{customer.name}</span>{balanceView && customersLoadedKey === "balance" && !customerError && <span className="shrink-0 text-right text-sm font-semibold tabular-nums text-slate-600">{formatTradeBalance(customer.tradeBalance ?? 0)}</span>}{activeCustomerId === customer.customerId && <span className="shrink-0 text-xs">{"\uC120\uD0DD\uB428"}</span>}</button>)}
+            {customerLoading && hosCustomers.length > 0 && <p className="py-2 text-center text-xs text-slate-400">{"\uACE0\uAC1D \uC815\uBCF4\uB97C \uAC31\uC2E0\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4."}</p>}
+          </div>
+          <footer className="shrink-0 border-t border-slate-200 bg-[#F3F5F8] px-3 py-2">
+            <div className="flex min-h-12 items-center gap-2">
+              <button aria-checked={balanceView} aria-busy={balanceView && customerLoading} className="flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-semibold text-slate-700" onClick={() => {
+                if (!balanceView) {
+                  customerDataLoadedKeysRef.current.delete("balance");
+                  setCustomersLoadedKey("plain");
+                }
+                setBalanceView(value => !value);
+              }} role="switch" type="button">
+                <span className="whitespace-nowrap">{"\uC794\uC561\uBCF4\uAE30"}</span>
+                <span aria-hidden="true" className={"relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 " + (balanceView ? "bg-blue-700" : "bg-slate-300")}><span className={"absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 " + (balanceView ? "translate-x-5" : "translate-x-0")} /></span>
+              </button>
+              <button aria-checked={managedCustomersOnly} className="flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-semibold text-slate-700" onClick={() => setManagedCustomersOnly(value => !value)} role="switch" type="button">
+                <span className="whitespace-nowrap">{"\uC120\uBD88\uAD00\uB9AC"}</span>
+                <span aria-hidden="true" className={"relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 " + (managedCustomersOnly ? "bg-blue-700" : "bg-slate-300")}><span className={"absolute left-1 top-1 size-5 rounded-full bg-white shadow transition-transform duration-200 " + (managedCustomersOnly ? "translate-x-5" : "translate-x-0")} /></span>
+              </button>
+            </div>
+            {balanceView && customerLoading && <p aria-live="polite" className="text-center text-[11px] text-slate-500">{"\uC794\uC561 \uC870\uD68C \uC911..."}</p>}
+          </footer>
+        </> : <div className="flex-1 space-y-3 overflow-y-auto p-4 pb-5">
+          {peopleError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" role="alert">{peopleError}</p>}
+          {([["personCount", "\uC131\uC778"], ["babyCount", "\uC544\uB3D9"]] as const).map(([key, label]) => <div className="flex min-h-16 items-center justify-between rounded-xl border border-slate-200 px-4" key={key}>
+            <span className="text-base font-semibold text-slate-700">{label}</span>
+            <div className="flex items-center gap-4">
+              <button aria-label={label + " \uC778\uC6D0 \uAC10\uC18C"} className="size-10 rounded-full bg-slate-100 text-2xl font-semibold text-slate-700 disabled:opacity-40" disabled={peopleBusy || peopleDraft[key] <= 0} onClick={() => setPeopleDraft(current => ({ ...current, [key]: Math.max(0, current[key] - 1) }))} type="button">{"\u2212"}</button>
+              <strong aria-live="polite" className="min-w-6 text-center text-lg tabular-nums">{peopleDraft[key]}</strong>
+              <button aria-label={label + " \uC778\uC6D0 \uC99D\uAC00"} className="size-10 rounded-full bg-slate-100 text-2xl font-semibold text-slate-700 disabled:opacity-40" disabled={peopleBusy || peopleDraft[key] >= 99} onClick={() => setPeopleDraft(current => ({ ...current, [key]: Math.min(99, current[key] + 1) }))} type="button">+</button>
+            </div>
+          </div>)}
+        </div>}
+      </section>
+    </>}
+
     {screen === "menu" && catalog && <section className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden px-3 pb-3">
-      <div aria-label="메뉴 분류" className="-mx-3 grid shrink-0 grid-cols-5 gap-2 border-b border-slate-100 bg-white px-3 py-2" ref={menuTabsRef}>
-        {menuSections.map(item => { const active = activeCategoryId === item.categoryId; return <button aria-pressed={active} className="min-h-11 w-full min-w-0 whitespace-nowrap rounded-full px-1 text-[17px] font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-700" key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
+      <div aria-label="메뉴 분류" className="-mx-3 grid shrink-0 grid-cols-6 gap-0 bg-[#F3F5F8] px-2 py-2" ref={menuTabsRef}>
+        {menuSections.map(item => { const active = activeCategoryId === item.categoryId; return <button aria-pressed={active} className={`min-h-10 min-w-0 whitespace-nowrap rounded-lg px-0 text-center text-[clamp(0.625rem,3vw,0.875rem)] font-semibold leading-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-800 ${active ? "bg-[#777777] text-white" : "bg-transparent text-[#777777]"}`} key={item.categoryId} onClick={() => scrollToMenuCategory(item.categoryId)} ref={element => {
           if (element) menuTabRefs.current.set(item.categoryId, element); else menuTabRefs.current.delete(item.categoryId);
-        }} style={getMenuCategoryTabStyles(item.tabColor, active)} type="button">{item.displayName}</button>; })}
+        }} type="button">{item.displayName}</button>; })}
       </div>
-      <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onPointerDown={cancelProgrammaticMenuScroll} onScroll={syncMenuCategoryFromScroll} onTouchStart={cancelProgrammaticMenuScroll} onWheel={cancelProgrammaticMenuScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch" }}>
-        {menuSectionsForDisplay.map((section, index) => <div className={`-mx-3 mb-[11.2px] border-y border-[#e5ebf0] bg-[#fbfcfe] px-3 shadow-[0_1px_3px_rgba(71,85,105,0.08)] ${index === menuSectionsForDisplay.length - 1 ? "mb-0" : ""}`} data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
+      <div className="-mx-3 min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-3 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" onPointerDown={cancelProgrammaticMenuScroll} onScroll={syncMenuCategoryFromScroll} onTouchStart={cancelProgrammaticMenuScroll} onWheel={cancelProgrammaticMenuScroll} ref={menuListRef} style={{ WebkitOverflowScrolling: "touch", paddingBottom: `${cartPeekHeight + 40}px` }}>
+        {menuSectionsForDisplay.map((section, index) => <div className={`-mx-3 mb-[11.2px] border-t border-[#e5ebf0] bg-[#fbfcfe] px-3 shadow-[0_1px_3px_rgba(71,85,105,0.08)] ${index === menuSectionsForDisplay.length - 1 ? "mb-0" : ""}`} data-menu-category-section={section.categoryId} key={section.categoryId} ref={element => {
           if (element) menuSectionRefs.current.set(section.categoryId, element); else menuSectionRefs.current.delete(section.categoryId);
         }}>
           {section.menus.map(menu => <div className="flex min-h-14 w-full items-center border-b border-slate-100 last:border-b-0" key={menu.menuId}>
             <button className="flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 bg-transparent px-1 py-3 text-left active:bg-blue-50" onClick={event => chooseMenu(menu, true, event.currentTarget)} type="button"><span className="flex min-w-0 flex-1 items-baseline gap-1 whitespace-nowrap"><span className="max-w-full shrink-0 truncate text-[19px] font-bold">{menu.name}</span>{catalog?.modifiers.some(modifier => modifier.menuId === menu.menuId && modifier.groupName === "매운맛") && <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-400" title="2.약간매운맛">2.약간매운맛</span>}</span><span className="shrink-0 whitespace-nowrap text-[17px] font-semibold text-slate-600">{money(Number(menu.price))}</span></button>
-            <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center bg-transparent text-blue-600 active:text-blue-800" onClick={event => quickAddMenu(menu, event.currentTarget)} type="button"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.4a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg></button>
+            <button aria-label={`${menu.name} 장바구니에 1개 추가`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-0 bg-transparent p-0 shadow-none transition active:scale-95" onClick={event => quickAddMenu(menu, event.currentTarget)} type="button"><QrMenuAddIcon className="pointer-events-none h-[25px] w-[25px] overflow-visible" color="#A0A8B5" /></button>
           </div>)}
         </div>)}
         <div aria-hidden="true" className="pointer-events-none w-full" ref={menuTailSpacerRef} style={{ height: 0 }} />
       </div>
-      <div className="sticky bottom-0 bg-white py-2"><button className="min-h-14 w-full rounded-xl bg-[#1D5EFF] font-extrabold text-white transition-colors hover:bg-[#164edb] active:bg-[#1245c6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1D5EFF]" onClick={() => setScreen("detail")} type="button">장바구니로 돌아가기</button></div>
     </section>}
+
+    {screen === "menu" && <>
+      {cartSheetOpen && <button aria-label="장바구니 닫기" className="fixed inset-0 z-30 bg-slate-950/45" onClick={() => setCartSheetOpen(false)} type="button" />}
+      <section aria-label="장바구니 상세" aria-modal={cartSheetOpen || undefined} className="fixed inset-x-0 bottom-0 z-40 mx-auto flex max-h-[85dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-[0_-8px_28px_rgba(15,23,42,0.2)] transition-transform duration-300 ease-out motion-reduce:transition-none" role={cartSheetOpen ? "dialog" : undefined} style={{ height: "82dvh", transform: cartSheetOpen ? "translateY(0)" : `translateY(calc(100% - ${cartPeekHeight}px))`, paddingBottom: "env(safe-area-inset-bottom)" }}>
+        <button aria-controls="hos-cart-panel-content" aria-expanded={cartSheetOpen} aria-label={cartHasItems ? `장바구니 ${draftQuantityTotal}개, ${money(draftOrderAmount)}원, ${cartSheetOpen ? "닫기" : "열기"}` : `빈 장바구니 ${cartSheetOpen ? "닫기" : "열기"}`} className="flex shrink-0 items-center justify-center bg-[#1D5EFF] px-4 text-white transition-[height] duration-300 ease-out motion-reduce:transition-none" onClick={() => setCartSheetOpen(open => !open)} style={{ height: cartSheetOpen ? 57.6 : cartPeekHeight }} type="button">
+          {cartSheetOpen ? <span className="flex w-full max-w-2xl items-center justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><strong className="truncate text-left text-[17px] font-extrabold" ref={cartSummaryRef}>장바구니</strong>{cartHasItems && <span className="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-xs font-bold tabular-nums">{draftQuantityTotal}개</span>}</span><span className="flex shrink-0 items-center gap-2 whitespace-nowrap text-[17px] font-extrabold tabular-nums">{cartHasItems ? `${money(draftOrderAmount)}원` : <svg aria-hidden="true" className="h-5 w-5 text-slate-300" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>}</span></span> : cartHasItems ? <span className="flex w-full max-w-2xl items-center justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><strong className="truncate text-left text-[17px] font-extrabold" ref={cartSummaryRef}>장바구니</strong><span className="shrink-0 rounded-full bg-white/20 px-2.5 py-1 text-xs font-bold tabular-nums">{draftQuantityTotal}개</span></span><strong className="flex shrink-0 items-center gap-2 whitespace-nowrap text-[17px] font-extrabold tabular-nums">{money(draftOrderAmount)}원<svg aria-hidden="true" className="size-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></strong></span> : <span aria-hidden="true" className="h-1 w-10 shrink-0 rounded-full bg-white/90" />}
+        </button>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3" id="hos-cart-panel-content" style={{ WebkitOverflowScrolling: "touch" }}>
+          {draft.length ? <div className="mx-auto w-full max-w-2xl divide-y divide-slate-100">{draft.map((item, index) => {
+            const menu = catalog?.menus.find(candidate => candidate.menuId === item.menuId);
+            const optionAmount = item.options.reduce((sum, option) => sum + Number(catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.priceDelta ?? 0) * option.qty, 0);
+            const itemAmount = (Number(menu?.price ?? 0) + optionAmount) * item.qty;
+            const optionNames = item.options.map(option => catalog?.modifiers.find(candidate => candidate.modifierOptionId === option.modifierOptionId)?.optionName).filter(Boolean);
+            return <article className="py-3" key={`${item.menuId}-${index}`}>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-baseline gap-1">
+                    <strong className="min-w-0 truncate text-base font-bold text-slate-900" title={item.name}>{item.name}</strong>
+                    {optionNames.length > 0 && <span className="min-w-0 truncate text-[13px] leading-tight text-slate-400" title={optionNames.join(" · ")}>{optionNames.join(" · ")}</span>}
+                  </div>
+                  <span className="mt-1 block text-sm font-semibold text-slate-600">{money(itemAmount)}</span>
+                </div>
+                <div className="flex items-center gap-1"><button aria-label={`${item.name} 수량 감소`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold" onClick={() => changeDraftQuantity(index, -1)} type="button">−</button><strong className="min-w-5 text-center text-[15px] tabular-nums">{money(item.qty)}</strong><button aria-label={`${item.name} 수량 증가`} className="size-9 rounded-lg bg-slate-100 text-[21px] font-bold disabled:opacity-40" disabled={item.qty >= 1000} onClick={() => changeDraftQuantity(index, 1)} type="button">+</button></div>
+                <button aria-label={`${item.name} 삭제`} className="flex size-9 items-center justify-center rounded-lg text-slate-400 active:bg-red-50 active:text-red-600" onClick={() => removeDraftItem(index)} type="button"><svg aria-hidden="true" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3" /></svg></button>
+              </div>
+            </article>;
+          })}</div> : <p className="flex min-h-40 items-center justify-center text-sm font-medium text-slate-400">장바구니가 비어 있습니다.</p>}
+        </div>
+        <footer className="shrink-0 border-t border-slate-200 bg-[#F3F5F8] px-4">
+          <div className="mx-auto flex min-h-[4.5rem] w-full max-w-2xl">
+            <button aria-label={"\uBE44\uC6B0\uAE30"} className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${!cartHasItems || busy ? "text-slate-400" : "text-slate-500"}`} disabled={!cartHasItems || busy} onClick={() => { if (window.confirm("\uC7A5\uBC14\uAD6C\uB2C8\uB97C \uBAA8\uB450 \uBE44\uC6B0\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?")) clearDraftImmediately(); }} type="button">
+              <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 5v5m4-5v5" /></svg>
+              <span className="text-[11px] font-normal leading-tight">{"\uBE44\uC6B0\uAE30"}</span>
+            </button>
+            <button aria-label="주문전송" className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-transparent transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${!cartHasItems || busy ? "text-slate-400" : "text-blue-700"}`} disabled={!cartHasItems || busy} onClick={() => void sendChanges({ returnToDetailAfterOrder: true })} type="button">
+              <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+              <span className="text-[11px] font-normal leading-tight">{busy ? "전송 중…" : "주문전송"}</span>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </>}
 
     {selectedMenu && catalog && <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 p-2 sm:items-center" onClick={() => { optionAddLockRef.current = false; optionFlightOriginRef.current = null; setSelectedMenu(null); }}>
       <section aria-modal="true" className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()} role="dialog">
@@ -1381,6 +1661,17 @@ export default function HosHome({ staffLoginId }: { staffLoginId: string | null 
         <div className="mt-5 grid grid-cols-2 gap-2">
           <button className="min-h-12 min-w-0 rounded-xl border border-[#F8B4B4] bg-[#FFF0F0] px-2 text-sm font-bold text-[#DC2626]" disabled={busy} onClick={discardDraftAndLeave} type="button">비우고 나가기</button>
           <button autoFocus className="min-h-12 min-w-0 rounded-xl bg-[#1855DF] px-2 text-sm font-bold text-white" onClick={closeLeaveCartConfirmation} type="button">계속 주문</button>
+        </div>
+      </section>
+    </div>}
+    {logoutConfirmOpen && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
+      <section aria-labelledby="hos-logout-title" aria-modal="true" className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" role="alertdialog">
+        <h2 className="text-lg font-extrabold text-slate-800" id="hos-logout-title">{"\uB85C\uADF8\uC544\uC6C3"}</h2>
+        <p className="mt-2 text-sm text-slate-600">{"\uB85C\uADF8\uC544\uC6C3\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?"}</p>
+        {logoutError && <p className="mt-2 text-sm text-red-600" role="alert">{logoutError}</p>}
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button autoFocus className="min-h-12 rounded-xl bg-slate-100 font-bold text-slate-700 disabled:opacity-50" disabled={busy} onClick={() => { setLogoutConfirmOpen(false); setLogoutError(""); }} type="button">{"\uCDE8\uC18C"}</button>
+          <button className="min-h-12 rounded-xl bg-blue-600 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => void logout()} type="button">{busy ? "\uCC98\uB9AC \uC911\u2026" : "\uB85C\uADF8\uC544\uC6C3"}</button>
         </div>
       </section>
     </div>}

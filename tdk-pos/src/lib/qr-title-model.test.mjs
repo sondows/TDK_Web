@@ -4,6 +4,7 @@ import {
   isQrTitleCrop, orderedQrTitlePhotos, parseQrTitlePhoto, qrTitlePhotoSettingKey,
   normalizeQrTitleSubtitle, QR_TITLE_ASPECT_RATIO, QR_TITLE_AUTOPLAY_MS, QR_TITLE_SUBTITLE_MAX_LENGTH,
   qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, serializeQrTitlePhoto,
+  defaultQrTitleScreenSettings, normalizeQrTitleScreenSettings, qrTitleScreenSettingKey,
 } from "./qr-title-model.ts";
 
 const photoId = "19d237a0-7bfc-4f87-9674-11fd42520f12";
@@ -39,6 +40,30 @@ test("QR title photos sort by saved order and autoplay is three seconds", () => 
   assert.deepEqual(orderedQrTitlePhotos([second, first]), [first, second]);
   assert.equal(QR_TITLE_AUTOPLAY_MS, 3000);
   assert.equal(QR_TITLE_ASPECT_RATIO, 4 / 3);
+});
+
+test("QR title screens keep independent defaults and setting keys", () => {
+  assert.equal(defaultQrTitleScreenSettings("order").title, "주문하기");
+  assert.equal(defaultQrTitleScreenSettings("order").leftMode, "SHARE_QR");
+  assert.equal(defaultQrTitleScreenSettings("order_history", "매장명").title, "매장명");
+  assert.equal(qrTitleScreenSettingKey("order", "title"), "qr_title_screen_order_title");
+  assert.notEqual(qrTitleScreenSettingKey("order", "title"), qrTitleScreenSettingKey("order_history", "title"));
+});
+
+test("QR title screen settings validate copy and display modes", () => {
+  const settings = defaultQrTitleScreenSettings("order");
+  assert.deepEqual(normalizeQrTitleScreenSettings(settings), settings);
+  assert.equal(normalizeQrTitleScreenSettings({ ...settings, leftMode: "TEXT", leftText: " " }), null);
+  assert.equal(normalizeQrTitleScreenSettings({ ...settings, footerMode: "MISSING" }), null);
+});
+
+test("screen-scoped title photo keys stay isolated from the public menu key", () => {
+  const photo = { photoId, assetId, sortOrder: 0, isActive: true, crop };
+  const orderKey = qrTitlePhotoSettingKey(photoId, "order");
+  const historyKey = qrTitlePhotoSettingKey(photoId, "order_history");
+  assert.equal(parseQrTitlePhoto(orderKey, serializeQrTitlePhoto(photo))?.screenId, "order");
+  assert.equal(parseQrTitlePhoto(historyKey, serializeQrTitlePhoto(photo))?.screenId, "order_history");
+  assert.equal(parseQrTitlePhoto(qrTitlePhotoSettingKey(photoId), serializeQrTitlePhoto(photo))?.screenId, undefined);
 });
 
 test("QR initial position aligns the title card to the exact half-height point", () => {

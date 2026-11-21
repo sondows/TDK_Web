@@ -1,11 +1,16 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, diningTables, qrCodeDailyCounters, qrCodes, qrSessions, qrTableLinks } from "@/db/schema";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import { createQrIdentifier } from "@/lib/qr-order-auth";
 import { formatQrManagementNumber, qrIssueDateInSeoul } from "@/lib/qr-management-number";
+import { analyzeQrAccessAnomalies, QR_ACCESS_ACTIONS, failureTypeFromDescription } from "@/lib/qr-access-analysis";
+import { getBusinessHoursStatus } from "@/lib/qr-business-hours";
+import { getQrBusinessHoursSettings } from "@/lib/qr-title-settings";
 
 export const dynamic = "force-dynamic";
+const ACCESS_RECORD_LIMIT = 10_000;
+const qrHistoryActions = ["QR_TABLE_ASSIGN", "QR_TARGET_ASSIGN", "QR_RETIRE", "QR_RETIRED_BY_REPLACEMENT", "QR_UNASSIGN"];
 
 export async function GET() {
   const auth = await requireQrNoticeManager();
@@ -17,7 +22,7 @@ export async function GET() {
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, isActive: diningTables.isActive }).from(diningTables).orderBy(asc(diningTables.sortOrder), asc(diningTables.tableNo))]);
   const retiredIds = rows.filter(row => row.status === "RETIRED").map(row => row.qrCodeId);
   const historyRows = retiredIds.length ? await db.select({ entityId: auditLogs.entityId, actionType: auditLogs.actionType, description: auditLogs.description, createdAt: auditLogs.createdAt })
-    .from(auditLogs).where(and(eq(auditLogs.entityType, "QR_CODE"), inArray(auditLogs.entityId, retiredIds))).orderBy(asc(auditLogs.createdAt)) : [];
+    .from(auditLogs).where(and(eq(auditLogs.entityType, "QR_CODE"), inArray(auditLogs.entityId, retiredIds), inArray(auditLogs.actionType, qrHistoryActions))).orderBy(asc(auditLogs.createdAt)) : [];
   const historyByQr = new Map<number, Array<{ actionType: string; description: string | null; createdAt: Date }>>();
   for (const row of historyRows) {
     if (row.entityId === null) continue;
@@ -26,11 +31,46 @@ export async function GET() {
     history.push(item);
     historyByQr.set(Number(row.entityId), history);
   }
-  return Response.json({ success: true, tables: tables.filter(table => table.isActive === 1).map(table => ({ tableId: Number(table.tableId), tableNo: table.tableNo })),
-    codes: rows.map(row => ({ ...row, status: row.status === "UNUSED" && row.targetType !== "UNASSIGNED" ? "IN_USE" : row.status,
-      qrCodeId: Number(row.qrCodeId), tableId: row.tableId === null ? null : Number(row.tableId), history: historyByQr.get(Number(row.qrCodeId)) ?? [] })) }, { headers: { "Cache-Control": "no-store" } });
-}
 
+  const accessRows = await db.select({ auditLogId: auditLogs.auditLogId, entityId: auditLogs.entityId, actionType: auditLogs.actionType, description: auditLogs.description, createdAt: auditLogs.createdAt })
+    .from(auditLogs).where(and(eq(auditLogs.entityType, "QR_CODE"), isNotNull(auditLogs.entityId), inArray(auditLogs.actionType, [...QR_ACCESS_ACTIONS])))
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.auditLogId)).limit(ACCESS_RECORD_LIMIT);
+  let hoursSettings: Awaited<ReturnType<typeof getQrBusinessHoursSettings>> | null = null;
+  try { hoursSettings = await getQrBusinessHoursSettings(); } catch { /* no guessed operating hours */ }
+  const recordsByQr = new Map<number, Array<{ auditLogId: number; actionType: string; occurredAt: Date; failureType: string | null; outsideBusinessHours: boolean }>>();
+  for (const row of accessRows) {
+    if (row.entityId === null) continue;
+    let outsideBusinessHours = false;
+    if (hoursSettings && row.createdAt instanceof Date) {
+      const state = getBusinessHoursStatus(hoursSettings.weekly, hoursSettings.specialHours, row.createdAt,
+        hoursSettings.closedDates, hoursSettings.holidayRules, hoursSettings.todayOverride).state;
+      outsideBusinessHours = state !== "OPEN" && state !== "NO_HOURS";
+    }
+    const id = Number(row.entityId);
+    const records = recordsByQr.get(id) ?? [];
+    records.push({ auditLogId: Number(row.auditLogId), actionType: row.actionType, occurredAt: row.createdAt,
+      failureType: failureTypeFromDescription(row.description), outsideBusinessHours });
+    recordsByQr.set(id, records);
+  }
+  const anomaliesByQr = new Map<number, string[]>();
+  for (const [id, records] of recordsByQr) {
+    const anomalies = analyzeQrAccessAnomalies(records);
+    const labels = [...new Set([...anomalies.values()].flat())];
+    if (labels.length) anomaliesByQr.set(id, labels);
+  }
+  const tableQrIds = new Set(rows.filter(row => row.targetType === "TABLE_ORDER").map(row => Number(row.qrCodeId)));
+  for (const [id, auditHistory] of historyByQr) {
+    if (auditHistory.some(item => item.actionType === "QR_TABLE_ASSIGN")) tableQrIds.add(id);
+  }
+  return Response.json({ success: true, tables: tables.filter(table => table.isActive === 1).map(table => ({ tableId: Number(table.tableId), tableNo: table.tableNo })),
+    codes: rows.map(row => {
+      const qrCodeId = Number(row.qrCodeId);
+      return { ...row, status: row.status === "UNUSED" && row.targetType !== "UNASSIGNED" ? "IN_USE" : row.status,
+        qrCodeId, tableId: row.tableId === null ? null : Number(row.tableId), history: historyByQr.get(qrCodeId) ?? [],
+        attentionRequired: tableQrIds.has(qrCodeId) && Boolean(anomaliesByQr.get(qrCodeId)?.length),
+        attentionLabels: tableQrIds.has(qrCodeId) ? anomaliesByQr.get(qrCodeId) ?? [] : [] };
+    }), accessEventsTruncated: accessRows.length >= ACCESS_RECORD_LIMIT }, { headers: { "Cache-Control": "no-store" } });
+}
 export async function POST(request: Request) {
   const auth = await requireQrNoticeManager();
   if ("error" in auth) return auth.error;

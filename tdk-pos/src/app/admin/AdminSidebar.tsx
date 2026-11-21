@@ -3,113 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { adminNavigationGroups, getAdminNavigationItems, groupContainsPath, isNavigationGroup, linkIsActive } from "@/lib/admin-navigation";
+import type { NavigationItem } from "@/lib/admin-navigation";
 import styles from "./admin.module.css";
 
-type NavigationLink = { label: string; href: string };
-type NavigationGroup = { id: string; label: string; href: string; children: NavigationLink[] };
-type NavigationItem = NavigationLink | NavigationGroup;
+const navigationGroups = adminNavigationGroups();
 
-const navigation: NavigationItem[] = [
-  { label: "대시보드", href: "/tdkadm" },
-  { label: "영업시간설정", href: "/tdkadm/business-hours" },
-  {
-    id: "sales",
-    label: "판매조회",
-    href: "/tdkadm/sales-report",
-    children: [
-      { label: "매출조회", href: "/tdkadm/sales-report" },
-      { label: "품목별 매출", href: "/tdkadm/item-sales" },
-      { label: "영업마감 내역", href: "/tdkadm/business-closings" },
-    ],
-  },
-  { label: "고객 관리", href: "/tdkadm/customers" },
-  {
-    id: "menus",
-    label: "메뉴",
-    href: "/tdkadm/menus",
-    children: [
-      { label: "메뉴관리", href: "/tdkadm/menus" },
-      { label: "메뉴분류", href: "/tdkadm/menus/categories" },
-      { label: "메뉴이미지", href: "/tdkadm/menus/images" },
-      { label: "메뉴설명", href: "/tdkadm/menus/descriptions" },
-      { label: "추가메뉴등록", href: "/tdkadm/menus/addons" },
-    ],
-  },
-  {
-    id: "qr-settings",
-    label: "QR",
-    href: "/tdkadm/qr/title",
-    children: [
-      { label: "타이틀설정", href: "/tdkadm/qr/title" },
-      { label: "안내문", href: "/tdkadm/qr/notices" },
-      { label: "QR 발행·관리", href: "/tdkadm/qr-codes" },
-    ],
-  },
-  {
-    id: "pos-settings",
-    label: "POS",
-    href: "/tdkadm/settings/pos",
-    children: [
-      { label: "테이블 설정", href: "/tdkadm/tables" },
-      { label: "할인 설정", href: "/tdkadm/settings/discounts" },
-      { label: "기타결제 설정", href: "/tdkadm/settings/other-payments" },
-      { label: "포장 설정", href: "/tdkadm/settings/takeout" },
-      { label: "영업마감", href: "/tdkadm/settings/pos/business-closing" },
-    ],
-  },
-  {
-    id: "kds-settings",
-    label: "KDS",
-    href: "/tdkadm/settings/pos/kds",
-    children: [
-      { label: "KDS 설정", href: "/tdkadm/settings/pos/kds" },
-    ],
-  },
-  {
-    id: "hos-settings",
-    label: "HOS",
-    href: "/tdkadm/hos/table-layout",
-    children: [
-      { label: "테이블 배치", href: "/tdkadm/hos/table-layout" },
-    ],
-  },
-  {
-    id: "printing",
-    label: "인쇄 설정",
-    href: "/tdkadm/settings/printing",
-    children: [
-      { label: "매장 명판 설정", href: "/tdkadm/settings/printing/nameplate" },
-    ],
-  },
-  {
-    id: "security",
-    label: "보안",
-    href: "/tdkadm/security/devices",
-    children: [
-      { label: "직원관리", href: "/tdkadm/security/staff" },
-      { label: "API 관리", href: "/tdkadm/security/api" },
-      { label: "신뢰 토큰 관리", href: "/tdkadm/security/devices" },
-      { label: "최고관리자 관리", href: "/tdkadm/security/owners" },
-    ],
-  },
-];
-const navigationGroups = navigation.filter(isGroup);
-
-function isGroup(item: NavigationItem): item is NavigationGroup {
-  return "children" in item;
-}
-
-function linkIsActive(pathname: string, href: string) {
-  return pathname === href || (href !== "/tdkadm" && pathname.startsWith(`${href}/`));
-}
-
-function groupContainsPath(group: NavigationGroup, pathname: string) {
-  return group.children.some(child => linkIsActive(pathname, child.href))
-    || pathname === group.href
-    || pathname.startsWith(`${group.href}/`);
-}
-
-export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity = false, canManageHosLayout = false, canManageMenu = false, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity?: boolean; canManageHosLayout?: boolean; canManageMenu?: boolean; onNavigate?: () => void }) {
+export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, canAccessSecurity, canManageHosLayout, canManageMenu, onNavigate }: { menuOnly?: boolean; mobileDrawer?: boolean; canAccessSecurity: boolean; canManageHosLayout: boolean; canManageMenu: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   // /tdkadm is rewritten to /admin, so the server and browser pathname can differ during hydration.
@@ -130,29 +30,12 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
       : [...current, groupId]);
   };
 
-  const items: NavigationItem[] = menuOnly && canManageMenu
-    ? [{
-      id: "menus",
-      label: "메뉴",
-      href: "/tdkadm/menus",
-      children: [
-        { label: "메뉴관리", href: "/tdkadm/menus" },
-        { label: "메뉴분류", href: "/tdkadm/menus/categories" },
-        { label: "메뉴이미지", href: "/tdkadm/menus/images" },
-        { label: "메뉴설명", href: "/tdkadm/menus/descriptions" },
-        { label: "추가메뉴등록", href: "/tdkadm/menus/addons" },
-      ],
-    }]
-    : menuOnly ? [] : navigation.filter(item => (canAccessSecurity || !isGroup(item) || item.id !== "security") &&
-      (canManageHosLayout || !isGroup(item) || item.id !== "hos-settings") &&
-      (canManageMenu || !isGroup(item) || item.id !== "menus") &&
-      (canManageMenu || !isGroup(item) || item.id !== "qr-settings") &&
-      (canManageMenu || isGroup(item) || item.href !== "/tdkadm/business-hours"));
+  const items: NavigationItem[] = getAdminNavigationItems({ menuOnly, canAccessSecurity, canManageHosLayout, canManageMenu });
 
   return <aside className={`${styles.sidebar}${mobileDrawer ? ` ${styles.mobileDrawerSidebar}` : ""}`}>
     <nav aria-label="관리센터 메뉴" className={styles.navigation}>
       {items.map(item => {
-        if (isGroup(item)) {
+        if (isNavigationGroup(item)) {
           const expanded = expandedGroups.includes(item.id);
           const childrenId = `admin-nav-${mobileDrawer ? "mobile" : "desktop"}-${item.id}-children`;
           return <div className={styles.navGroup} key={item.id}>

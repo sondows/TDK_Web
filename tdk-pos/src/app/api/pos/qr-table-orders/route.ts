@@ -2,45 +2,60 @@ import { and, asc, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { diningTables, qrCodes, qrOrderItemOptions, qrOrderItems, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
+import { assignQrOrderRoundNumbers } from "@/lib/qr-pending-order-rounds";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
 import { buildWaitOrderSnapshots, insertWaitOrderAsPosOrder, type WaitOrderInputItem } from "@/lib/qr-wait-pos-order";
+import { canAdoptQrOrderSession, canProcessQrOrder } from "@/lib/qr-processing-policy";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const staff = await getCurrentStaff();
+  const staff = await getCurrentStaff() ?? await getCurrentHosStaff();
   if (!staff) return Response.json({ success: false }, { status: 401 });
   try {
-    const rows = await db.select({ qrOrderId: qrOrders.qrOrderId, tableNo: diningTables.tableNo,
-      qrSessionId: qrOrders.qrSessionId, languageCode: qrSessions.languageCode, totalAmount: qrOrders.totalAmount,
-      orderedAt: qrOrders.orderedAt, note: qrOrders.note })
+    const rows = await db.select({ qrOrderId: qrOrders.qrOrderId, status: qrOrders.status, tableId: diningTables.tableId,
+      tableNo: diningTables.tableNo, sessionId: qrSessions.sessionId, qrSessionId: qrOrders.qrSessionId, languageCode: qrSessions.languageCode,
+      totalAmount: qrOrders.totalAmount,
+      orderedAt: sql<string>`DATE_FORMAT(${qrOrders.orderedAt}, '%Y-%m-%dT%H:%i:%s')`, note: qrOrders.note })
       .from(qrOrders).innerJoin(qrSessions, eq(qrSessions.qrSessionId, qrOrders.qrSessionId))
       .leftJoin(tableSessions, eq(tableSessions.sessionId, qrSessions.sessionId))
       .innerJoin(diningTables, eq(diningTables.tableId, sql`COALESCE(${tableSessions.tableId}, ${qrSessions.tableId})`))
-      .where(and(eq(qrOrders.status, "PENDING"), eq(qrSessions.status, "ACTIVE"), or(
-        and(isNull(qrSessions.sessionId), isNotNull(qrSessions.tableId)),
-        and(eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")),
+      .where(and(eq(diningTables.isActive, 1), or(
+        and(eq(qrSessions.status, "ACTIVE"), or(
+          and(isNull(qrSessions.sessionId), isNotNull(qrSessions.tableId)),
+          and(eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")),
+        )),
+        and(inArray(qrOrders.status, ["ACCEPTED", "REJECTED", "CANCELLED"]),
+          eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")),
       )))
-      .orderBy(asc(qrOrders.orderedAt));
-    const ids = rows.map(row => Number(row.qrOrderId));
+      .orderBy(asc(qrOrders.orderedAt), asc(qrOrders.qrOrderId));
+    const numberedOrders = assignQrOrderRoundNumbers(rows.map(row => ({ ...row, qrOrderId: Number(row.qrOrderId),
+      tableId: Number(row.tableId), sessionId: row.sessionId === null ? null : Number(row.sessionId) })));
+    const pendingOrders = numberedOrders.filter(order => order.status === "PENDING");
+    const ids = pendingOrders.map(order => order.qrOrderId);
     const items = ids.length ? await db.select({ qrOrderId: qrOrderItems.qrOrderId, qrOrderItemId: qrOrderItems.qrOrderItemId,
       menuId: qrOrderItems.menuId, itemName: qrOrderItems.itemName, qty: qrOrderItems.qty, totalAmount: qrOrderItems.totalAmount })
       .from(qrOrderItems).where(inArray(qrOrderItems.qrOrderId, ids)).orderBy(asc(qrOrderItems.qrOrderItemId)) : [];
     const itemIds = items.map(item => Number(item.qrOrderItemId));
     const options = itemIds.length ? await db.select({ qrOrderItemId: qrOrderItemOptions.qrOrderItemId,
-      optionName: qrOrderItemOptions.optionName, qty: qrOrderItemOptions.qty }).from(qrOrderItemOptions)
+      optionName: qrOrderItemOptions.optionName, qty: qrOrderItemOptions.qty, totalAmount: qrOrderItemOptions.totalAmount }).from(qrOrderItemOptions)
       .where(inArray(qrOrderItemOptions.qrOrderItemId, itemIds)) : [];
-    return Response.json({ success: true, orders: rows.map(row => ({ ...row, qrOrderId: Number(row.qrOrderId),
-      items: items.filter(item => Number(item.qrOrderId) === Number(row.qrOrderId)).map(item => ({ ...item,
-        qrOrderItemId: Number(item.qrOrderItemId), menuId: Number(item.menuId), qty: Number(item.qty),
-        options: options.filter(option => Number(option.qrOrderItemId) === Number(item.qrOrderItemId)) })) })) }, { headers: { "Cache-Control": "no-store" } });
+    const orders = pendingOrders.map(order => ({ ...order,
+      qrSessionId: Number(order.qrSessionId), totalAmount: String(order.totalAmount),
+      items: items.filter(item => Number(item.qrOrderId) === order.qrOrderId).map(item => ({ ...item,
+        qrOrderItemId: Number(item.qrOrderItemId), menuId: Number(item.menuId), qty: Number(item.qty), totalAmount: String(item.totalAmount),
+        options: options.filter(option => Number(option.qrOrderItemId) === Number(item.qrOrderItemId)).map(option => ({
+          ...option, qty: Number(option.qty), totalAmount: String(option.totalAmount),
+        })) })) }));
+    return Response.json({ success: true, orders }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ success: false, message: "QR 주문 대기 목록을 불러오지 못했습니다." }, { status: 503 });
   }
 }
 
 export async function PATCH(request: Request) {
-  const staff = await getCurrentStaff();
+  const staff = await getCurrentStaff() ?? await getCurrentHosStaff();
   if (!staff) return Response.json({ success: false }, { status: 401 });
   const body = await request.json().catch(() => null) as { qrOrderId?: unknown; action?: unknown } | null;
   const id = Number(body?.qrOrderId);
@@ -50,7 +65,7 @@ export async function PATCH(request: Request) {
       const [order] = await tx.select({ qrOrderId: qrOrders.qrOrderId, status: qrOrders.status, qrSessionId: qrOrders.qrSessionId,
         submittedTotal: qrOrders.totalAmount })
         .from(qrOrders).where(eq(qrOrders.qrOrderId, id)).for("update").limit(1);
-      if (!order || order.status !== "PENDING") return { kind: "CONFLICT" as const };
+      if (!order || !canProcessQrOrder(order.status)) return { kind: "CONFLICT" as const };
       const now = new Date();
       if (body.action === "REJECT") {
         await tx.update(qrOrders).set({ status: "REJECTED", rejectedAt: now }).where(and(eq(qrOrders.qrOrderId, id), eq(qrOrders.status, "PENDING")));
@@ -70,7 +85,7 @@ export async function PATCH(request: Request) {
       if (!table) return { kind: "CLOSED" as const };
       const openSessions = await tx.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId })
         .from(tableSessions).where(and(eq(tableSessions.tableId, tableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).for("update");
-      const [customer] = await tx.select({ sessionId: qrSessions.sessionId, tableId: qrSessions.tableId, status: qrSessions.status })
+      const [customer] = await tx.select({ qrSessionId: qrSessions.qrSessionId, sessionId: qrSessions.sessionId, tableId: qrSessions.tableId, status: qrSessions.status })
         .from(qrSessions).where(eq(qrSessions.qrSessionId, order.qrSessionId)).for("update").limit(1);
       if (!customer || customer.status !== "ACTIVE") return { kind: "CLOSED" as const };
       if (customer.sessionId !== null && !openSessions.some(session => Number(customer.sessionId) === Number(session.sessionId))) return { kind: "CLOSED" as const };
@@ -100,12 +115,24 @@ export async function PATCH(request: Request) {
       if (Math.abs(Number(snapshots.total) - Number(order.submittedTotal)) >= 0.01) return { kind: "PRICE_CHANGED" as const };
 
       if (sessionId === 0) {
+        const pendingQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId, sessionId: qrSessions.sessionId,
+          tableId: qrSessions.tableId, status: qrSessions.status }).from(qrSessions)
+          .where(and(eq(qrSessions.tableId, tableId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId),
+            sql`EXISTS (SELECT 1 FROM qr_orders pending_order WHERE pending_order.qr_session_id = ${qrSessions.qrSessionId} AND pending_order.status = 'PENDING')`))
+          .orderBy(asc(qrSessions.qrSessionId)).for("update");
+        const sessionsToBind = pendingQrSessions.filter(candidate => canAdoptQrOrderSession({
+          candidateTableId: Number(candidate.tableId), targetTableId: tableId,
+          candidateSessionId: candidate.sessionId === null ? null : Number(candidate.sessionId),
+          qrSessionStatus: candidate.status, hasPendingOrder: true, hasOpenTableSession: false,
+        }));
+        const sessionIdsToBind = sessionsToBind.map(candidate => Number(candidate.qrSessionId));
+        if (!sessionIdsToBind.includes(Number(customer.qrSessionId))) return { kind: "CLOSED" as const };
         const [createdSession] = await tx.insert(tableSessions).values({ tableId, personCount: 0, babyCount: 0,
           status: "OPEN", openedByStaffId: staff.staffId, sessionKind: "DINE_IN" });
         sessionId = Number(createdSession.insertId);
         const bound = await tx.update(qrSessions).set({ sessionId, tableId, lastActiveAt: now })
-          .where(and(eq(qrSessions.qrSessionId, order.qrSessionId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
-        if (bound[0].affectedRows !== 1) throw new Error("QR_SESSION_BIND_FAILED");
+          .where(and(inArray(qrSessions.qrSessionId, sessionIdsToBind), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
+        if (bound[0].affectedRows !== sessionIdsToBind.length) throw new Error("QR_SESSION_BIND_FAILED");
       }
       const acceptedOrderId = await insertWaitOrderAsPosOrder(tx, sessionId, staff.staffId, snapshots.snapshots, snapshots.total);
       await tx.update(qrOrders).set({ status: "ACCEPTED", acceptedOrderId, acceptedAt: now, acceptedByStaffId: staff.staffId })

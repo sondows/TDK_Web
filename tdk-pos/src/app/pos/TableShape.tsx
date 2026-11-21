@@ -4,15 +4,21 @@ import { useEffect, useState, type PointerEventHandler } from "react";
 import { formatMoney } from "@/lib/format-money";
 import { formatSessionElapsed } from "@/lib/session-time";
 import type { TableLayoutValues } from "@/lib/table-layout";
+import { qrTableIndicatorState } from "@/lib/qr-table-indicators-model";
 
-type Props = TableLayoutValues & { tableNumber: string; guestCount: number; amountDue: number; prepaidAmount?: number; customerName?: string | null; startedAt: string | null; hasOpenSession?: boolean; posMainTable?: boolean; fixedPosition: { left: number; top: number; width: number; height: number }; sageOccupied?: boolean; hasQrOrder?: boolean; qrLanguageCode?: string | null; mergedSourceTableNos?: string[]; partyTableNos?: string[]; partyRelationHighlight?: boolean; mergeSplitCandidate?: boolean; mergeSplitSelected?: boolean; enhancedText?: boolean; dataTableManagementItem?: boolean; grouped?: boolean; blocked?: boolean; partyGroupBadge?: number | null; partyGroupColor?: string; partyGroupSelected?: boolean; partyHighlight?: boolean; thickSelection?: boolean; selected?: boolean; editable?: boolean; onClick?: () => void; onPointerDown?: PointerEventHandler<HTMLButtonElement>; onResizePointerDown?: PointerEventHandler<HTMLSpanElement> };
+type Props = TableLayoutValues & { tableNumber: string; guestCount: number; amountDue: number; prepaidAmount?: number; customerName?: string | null; startedAt: string | null; hasOpenSession?: boolean; posMainTable?: boolean; fixedPosition: { left: number; top: number; width: number; height: number }; sageOccupied?: boolean; hasQrOrder?: boolean; hasActiveQrToken?: boolean; hasPendingQrOrder?: boolean; hasQrOrderHistory?: boolean; qrLanguageCode?: string | null; mergedSourceTableNos?: string[]; partyTableNos?: string[]; partyRelationHighlight?: boolean; mergeSplitCandidate?: boolean; mergeSplitSelected?: boolean; enhancedText?: boolean; dataTableManagementItem?: boolean; grouped?: boolean; blocked?: boolean; partyGroupBadge?: number | null; partyGroupColor?: string; partyGroupSelected?: boolean; partyHighlight?: boolean; thickSelection?: boolean; selected?: boolean; editable?: boolean; onClick?: () => void; onPointerDown?: PointerEventHandler<HTMLButtonElement>; onResizePointerDown?: PointerEventHandler<HTMLSpanElement> };
 
-export default function TableShape({ tableNumber, guestCount, amountDue, prepaidAmount = 0, customerName = null, startedAt, hasOpenSession, posMainTable = false, fixedPosition, sageOccupied = false, hasQrOrder = false, qrLanguageCode = null, mergedSourceTableNos = [], partyTableNos = [], partyRelationHighlight = false, mergeSplitCandidate = false, mergeSplitSelected = false, enhancedText = false, dataTableManagementItem = false, grouped = false, blocked = false, partyGroupBadge = null, partyGroupColor, partyGroupSelected = false, partyHighlight = false, thickSelection = false, selected = false, editable = false, onClick, onPointerDown, onResizePointerDown, ...layout }: Props) {
+export default function TableShape({ tableNumber, guestCount, amountDue, prepaidAmount = 0, customerName = null, startedAt, hasOpenSession, posMainTable = false, fixedPosition, sageOccupied = false, hasQrOrder = false, hasActiveQrToken = false, hasPendingQrOrder = false, hasQrOrderHistory = false, qrLanguageCode = null, mergedSourceTableNos = [], partyTableNos = [], partyRelationHighlight = false, mergeSplitCandidate = false, mergeSplitSelected = false, enhancedText = false, dataTableManagementItem = false, grouped = false, blocked = false, partyGroupBadge = null, partyGroupColor, partyGroupSelected = false, partyHighlight = false, thickSelection = false, selected = false, editable = false, onClick, onPointerDown, onResizePointerDown, ...layout }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const occupied = hasOpenSession ?? (guestCount > 0 && startedAt !== null);
   const fixedTextLayout = posMainTable || !dataTableManagementItem;
   const relationLabels = [partyTableNos.length > 0 ? "일행" : "", mergedSourceTableNos.length > 0 ? "합석" : ""].filter(Boolean).join(" · ");
   const activeChairs = occupied ? Math.min(4, guestCount) : 0;
+  const qrIndicator = qrTableIndicatorState({ hasActiveQrToken, hasPendingQrOrder, hasQrOrderHistory });
+  const qrIndicatorSlot = qrIndicator === "NONE" ? null : <span aria-label={qrIndicator === "ORDER_HISTORY" ? "QR 주문 이력" : "유효한 QR 토큰"}
+    className="pos-table-qr-indicator-slot" role="img">{qrIndicator === "ORDER_HISTORY"
+      ? <span className="text-[21px] font-extrabold leading-none text-[#DC2626]">QR</span>
+      : <svg aria-hidden="true" className="size-full text-[#1769D2]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM19 14v2m2 2v3h-3m-4 0h2" /></svg>}</span>;
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 60_000); return () => window.clearInterval(timer); }, []);
   const chairs = [{ side: "top", slot: "left", active: activeChairs >= 4 }, { side: "top", slot: "right", active: activeChairs >= 1 }, { side: "bottom", slot: "right", active: activeChairs >= 2 }, { side: "bottom", slot: "left", active: activeChairs >= 3 }];
   const numberClass = occupied ? (enhancedText ? "text-2xl leading-none text-slate-800" : "text-lg leading-none text-slate-800") : (enhancedText ? "text-2xl leading-none text-slate-700" : "text-2xl leading-none text-slate-700");
@@ -30,6 +36,7 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
   const partyBorderStyle = partyGroupColor ? { borderColor: partyGroupColor, ...(partyGroupSelected ? { boxShadow: `0 0 0 3px ${partyGroupColor}55` } : {}) } : undefined;
   const surfaceStyle = {
     ...partyBorderStyle,
+    ...(hasPendingQrOrder ? { outline: "3px solid #E53935", outlineOffset: "1px" } : {}),
     ...(useSageSurface ? {
       backgroundImage: "none",
       backgroundColor: "#E8F3EC",
@@ -42,8 +49,7 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
       {partyGroupBadge !== null && <span aria-label={`일행 그룹 ${partyGroupBadge}`} className="absolute -right-3 -top-3 z-20 flex size-9 items-center justify-center rounded-full text-lg font-extrabold text-white shadow-md" style={{ backgroundColor: partyGroupColor ?? "#0284C7" }}>{partyGroupBadge}</span>}
       {mainOccupied ? (
         <span className={`pos-table-occupied-content${prepaidAmount > 0 ? " pos-table-occupied-content-prepaid" : ""}`}>
-          <strong className={`pos-table-main-number text-2xl leading-none text-slate-800 ${tableNumber.length > 1 ? "pos-table-occupied-number-multi" : ""} whitespace-nowrap font-bold`}>{tableNumber}</strong>
-          {hasQrOrder && <span aria-label={`QR 주문${qrLanguageCode ? ` ${qrLanguageCode}` : ""}`} className="pos-table-qr-marker pos-table-qr-order-marker">QR</span>}
+          {qrIndicatorSlot ? <span className="pos-table-qr-indicator-stack"><strong className={`pos-table-main-number text-2xl leading-none text-slate-800 ${tableNumber.length > 1 ? "pos-table-occupied-number-multi" : ""} whitespace-nowrap font-bold`}>{tableNumber}</strong>{qrIndicatorSlot}</span> : <strong className={`pos-table-main-number text-2xl leading-none text-slate-800 ${tableNumber.length > 1 ? "pos-table-occupied-number-multi" : ""} whitespace-nowrap font-bold`}>{tableNumber}</strong>}
           {hasQrOrder && qrLanguageCode && <span className="pos-table-qr-marker pos-table-qr-language-marker">{qrLanguageCode}</span>}
           <span className="pos-table-info-slot pos-table-slot-received pos-table-occupied-amount">{formatMoney(amountDue)}</span>
           {prepaidAmount > 0 && <span className="pos-table-info-slot pos-table-slot-prepaid pos-table-occupied-amount text-blue-600">선불 {formatMoney(prepaidAmount)}</span>}
@@ -54,7 +60,10 @@ export default function TableShape({ tableNumber, guestCount, amountDue, prepaid
         </span>
       ) : (
         <>
-          <strong className={numberClass}>{tableNumber}</strong>
+          <span className="relative flex flex-col items-center">
+            <strong className={numberClass}>{tableNumber}</strong>
+            {qrIndicatorSlot}
+          </span>
           {occupied && <><span className={amountClass}>= {formatMoney(amountDue)}</span>{prepaidAmount > 0 && <span className={`${amountClass} mt-0 !text-blue-600`}>- {formatMoney(prepaidAmount)}</span>}<span className={detailsClass}>{guestCount}명 · {formatSessionElapsed(startedAt ?? new Date().toISOString(), now)}</span></>}
           {partyTableNos.length > 0 && <span className={`mt-0.5 max-w-[92%] truncate rounded-full bg-sky-100 px-1.5 py-px font-bold text-sky-800 ${enhancedText ? "text-[10px]" : "text-[8px]"}`}>일행 {partyTableNos.map(tableNo => `${tableNo}T`).join("·")}</span>}
           {mergedSourceTableNos.length > 0 && <span className={`mt-0.5 max-w-[92%] truncate rounded-full bg-violet-100 px-1.5 py-px font-bold text-violet-700 ${enhancedText ? "text-[10px]" : "text-[8px]"}`}>합석 {mergedSourceTableNos.map(tableNo => `+${tableNo}T`).join(" ")}</span>}

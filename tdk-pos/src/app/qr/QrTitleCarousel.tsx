@@ -7,7 +7,7 @@ import type { QrTitleSlide } from "@/lib/qr-title-model";
 
 export type { QrTitleSlide } from "@/lib/qr-title-model";
 
-export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightPx, fixedHero = false }: { photos: QrTitleSlide[]; photoHeightPx?: number; viewportHeightPx?: number; fixedHero?: boolean }) {
+export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightPx, fixedHero = false, onExitRequest, exitDisabled = false }: { photos: QrTitleSlide[]; photoHeightPx?: number; viewportHeightPx?: number; fixedHero?: boolean; onExitRequest?: () => void; exitDisabled?: boolean }) {
   const [trackIndex, setTrackIndex] = useState(photos.length > 1 ? 1 : 0);
   const [visible, setVisible] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -81,6 +81,9 @@ export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightP
         </div>)}
       </div>
     </div>
+    {fixedHero && onExitRequest && <button aria-label="종료" className="absolute right-2 top-2 z-10 grid size-11 place-items-center rounded-full text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-70" data-qr-hero-exit disabled={exitDisabled} onClick={event => { event.stopPropagation(); onExitRequest(); }} onTouchStart={event => event.stopPropagation()} type="button">
+      <span aria-hidden="true" className="grid size-9 place-items-center rounded-full bg-slate-950/65 text-[28px] font-light leading-none shadow-sm">×</span>
+    </button>}
     {count > 1 && <div aria-label="사진 선택" className="absolute inset-x-0 bottom-3 flex justify-center gap-2">{photos.map((photo, dotIndex) => <button aria-current={activeIndex === dotIndex ? "true" : undefined} aria-label={`${dotIndex + 1}번째 사진`} className={`h-2.5 rounded-full shadow-sm ${activeIndex === dotIndex ? "w-5 bg-white" : "w-2.5 bg-white/60"}`} key={photo.id} onClick={() => { setTransitioning(!reduceMotion); setTrackIndex(dotIndex + 1); }} type="button" />)}</div>}
   </section>;
 }

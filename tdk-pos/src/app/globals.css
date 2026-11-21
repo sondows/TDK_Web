@@ -436,6 +436,30 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 .pos-table-qr-order-marker { grid-row: 2; }
 .pos-table-qr-language-marker { grid-row: 3; }
 
+.pos-table-unit-fixed .pos-table-qr-indicator-slot {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  display: grid;
+  width: 39.2px;
+  height: 39.2px;
+  place-items: center;
+  transform: translateX(-50%);
+}
+.pos-table-unit-fixed .pos-table-qr-indicator-stack {
+  position: relative;
+  display: inline-flex;
+  width: max-content;
+  height: max-content;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  justify-self: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
 .pos-table-occupied-number-multi {
   position: relative;
   left: 2px;
@@ -1141,29 +1165,38 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   position: absolute;
   z-index: 1;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.2rem;
+  display: grid;
+  grid-template-rows: minmax(0, 5fr) minmax(0, 60fr) minmax(0, 5fr) minmax(0, 25fr) minmax(0, 5fr);
   box-sizing: border-box;
   min-width: 0;
   width: 100%;
   min-height: 0;
-  padding: 32px 0.4rem 9px;
+  padding: 0;
   text-align: center;
   pointer-events: none;
 }
 
 .pos-menu-copy strong {
-  display: -webkit-box;
+  grid-row: 2;
+  display: flex;
   width: 100%;
-  height: 2.5em;
-  max-height: 2.5em;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
-  flex-shrink: 0;
   font-size: clamp(0.875rem, 1.1vw, 1.0625rem);
   font-weight: 800;
-  line-height: 1.25;
+  line-height: 1.43;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.pos-menu-name-text {
+  display: -webkit-box;
+  max-width: 100%;
+  max-height: 2.86em;
+  overflow: hidden;
+  white-space: pre-line;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   word-break: keep-all;
@@ -1171,8 +1204,15 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .pos-menu-price {
-  position: relative;
-  top: -10px;
+  grid-row: 4;
+  display: flex;
+  width: calc(100% - 44px);
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  margin-inline: auto;
+  white-space: nowrap;
   color: #1d4ed8;
   font-size: 0.8125rem;
   font-weight: 750;
@@ -1189,7 +1229,6 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 }
 
 .pos-menu-cart-button {
-  --pos-cart-visual-size: 27px;
   --pos-cart-visual-shift: 8px;
   position: absolute;
   z-index: 2;
@@ -1206,26 +1245,8 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
   transition: transform 100ms ease;
 }
 
-.pos-menu-cart-button::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: var(--pos-cart-visual-size);
-  height: var(--pos-cart-visual-size);
-  transform: translate(calc(-50% + var(--pos-cart-visual-shift)), calc(-50% + var(--pos-cart-visual-shift)));
-  border: 1px solid #475569;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
-}
-
 .pos-menu-cart-button:active {
   transform: scale(0.92);
-}
-
-.pos-menu-cart-button:active::before {
-  background: #f1f5f9;
 }
 
 .pos-menu-cart-button:disabled {
@@ -1235,8 +1256,8 @@ main.h-dvh > div > div.flex.min-h-0.flex-col.gap-3 > section:nth-child(2) nav > 
 .pos-menu-cart-button img {
   position: relative;
   display: block;
-  width: 22px;
-  height: 22px;
+  width: 25px;
+  height: 25px;
   transform: translate(var(--pos-cart-visual-shift), var(--pos-cart-visual-shift));
   pointer-events: none;
   object-fit: contain;
@@ -1560,8 +1581,8 @@ section[role="dialog"] > div > section:last-child .grid.grid-cols-3.gap-2.rounde
   [data-pos-shell] .pos-menu-list { --menu-card-column-gap: 20px; padding-inline: 8px; }
   [data-pos-shell] .pos-menu-copy strong { font-size: 1.125rem; }
   [data-pos-shell] .pos-menu-price { font-size: 0.875rem; }
-  [data-pos-shell] .pos-menu-cart-button { --pos-cart-visual-size: 32px; --pos-cart-visual-shift: 6px; }
-  [data-pos-shell] .pos-menu-cart-button img { width: 24px; height: 24px; }
+  [data-pos-shell] .pos-menu-cart-button { --pos-cart-visual-shift: 6px; }
+  [data-pos-shell] .pos-menu-cart-button img { width: 25px; height: 25px; }
   [data-pos-shell] .pos-table-occupied-amount { font-size: 17px; }
   [data-pos-shell] .pos-table-occupied-usage { font-size: 15px; }
   [data-pos-shell] .pos-table-info-row { line-height: 16px; }

@@ -1,6 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { diningTables, qrCodes, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { diningTables, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { qrSessionCookieMaxAgeSeconds, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import {
   createQrDevTestToken,
@@ -9,6 +10,7 @@ import {
   QR_DEV_TEST_COOKIE,
   QR_DEV_TEST_MAX_AGE_SECONDS,
   qrSessionCookieAttributes,
+  resolveQrDevTestSession,
 } from "@/lib/qr-order-auth";
 
 export const dynamic = "force-dynamic";
@@ -28,8 +30,15 @@ export async function POST(request: Request) {
   const qrCodeId = Number(body?.qrCodeId);
   if (!Number.isSafeInteger(qrCodeId) || qrCodeId <= 0) return Response.json({ success: false, message: "QR 번호가 유효하지 않습니다." }, { status: 400 });
 
+  const testCookiePrefix = `${QR_DEV_TEST_COOKIE}=`;
+  const rawTestCookie = request.headers.get("cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(testCookiePrefix));
+  let currentTestSession = null;
+  if (rawTestCookie) {
+    try { currentTestSession = await resolveQrDevTestSession(decodeURIComponent(rawTestCookie.slice(testCookiePrefix.length))); }
+    catch { /* A stale or malformed test cookie must not prevent a fresh authorized test session. */ }
+  }
+
   try {
-    const token = createQrDevTestToken();
     const session = await db.transaction(async tx => {
       const [qr] = await tx.select({ qrCodeId: qrCodes.qrCodeId, tableId: qrTableLinks.tableId, tableNo: diningTables.tableNo })
         .from(qrCodes).innerJoin(qrTableLinks, eq(qrTableLinks.qrCodeId, qrCodes.qrCodeId))
@@ -40,14 +49,34 @@ export async function POST(request: Request) {
       await tx.select({ tableId: diningTables.tableId }).from(diningTables).where(eq(diningTables.tableId, qr.tableId)).for("update").limit(1);
       const openSessions = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
         .where(and(eq(tableSessions.tableId, qr.tableId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN"))).for("update").limit(1);
-      await tx.insert(qrSessions).values({ sessionId: null, tableId: qr.tableId, tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
-      return { tableNo: qr.tableNo, redirectTo: openSessions.length ? "/qrorder/join-required" : "/qrorder/order" };
+      if (currentTestSession?.tableId === Number(qr.tableId)) {
+        if (currentTestSession.sessionId !== null) return { tableNo: qr.tableNo, redirectTo: "/qrorder", reused: true };
+        const [ownOrder] = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
+          .where(eq(qrOrders.qrSessionId, currentTestSession.qrSessionId)).limit(1);
+        return { tableNo: qr.tableNo, redirectTo: ownOrder ? "/qrorder" : openSessions.length ? "/qrorder/join-required" : "/qrorder/order", reused: true };
+      }
+
+      const [validQrTableSession] = openSessions.length ? await tx.select({
+        sessionId: tableSessions.sessionId,
+        remainingSeconds: sql<number>`TIMESTAMPDIFF(SECOND, CURRENT_TIMESTAMP, ${qrTableSessionExpiresAtSql(tableSessions.sessionId)})`,
+      }).from(tableSessions)
+        .where(and(eq(tableSessions.sessionId, openSessions[0].sessionId), gt(qrTableSessionExpiresAtSql(tableSessions.sessionId), sql`CURRENT_TIMESTAMP`)))
+        .for("update").limit(1) : [];
+      const token = createQrDevTestToken();
+      await tx.insert(qrSessions).values({ sessionId: validQrTableSession ? Number(validQrTableSession.sessionId) : null,
+        tableId: qr.tableId, tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
+      const redirectTo = validQrTableSession ? "/qrorder" : openSessions.length ? "/qrorder/join-required" : "/qrorder/order";
+      const expiresInSeconds = validQrTableSession
+        ? qrSessionCookieMaxAgeSeconds(Number(validQrTableSession.remainingSeconds), QR_DEV_TEST_MAX_AGE_SECONDS)
+        : QR_DEV_TEST_MAX_AGE_SECONDS;
+      return { tableNo: qr.tableNo, redirectTo, reused: false, token, expiresInSeconds };
     });
 
-    return Response.json({ success: true, tableNo: session.tableNo, redirectTo: session.redirectTo, expiresInSeconds: QR_DEV_TEST_MAX_AGE_SECONDS }, {
+    return Response.json({ success: true, tableNo: session.tableNo, redirectTo: session.redirectTo,
+      expiresInSeconds: session.reused ? QR_DEV_TEST_MAX_AGE_SECONDS : session.expiresInSeconds }, {
       headers: {
         "Cache-Control": "no-store",
-        "Set-Cookie": `${QR_DEV_TEST_COOKIE}=${encodeURIComponent(token)}; ${qrSessionCookieAttributes(request, QR_DEV_TEST_MAX_AGE_SECONDS)}`,
+        ...(session.reused ? {} : { "Set-Cookie": `${QR_DEV_TEST_COOKIE}=${encodeURIComponent(session.token!)}; ${qrSessionCookieAttributes(request, session.expiresInSeconds)}` }),
       },
     });
   } catch (error) {

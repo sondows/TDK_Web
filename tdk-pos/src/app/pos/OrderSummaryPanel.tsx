@@ -804,7 +804,7 @@ export default function OrderSummaryPanel({
         {viewTab === "summary"
           ? displaySummaryItems.length
             ? <OrderSummaryRows items={displaySummaryItems} onOptionClick={!readOnly ? openSpicyEdit : undefined}
-                canEditOption={!readOnly ? row => spicyEditSource(row) !== null : undefined} />
+                canEditOption={!readOnly ? row => (row.sourceOrderItemIds?.length ?? 1) === 1 && spicyEditSource(row) !== null : undefined} />
             : <p className="py-6 text-center text-sm text-slate-400">현재 주문 내역이 없습니다.</p>
           : details.length
             ? readOnly ? renderDetailRows(true) : rows

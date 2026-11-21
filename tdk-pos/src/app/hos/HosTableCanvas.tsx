@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 
 import { HOS_LAYOUT_LIMITS, HOS_LAYOUT_VERTICAL_SCALE, snapHosPositionToGrid } from "@/lib/hos-table-layout";
 import { calculateHosSectionLayout, type HosSectionLayout } from "@/lib/hos-section-layout";
 import { sessionElapsedMinutes } from "@/lib/session-time";
+import { qrTableIndicatorState } from "@/lib/qr-table-indicators-model";
 
 export type HosTableCanvasRow = {
   tableId: number;
@@ -20,7 +21,9 @@ export type HosTableCanvasRow = {
   babyCount?: number | null;
   openedAt?: string | null;
   customerName?: string | null;
-  hasQrOrder?: boolean;
+  hasActiveQrToken?: boolean;
+  hasPendingQrOrder?: boolean;
+  hasQrOrderHistory?: boolean;
   hasTableToken?: boolean;
   isMergedSource: boolean;
   mergedIntoTableNo: string | null;
@@ -206,9 +209,9 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
         table.isMergedSource ? `→ ${table.mergedIntoTableNo ?? "병합"}` : null,
         table.mergedSourceTableNos.length ? `+${table.mergedSourceTableNos.join(", ")}` : null,
       ].filter((label): label is string => Boolean(label));
-      const statusBadgeClass = (status: "QR" | "TI") => status === "QR"
-        ? "rounded-full bg-blue-100 px-2 py-1 text-xs font-extrabold leading-none text-blue-700 ring-1 ring-inset ring-blue-200"
-        : "rounded-full bg-red-100 px-2 py-1 text-xs font-extrabold leading-none text-red-700 ring-1 ring-inset ring-red-200";
+      const qrIndicator = qrTableIndicatorState({ hasActiveQrToken: table.hasActiveQrToken ?? false,
+        hasPendingQrOrder: table.hasPendingQrOrder ?? false, hasQrOrderHistory: table.hasQrOrderHistory ?? false });
+      const statusBadgeClass = "rounded-full bg-red-100 px-2 py-1 text-xs font-extrabold leading-none text-red-700 ring-1 ring-inset ring-red-200";
       return <button data-hos-table-no={table.tableNo} key={table.tableId}
         aria-label={`${table.tableNo}${occupied ? `, 받을 금액 ${money(table.amountDue)}${guestCount > 0 ? `, ${guestCount}명` : ""}` : ""}`}
         className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-xl border ${editing ? "px-1 shadow-sm" : "p-0 transition-transform duration-150 active:scale-[0.985]"} text-center ${occupied ? "border-blue-200 bg-blue-50 text-slate-900" : "border-slate-300 bg-slate-50 text-slate-800"} ${!editing && !occupied ? "hover:border-slate-400" : ""} ${editing && selectedTableId === table.tableId ? "ring-4 ring-amber-400 ring-offset-2" : ""} disabled:opacity-50`}
@@ -218,7 +221,7 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onClick={event => selectTable(event, table)}
-        style={{ left: `${table.positionX}%`, top: `calc(${table.positionY * HOS_LAYOUT_VERTICAL_SCALE}% + ${(sectionLayout.verticalOffsets.get(table.tableId) ?? 0) * 16 / 9}cqw)`, width: `${table.layoutWidth}%`, height: `${table.layoutHeight * HOS_LAYOUT_VERTICAL_SCALE}%`, zIndex: draggingTableId === table.tableId ? 1000 : editing && selectedTableId === table.tableId ? 500 : undefined, touchAction: editing ? "none" : undefined, containerType: editing ? undefined : "inline-size" }}
+        style={{ left: `${table.positionX}%`, top: `calc(${table.positionY * HOS_LAYOUT_VERTICAL_SCALE}% + ${(sectionLayout.verticalOffsets.get(table.tableId) ?? 0) * 16 / 9}cqw)`, width: `${table.layoutWidth}%`, height: `${table.layoutHeight * HOS_LAYOUT_VERTICAL_SCALE}%`, zIndex: draggingTableId === table.tableId ? 1000 : editing && selectedTableId === table.tableId ? 500 : undefined, touchAction: editing ? "none" : undefined, containerType: editing ? undefined : "inline-size", outline: table.hasPendingQrOrder ? "3px solid #E53935" : undefined, outlineOffset: table.hasPendingQrOrder ? "1px" : undefined }}
         type="button">
         {editing ? <>
           <span className="font-extrabold leading-tight" style={{ fontSize: "clamp(12px, 3cqw, 24px)" }}>{table.tableNo}</span>
@@ -228,7 +231,10 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
         </> : <span className="flex size-full min-h-0 items-stretch p-[5%] leading-tight">
           <span className="flex h-full w-[33%] shrink-0 flex-col items-center">
             <span className="flex h-1/2 w-full items-center justify-center truncate font-extrabold" style={{ fontSize: "clamp(17px, calc(34cqw - 7px), 29px)", color: occupied ? "#111111" : "#C8CDD4" }} title={table.tableName || table.tableNo}>{table.tableNo}</span>
-            <span aria-hidden="true" className="h-1/2 w-full" />
+            <span className="flex h-1/2 w-full items-center justify-center">
+              {qrIndicator === "ORDER_HISTORY" && <span aria-label="QR 주문 이력" className="text-[clamp(12px,1.95cqw,16px)] font-extrabold leading-none text-red-600" role="img">QR</span>}
+              {qrIndicator === "TOKEN" && <svg aria-label="유효한 QR 토큰" className="h-[clamp(12px,2cqw,17px)] w-[clamp(12px,2cqw,17px)] text-[#1769D2]" fill="none" role="img" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM19 14v2m2 2v3h-3m-4 0h2" /></svg>}
+            </span>
           </span>
           <span className="grid h-full w-[67%] min-w-0 shrink-0 grid-rows-4">
             <span className="flex min-h-0 min-w-0 items-center justify-end overflow-hidden border-b border-slate-200/90 text-right font-bold tabular-nums" style={{ fontSize: "clamp(15px, calc(20cqw + 3px), 19px)" }}>{occupied ? money(table.amountDue) : ""}</span>
@@ -236,11 +242,11 @@ export default function HosTableCanvas({ tables, disabled = false, editing = fal
             <span className={`flex min-h-0 min-w-0 items-center justify-end gap-1 overflow-hidden border-b border-slate-200/90 text-right ${table.customerName?.trim() ? "truncate text-slate-600" : ""}`}
               style={table.customerName?.trim() ? { fontSize: "clamp(12px, calc(5.8cqw + 3px), 17px)", fontWeight: 400 } : undefined}
               title={table.customerName?.trim() || undefined}>
-              {table.customerName?.trim() || <>{table.hasQrOrder && <span className={statusBadgeClass("QR")}>QR</span>}{table.hasTableToken && <span className={statusBadgeClass("TI")}>TI</span>}</>}
+              {table.customerName?.trim() || <>{table.hasTableToken && <span className={statusBadgeClass}>TI</span>}</>}
             </span>
             <span className="flex min-h-0 min-w-0 items-center justify-end gap-1 overflow-hidden text-right text-xs text-slate-600">
               {table.customerName?.trim()
-                ? <>{table.hasQrOrder && <span className={statusBadgeClass("QR")}>QR</span>}{table.hasTableToken && <span className={statusBadgeClass("TI")}>TI</span>}</>
+                ? <>{table.hasTableToken && <span className={statusBadgeClass}>TI</span>}</>
                 : occupied ? "" : mergeLabels.join(" ")}
             </span>
           </span>

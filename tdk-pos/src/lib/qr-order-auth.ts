@@ -5,10 +5,13 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { RowDataPacket } from "mysql2/promise";
 import { db, pool } from "@/db";
-import { diningTables, qrCodes, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { checkouts, diningTables, orders, paymentSessionAllocations, payments, qrCodes, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { QR_ORDER_ACCESS_MAX_AGE_SECONDS, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
+import { classifyQrOrderAccessState } from "@/lib/qr-order-access-state";
+
+export { QR_ORDER_ACCESS_MAX_AGE_SECONDS } from "@/lib/qr-session-expiry-policy";
 
 export const QR_ORDER_ACCESS_COOKIE = "tdkon_qr_session";
-export const QR_ORDER_ACCESS_MAX_AGE_SECONDS = 12 * 60 * 60;
 export const QR_DEV_TEST_COOKIE = "tdkon_qr_dev_test";
 export const QR_DEV_TEST_TOKEN_PREFIX = "devtest_";
 export const QR_DEV_TEST_MAX_AGE_SECONDS = 30 * 60;
@@ -69,7 +72,18 @@ async function resolveQrOrderToken(token: string, testSession = false) {
     eq(qrCodes.status, "IN_USE"),
     eq(diningTables.isActive, 1),
   ];
-  whereConditions.push(sql`${qrSessions.createdAt} >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ${testSession ? QR_DEV_TEST_MAX_AGE_SECONDS : QR_ORDER_ACCESS_MAX_AGE_SECONDS} SECOND)`);
+  const tokenLifetime = sql`${qrSessions.createdAt} >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ${testSession ? QR_DEV_TEST_MAX_AGE_SECONDS : QR_ORDER_ACCESS_MAX_AGE_SECONDS} SECOND)`;
+  if (testSession) {
+    whereConditions.push(tokenLifetime);
+    whereConditions.push(or(isNull(qrSessions.sessionId), sql`${qrTableSessionExpiresAtSql(qrSessions.sessionId)} > CURRENT_TIMESTAMP`)!);
+  } else {
+    // Bound customer tokens share the end time of the session that accepted
+    // the first QR order; a later invitee cannot extend that table session.
+    whereConditions.push(or(
+      and(isNull(qrSessions.sessionId), tokenLifetime),
+      sql`${qrSessions.sessionId} IS NOT NULL AND ${qrTableSessionExpiresAtSql(qrSessions.sessionId)} > CURRENT_TIMESTAMP`
+    )!);
+  }
   const [row] = await db.select({
     qrSessionId: qrSessions.qrSessionId,
     sessionId: qrSessions.sessionId,
@@ -100,12 +114,86 @@ export async function resolveQrOrderRequest(request: Request) {
   const rawTest = request.headers.get("cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(testPrefix));
   if (rawTest) {
     let testToken: string | null = null;
-    try { testToken = decodeURIComponent(rawTest.slice(testPrefix.length)); } catch { return null; }
-    return resolveQrDevTestSession(testToken);
+    try { testToken = decodeURIComponent(rawTest.slice(testPrefix.length)); } catch { /* Ignore malformed or stale test cookies and check the customer token below. */ }
+    const testSession = await resolveQrDevTestSession(testToken);
+    if (testSession) return testSession;
   }
   const prefix = `${QR_ORDER_ACCESS_COOKIE}=`;
   const raw = request.headers.get("cookie")?.split(";").map(part => part.trim()).find(part => part.startsWith(prefix));
   let token: string | null = null;
   try { token = raw ? decodeURIComponent(raw.slice(prefix.length)) : null; } catch { return null; }
   return resolveQrOrderSession(token);
+}
+
+/** Classifies a failed customer request without returning any prior order data. */
+export async function classifyQrOrderRequestFailure(request: Request) {
+  const cookieParts = request.headers.get("cookie")?.split(";").map(part => part.trim()) ?? [];
+  const testPrefix = `${QR_DEV_TEST_COOKIE}=`;
+  const testCookie = cookieParts.find(part => part.startsWith(testPrefix));
+  const accessPrefix = `${QR_ORDER_ACCESS_COOKIE}=`;
+  const accessCookie = cookieParts.find(part => part.startsWith(accessPrefix));
+  const usingTestToken = Boolean(testCookie);
+  const cookie = usingTestToken ? testCookie : accessCookie;
+  let token: string | null = null;
+  try {
+    token = cookie ? decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1)) : null;
+  } catch {
+    return "AUTH_REQUIRED" as const;
+  }
+  if (!validQrAccessToken(token) || (usingTestToken && !token.startsWith(QR_DEV_TEST_TOKEN_PREFIX))) {
+    return "AUTH_REQUIRED" as const;
+  }
+  if (usingTestToken && !(await isDevelopmentQrTestDatabase())) return "AUTH_REQUIRED" as const;
+
+  const testSession = usingTestToken;
+  const maxAgeSeconds = testSession ? QR_DEV_TEST_MAX_AGE_SECONDS : QR_ORDER_ACCESS_MAX_AGE_SECONDS;
+  const [session] = await db.select({
+    qrStatus: qrSessions.status,
+    sessionId: qrSessions.sessionId,
+    createdAt: qrSessions.createdAt,
+    tableStatus: tableSessions.status,
+    sessionKind: tableSessions.sessionKind,
+    expired: sql<boolean>`CASE
+      WHEN ${qrSessions.sessionId} IS NULL
+        THEN DATE_ADD(${qrSessions.createdAt}, INTERVAL ${maxAgeSeconds} SECOND) <= CURRENT_TIMESTAMP
+      WHEN ${testSession}
+        THEN DATE_ADD(${qrSessions.createdAt}, INTERVAL ${maxAgeSeconds} SECOND) <= CURRENT_TIMESTAMP
+          OR ${qrTableSessionExpiresAtSql(qrSessions.sessionId)} <= CURRENT_TIMESTAMP
+      ELSE ${qrTableSessionExpiresAtSql(qrSessions.sessionId)} <= CURRENT_TIMESTAMP
+    END`,
+  }).from(qrSessions)
+    .leftJoin(tableSessions, eq(tableSessions.sessionId, qrSessions.sessionId))
+    .where(eq(qrSessions.tokenHash, hashQrToken(token)))
+    .limit(1);
+
+  if (!session) return "AUTH_REQUIRED" as const;
+  let hasCompletedOrder = false;
+  let hasUnsettledOrder = false;
+  let hasPaidAllocation = false;
+  if (session.sessionId !== null && session.tableStatus === "CLOSED" && session.sessionKind === "DINE_IN") {
+    const sessionOrders = await db.select({ status: orders.status }).from(orders)
+      .where(eq(orders.sessionId, Number(session.sessionId)));
+    hasCompletedOrder = sessionOrders.some(order => order.status === "COMPLETED");
+    hasUnsettledOrder = sessionOrders.some(order => order.status !== "COMPLETED" && order.status !== "CANCELLED");
+    const [paidAllocation] = hasCompletedOrder && !hasUnsettledOrder ? await db.select({ sessionId: paymentSessionAllocations.sessionId })
+      .from(paymentSessionAllocations)
+      .innerJoin(payments, eq(payments.paymentId, paymentSessionAllocations.paymentId))
+      .innerJoin(checkouts, eq(checkouts.checkoutId, payments.checkoutId))
+      .where(and(
+        eq(paymentSessionAllocations.sessionId, Number(session.sessionId)),
+        eq(checkouts.status, "PAID"),
+        eq(payments.status, "APPROVED"),
+      )).limit(1) : [];
+    hasPaidAllocation = Boolean(paidAllocation);
+  }
+  return classifyQrOrderAccessState({
+    qrStatus: session.qrStatus,
+    sessionId: session.sessionId === null ? null : Number(session.sessionId),
+    tableStatus: session.tableStatus,
+    sessionKind: session.sessionKind,
+    expired: Boolean(session.expired),
+    hasCompletedOrder,
+    hasUnsettledOrder,
+    hasPaidAllocation,
+  });
 }

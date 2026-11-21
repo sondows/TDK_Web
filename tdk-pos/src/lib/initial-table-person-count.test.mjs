@@ -24,3 +24,11 @@ test("legacy 김치찌개 category rows keep the existing first-order headcount 
     [{ categoryId: 10, name: "김치찌개" }],
   ), 3);
 });
+
+test("multiple stew menu categories are summed while sides remain excluded", () => {
+  assert.equal(initialAdultCountFromStewOrder(
+    [{ menuId: 1, qty: 2 }, { menuId: 2, qty: 1 }, { menuId: 3, qty: 5 }],
+    [{ menuId: 1, categoryId: 10 }, { menuId: 2, categoryId: 11 }, { menuId: 3, categoryId: 20 }],
+    [{ categoryId: 10, name: "\uCC0C\uAC1C" }, { categoryId: 11, name: "\uCC0C\uAC1C" }, { categoryId: 20, name: "\uC0AC\uC774\uB4DC" }],
+  ), 3);
+});

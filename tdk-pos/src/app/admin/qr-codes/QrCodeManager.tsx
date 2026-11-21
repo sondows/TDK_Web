@@ -15,6 +15,8 @@ type QrCode = {
   createdAt: string;
   updatedAt: string;
   history: Array<{ actionType: string; description: string | null; createdAt: string }>;
+  attentionRequired?: boolean;
+  attentionLabels?: string[];
 };
 type Table = { tableId: number; tableNo: string };
 type Filter = "AVAILABLE" | "RETIRED" | "ALL";
@@ -65,6 +67,7 @@ export default function QrCodeManager() {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const [accessEventsTruncated, setAccessEventsTruncated] = useState(false);
 
   const visibleCodes = useMemo(() => {
     const normalizedSearch = search.trim().toUpperCase();
@@ -81,9 +84,10 @@ export default function QrCodeManager() {
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/admin/qr-codes", { cache: "no-store" });
-    const result = await response.json() as { success?: boolean; codes?: QrCode[]; tables?: Table[]; message?: string };
+    const result = await response.json() as { success?: boolean; codes?: QrCode[]; tables?: Table[]; accessEventsTruncated?: boolean; message?: string };
     if (!response.ok || !result.success) throw new Error(result.message ?? "QR 목록을 불러오지 못했습니다.");
     setCodes(result.codes ?? []);
+    setAccessEventsTruncated(result.accessEventsTruncated === true);
     setTables(result.tables ?? []);
   }, []);
 
@@ -155,7 +159,9 @@ export default function QrCodeManager() {
   };
 
   const retire = async (code: QrCode) => {
-    const linkedTableWarning = code.tableNo ? `\n\n테이블 ${code.tableNo}의 QR 주문 접근이 즉시 중단됩니다.` : "";
+    const linkedTableWarning = code.tableNo ? `
+
+테이블 ${code.tableNo}의 QR 주문 접근이 즉시 중단됩니다.` : "";
     if (!window.confirm(`이 QR(${code.managementNumber})을 폐기하시겠습니까? 폐기된 QR은 다시 사용할 수 없습니다.${linkedTableWarning}`)) return;
     setBusy(true);
     setError("");
@@ -172,6 +178,14 @@ export default function QrCodeManager() {
     }
   };
 
+  const openUsageHistory = (code: QrCode) => {
+    const historyWindow = window.open(`/admin/qr-codes/${code.qrCodeId}/history`, "_blank");
+    if (!historyWindow) {
+      setError("새 탭이 차단되었습니다. 브라우저에서 팝업을 허용한 후 다시 시도해 주세요.");
+      return;
+    }
+    historyWindow.opener = null;
+  };
   const openCustomerTest = async (code: QrCode) => {
     if (!devTestEnabled || code.targetType !== "TABLE_ORDER" || code.status !== "IN_USE" || !code.tableId) return;
     const testWindow = window.open("about:blank", "_blank");
@@ -191,7 +205,7 @@ export default function QrCodeManager() {
       });
       const result = await response.json() as { success?: boolean; tableNo?: string; redirectTo?: string; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "고객 화면 테스트를 시작하지 못했습니다.");
-      const redirectTo = result.redirectTo === "/qrorder/join-required" ? result.redirectTo : "/qrorder/order";
+      const redirectTo = result.redirectTo === "/qrorder" || result.redirectTo === "/qrorder/join-required" ? result.redirectTo : "/qrorder/order";
       testWindow.location.replace(redirectTo);
     } catch (reason) {
       testWindow.close();
@@ -265,32 +279,44 @@ export default function QrCodeManager() {
     </div>
     {legacyLockedCount > 0 && <p className="qr-no-print mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">기존 잠금 상태 QR {legacyLockedCount}개는 변경 없이 보존했습니다. 전체 필터에서 확인할 수 있습니다.</p>}
     {error && <p className="qr-no-print mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
+    {accessEventsTruncated && <p className="qr-no-print mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">최근 QR 접속기록 조회가 10,000건 한도에 도달했습니다. 기록량이 한도를 넘으면 오래된 QR의 이상징후가 목록에 나타나지 않을 수 있습니다.</p>}
     <div className="qr-print-area">
-      <div className="qr-print-grid mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="qr-print-grid mt-5 flex flex-wrap items-start justify-start gap-4">
         {visibleCodes.map(code => {
           const choice = choiceByQr[code.qrCodeId] ?? currentChoice(code);
           const locked = code.status === "LOCKED";
           const retired = code.status === "RETIRED";
-          return <article className={`qr-print-card ${retired ? "qr-retired-card" : ""} rounded-xl border border-slate-200 bg-white p-4`} key={code.qrCodeId}>
-            <div className="qr-print-content flex items-start gap-3">
-              {!retired && <><div className="qr-no-print flex shrink-0 items-start pt-1"><input aria-label={`${code.managementNumber} PNG 선택`} checked={selected.includes(code.qrCodeId)} disabled={!selected.includes(code.qrCodeId) && selectedForExport.length >= 500} onChange={() => toggleSelected(code.qrCodeId)} type="checkbox" /></div><Image alt={`QR ${code.managementNumber}`} className="qr-print-image size-24 shrink-0" height={96} src={`/api/admin/qr-codes/${code.qrCodeId}/image`} unoptimized width={96} /></>}
+          return <article className={`qr-print-card ${retired ? "qr-retired-card" : ""} w-fit max-w-full rounded-xl border border-slate-200 bg-white p-4`} key={code.qrCodeId}>
+            <div className="qr-print-content flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
+              {!retired && <div className="flex shrink-0 items-start gap-2">
+                <div className="qr-no-print flex shrink-0 items-start pt-1"><input aria-label={`${code.managementNumber} PNG 선택`} checked={selected.includes(code.qrCodeId)} disabled={!selected.includes(code.qrCodeId) && selectedForExport.length >= 500} onChange={() => toggleSelected(code.qrCodeId)} type="checkbox" /></div>
+                <div className="flex flex-col items-center gap-3">
+                  <button aria-label={`${code.managementNumber} QR 사용기록 열기`} className="cursor-pointer border-0 bg-transparent p-0" onClick={() => openUsageHistory(code)} type="button"><Image alt={`QR ${code.managementNumber}`} className="qr-print-image size-32 shrink-0 sm:size-36" height={144} src={`/api/admin/qr-codes/${code.qrCodeId}/image`} unoptimized width={144} /></button>
+                </div>
+              </div>}
               <div className="qr-print-details min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2"><strong className="qr-print-identifier font-mono">{code.managementNumber}</strong><span className={`qr-print-status shrink-0 rounded px-2 py-1 text-xs ${locked ? "bg-amber-100 text-amber-900" : "bg-slate-100"}`}>{statusLabel[code.status]}</span></div>
-                {!retired && <p className="qr-print-target mt-1 text-sm text-slate-600">현재 연결: {targetDescription(currentChoice(code), tables)}</p>}
-                {!retired && <div className="qr-no-print mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                  <select aria-label={`QR ${code.managementNumber} 연결 대상`} className="min-w-0 rounded-lg border px-2 py-2 text-sm" disabled={busy || locked || retired} onChange={event => setChoiceByQr(current => ({ ...current, [code.qrCodeId]: event.target.value as TargetChoice }))} value={choice}>
+                <div className="flex min-h-8 flex-wrap items-center gap-2">
+                  <strong className="qr-print-identifier break-all font-mono text-lg font-black tracking-tight sm:text-xl">{code.managementNumber}</strong>
+                  <span className={`qr-print-status shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${locked ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>{statusLabel[code.status]}</span>
+                  {code.attentionRequired && <span aria-label={`확인 필요: ${(code.attentionLabels ?? []).join(", ")}`} className="qr-no-print text-xs font-bold text-red-700">확인 필요</span>}
+                </div>
+                {!retired && <p className="qr-print-target mt-2 text-sm font-medium text-slate-600">현재 연결: {targetDescription(currentChoice(code), tables)}</p>}
+                {!retired && <div className="qr-no-print mt-3 flex w-fit max-w-full flex-col items-start">
+                  <div className="flex w-full items-center gap-2">
+                  <select aria-label={`QR ${code.managementNumber} 연결 대상`} className="min-h-10 w-0 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={busy || locked || retired} onChange={event => setChoiceByQr(current => ({ ...current, [code.qrCodeId]: event.target.value as TargetChoice }))} value={choice}>
                     <option value="UNASSIGNED">미연결</option>
                     {choice === "ORPHANED_TABLE" && <option disabled value="ORPHANED_TABLE">기존 테이블 연결 정보 없음</option>}
                     {tables.map(table => <option key={table.tableId} value={`TABLE:${table.tableId}`}>테이블 {table.tableNo}</option>)}
                     <option value="GUEST_MENU">매장 메뉴 QR</option><option value="WAITING">대기 QR</option>
                   </select>
-                  <button className="rounded-lg bg-blue-50 px-3 text-sm font-bold text-blue-700" disabled={busy || locked || retired || choice === currentChoice(code)} onClick={() => void updateTarget(code)} type="button">연결 저장</button>
+                  <button className="h-10 w-fit shrink-0 rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold whitespace-nowrap text-blue-700 hover:bg-blue-100" disabled={busy || locked || retired || choice === currentChoice(code)} onClick={() => void updateTarget(code)} type="button">연결 저장</button>
+                  </div>
+                <div className="mt-3 flex w-max max-w-full flex-wrap items-center gap-2">
+                  <button className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold whitespace-nowrap hover:bg-slate-50" disabled={exporting} onClick={() => void savePng(code)} type="button">PNG 저장</button>
+                  <button className="min-h-10 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold whitespace-nowrap text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={busy} onClick={() => void retire(code)} type="button">폐기</button>
+                  {devTestEnabled && <button className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold whitespace-nowrap text-blue-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={testSessionFor !== null || code.status !== "IN_USE" || code.targetType !== "TABLE_ORDER" || !code.tableId} onClick={() => void openCustomerTest(code)} type="button">{testSessionFor === code.qrCodeId ? "테스트창 여는 중…" : "테스트창 열기"}</button>}
+                </div>
                 </div>}
-                {!retired && <div className="qr-no-print mt-2 flex flex-wrap gap-2">
-                  <button className="rounded-lg border px-3 py-2 text-xs font-semibold" disabled={exporting || retired} onClick={() => void savePng(code)} type="button">PNG 저장</button>
-                  <button className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700" disabled={busy || retired} onClick={() => void retire(code)} type="button">폐기</button>
-                </div>}
-                {devTestEnabled && <button className="qr-no-print mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={testSessionFor !== null || code.status !== "IN_USE" || code.targetType !== "TABLE_ORDER" || !code.tableId} onClick={() => void openCustomerTest(code)} type="button">{testSessionFor === code.qrCodeId ? "테스트 열기 중…" : "고객 화면 테스트"}</button>}
                 {retired && <div className="qr-no-print mt-2 text-xs text-slate-600"><p>발행일: {code.managementNumber.slice(0, 8)} · 폐기일: {new Date(code.updatedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</p><details className="mt-1"><summary className="cursor-pointer">기존 연결 이력 {code.history.length}건</summary><ul className="mt-1 space-y-1">{code.history.map((item, index) => <li key={`${item.createdAt}-${index}`}>{new Date(item.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} · {item.description ?? item.actionType}</li>)}</ul></details></div>}
               </div>
             </div>

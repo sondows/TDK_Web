@@ -2147,3 +2147,239 @@ Constraints: do not modify production or development DB data, schema, NAS, deplo
 - POS, ADM, and QR menu order already uses category/menu `sort_order` with menu ID tie-breaking. No menu_number index, foreign key, view, trigger, routine, or `ORDER BY` dependency was found. menu_id relationships and order tables were not modified.
 - TDK_POS has the same menus columns/indexes/menu_id references as TDK_POS_TEST; its menu count is 35 versus 41 in the development database. No production DDL or full backup was performed.
 - Focused ESLint and TypeScript pass; `next build` passes with two existing filesystem-tracing warnings. Full ESLint reports 33 errors and 2 warnings in unrelated existing files, including existing React Compiler findings in PosShell.
+## TDKADM 사이드바 권한별 누락 — 2026-11-18
+
+| 단계 | 작업 목표 | 수정 대상 | 완료 기준 | 검증 | 상태 |
+|---|---|---|---|---|---|
+| 1 | 사이드바 정의·라우트별 Shell·권한 전달·Git 변경 이력 조사 | AdminSidebar, AdminWorkspaceShell, 호출 페이지, auth/permissions | 누락 조건과 반복 경로 특정 | 읽기 전용 코드·Git·OWNER 역할 확인 | PASS |
+| 2 | 공통 메뉴 정의와 필수 권한 전달로 페이지 간 사이드바 일관성 보장 | admin-navigation, shell 권한 helper, direct page shells | 실제 역할 필터 유지, 누락된 OWNER 메뉴 복원, 기본 false 누락 방지 | OWNER/MANAGER/일반직원 메뉴 테스트 4/4 PASS | PASS |
+| 3 | TypeScript·ESLint·빌드·브라우저 확인 및 결과 기록 | 변경 파일, PLANS.md | 정적 검사 통과, 제한 사항 명시 | TypeScript, 변경 파일 ESLint, build, diff 검사 PASS; 로그인 브라우저 검증 불가 | PASS (브라우저 미검증) |
+
+분석 결과: 2026-11-13 커밋에서 `canManageMenu` 조건부 필터가 추가됐으나 `/tdkadm/menus` 페이지가 그 이전부터 `AdminWorkspaceShell`에 권한 props를 전달하지 않아 기본 `false`가 적용된다. 다른 직접 렌더링 페이지들도 권한 props 전달 방식이 달라 페이지 이동 시 허용 메뉴가 달라질 수 있다. OWNER 두 계정은 개발·운영 DB 모두 활성 OWNER로 읽기 확인했고 계정 변경은 하지 않았다.
+
+수정 결과: 사이드바 메뉴/권한 필터를 `src/lib/admin-navigation.ts` 한 곳으로 모으고 메뉴 전용 화면의 중복 그룹도 공통 정의를 재사용하게 했다. 셸 권한 props를 필수로 바꾸고 보호 레이아웃 및 직접 셸을 렌더링하는 ADM 페이지 모두 현재 직원의 권한 helper 결과를 전달한다. 네 가지 OWNER/MANAGER/일반 직원/메뉴 전용 메뉴 테스트, TypeScript, 변경 파일 ESLint, `next build`가 통과했다. 빌드에는 메뉴 이미지 파일 경로 추적 관련 기존 경고가 두 건 있으며 사이드바 변경과 무관하다. 인증된 브라우저 세션은 제공되지 않아 실제 UI 확인은 수행하지 않았다.
+## TDKON QR 매운맛 표시 차이 조사 — 2026-11-18
+
+| 단계 | 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| 1 | `/qr`, `/qrorder/order`, `/q/[identifier]` 실제 라우트와 매운맛 렌더링/Git 이력 추적 | 양쪽 QR 화면의 컴포넌트·보안 모드와 문자열 함수 특정 | PASS |
+| 2 | 개발/공개 운영 페이지 번들, 공개 카탈로그 응답, 캐시와 서비스워커 확인 | 실제 번들 로직 및 매운맛 데이터 차이 비교 | PASS |
+| 3 | 사용자가 본 새 QR의 실제 인코딩 URL 및 locale과 공개 운영 응답 대조 | 보고된 괄호 표시가 현재 공개 서비스에서 재현되는지 확인 | IN_PROGRESS |
+| 4 | 필요한 최소 코드 정리와 TypeScript·ESLint·빌드 검증 | 근거가 확인된 경우에만 변경, 기존 주문 의미 유지 | IN_PROGRESS (TypeScript/ESLint/diff PASS; 코드 변경이 없어 빌드 미실행) |
+
+초기 조사 결과: 저장소에는 `/qr` 및 `/qrorder/order` 모두 같은 `src/app/qr/QrMenuClient.tsx`를 사용하며 QR 진입 인증 흐름은 `/q/[identifier]`에서 별도로 유지된다. 매운맛 텍스트 함수도 `qrOptionLabel` 한 곳이며 한국어 locale에서만 QR 설명을 괄호로 붙인다. 로컬 개발 API에는 매운맛 20행 전체의 설명이 있으나 공개 운영 API에는 설명이 비어 있다. 공개 운영 `/qr` 및 `/qrorder/order` 번들에는 현재 저장소와 동일한 `qrOptionLabel` 구현이 있고 HTML/API는 no-store이며 서비스워커 사용은 확인되지 않았다. 따라서 현재 공개 URL에서 보고한 괄호 표시가 생기는 경로는 재현되지 않았으며, 새 QR의 실제 인코딩 URL 확인이 남아 있다. 코드나 DB는 수정하지 않았다.
+
+## TDKON QR 상호박스/상단 주문 바 — 2026-11-18
+
+| 단계 | 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| 1 | 상호박스·주문 바·테이블 번호·4단계 스냅 연결 추적 | 메뉴 화면과 주문내역 화면의 공유 범위 및 기존 좌표 특정 | PASS |
+| 2 | 메뉴 화면의 파란 주문 바 제거, 상호박스 3열 재배치, 인증된 테이블 번호 표시 | 기존 주문 전송, 영업 안내, 각 라우트의 4단계 스냅 보존 | PASS |
+| 3 | TypeScript·ESLint·회귀 테스트 및 가능한 브라우저 확인 | 모바일 겹침, 기본/주문/주문내역 화면과 기능 검증 | PARTIAL |
+
+분석 결과: `/qrorder/order` 메뉴 화면에만 `QrOrderTitleBar title="주문하기"`가 고정 오버레이로 표시되며, 이 컴포넌트는 별도의 주문 클릭 동작이 없다. 주문 전송은 장바구니의 기존 `submitTableOrder` 버튼이 처리한다. 파란 바의 높이와 접촉 밀림 계산은 상호박스의 top 스냅 계산에 연결되어 있었고, 파란 바 컴포넌트는 주문내역 화면에서도 상태 표시용으로 사용된다. 메뉴 화면에서만 바를 제거하며 주문내역용 바는 유지한다. 테이블 번호는 인증된 `GET /api/qr/table-orders` 응답의 `tableNo`를 사용한다.
+
+
+## TDKON QRS 주문대기 화면 및 QR 공유
+
+| 단계 | 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| 1 | 주문대기 화면, 주문 API, KDS 시각, 초대 토큰 흐름 조사 | 합산 기준·실제 조리 상태·기존 공유 정책 확인 | PASS |
+| 2 | 주문대기 전용 상단 고정 상호박스, 집계/상세 탭 및 반응형 화면 구현 | 메뉴 화면/4단계 스냅/토큰 인증 불변 | PASS |
+| 3 | 기존 초대 API로 공유 모달·QR·링크 공유 구현, KDS 타임스탬프 연결 | 만료·취소·권한 정책 보존, 중복 발급 억제 | PASS |
+| 4 | TypeScript·ESLint·관련 테스트·diff 및 가능한 브라우저 검증 | 확인한 항목과 미검증 항목을 구분 보고 | IN_PROGRESS |
+
+조사 결과: 주문대기는 /qrorder의 QrOrderHistory이며 5초 주기로 /api/qr/table-orders를 조회한다. 이 API는 이미 주문 회차, 옵션, 메뉴별 금액, KDS 상태, POT 후조리 타이머를 반환한다. 초대 공유는 /api/qr/order-invites가 기존 토큰 해시/만료/현재 세션 검증을 수행하므로 이를 재사용하며, 화면 진입 때가 아니라 사용자가 QR 공유를 누를 때만 발급한다. 현재 총액은 PENDING/ACCEPTED 주문만 합산한다.
+
+
+검증 결과: TypeScript와 변경 파일 ESLint 통과, QR 주문내역 집계·QR 타이틀·장바구니·영업시간 테스트 31개 통과, 로컬 개발 서버에서 /qrorder와 /qr HTTP 200 및 주문대기 화면 요소 제거/일반 QR AI 메뉴도우미 유지 확인. 실제 브라우저/400px viewport 시각 검증은 실행할 브라우저 자동화 도구가 없어 미완료이며 stage 4는 IN_PROGRESS로 유지한다. DB 변경과 운영 배포는 하지 않았다.
+
+
+## TDKON QRS QR 접속 유형별 종료 버튼
+
+| 단계 | 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| 1 | QR 라우팅, 이미지 레이어, 장바구니 저장 및 테이블 인증 흐름 조사 | 일반/테이블/대기 QR 경로와 상호박스 덮개 관계 확인 | PASS |
+| 2 | 이미지 컨테이너 내부 종료 버튼 및 일반 QR 종료 확인/안내 구현 | 이미지 레이어에 종속되고 대기 QR/기존 스냅 불변 | PASS |
+| 3 | 테이블 QR의 장바구니별 종료·인증 확인 후 주문내역 이동 구현 | 토큰·장바구니 유지, 미인증 상태는 이동 차단 | PASS |
+| 4 | TypeScript·ESLint·QR 회귀 테스트·diff 및 가능한 브라우저 확인 | 결과와 브라우저 미검증 범위를 구분 | IN_PROGRESS |
+
+분석 결과: /q/[identifier]에서 유효한 TABLE_ORDER QR은 토큰 쿠키를 설정한 뒤 /qrorder/order 또는 /qrorder로 이동하며, /qrorder/order만 	ableOrderMode를 전달한다. 식당 앞 메뉴는 /qr에서 같은 QrMenuClient를 사용하고, /qr/wait는 별도의 waitingMode이므로 종료 UI 대상에서 제외한다. 대표 사진은 QrTitleCarousel의 fixed hero(z-0), 메뉴 콘텐츠는 z-10 위에 렌더되어 있어 버튼을 hero 내부에 추가하면 상호박스/콘텐츠가 이미지와 버튼을 함께 덮는다. 장바구니는 기존 localStorage 저장 효과로 유지된다.
+
+
+검증 결과: TypeScript, 변경 파일 ESLint, QR 타이틀/장바구니 테스트 16개 통과. 로컬 서버의 /qr, /qrorder/order, /qr/wait는 HTTP 200이며 종료 버튼은 일반/테이블 QR에서만 서버 렌더링되고 대기 QR에는 없음을 확인했다. 실제 400px 브라우저 조작, 가려진 hit-testing, 테이블 인증·장바구니 동작, 브라우저 close 동작은 자동화 브라우저가 없어 미검증이므로 단계 4는 IN_PROGRESS로 유지한다. DB 및 운영 배포는 하지 않았다.
+
+
+## TDKON QRS X 버튼 주문내역 이동 오류
+
+| 단계 | 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| 1 | X 클릭부터 주문내역 라우트의 인증·빈 주문 처리까지 추적 | 이동/되돌림 조건을 코드 기준으로 특정 | PASS |
+| 2 | 서버 주문 배열 확인, 빈 주문 안내, 승인대기 주문 이동 처리 | 장바구니 보존, 무효 세션 차단 | PASS |
+| 3 | 집계 로직 단위 테스트, TypeScript·ESLint·diff 및 라우트 검증 | 검증되지 않은 브라우저 흐름은 명시 | PASS |
+
+원인 분석: X 버튼은 /api/qr/table-orders의 성공과 	ableNo만 확인한 뒤 /qrorder로 이동했으며 주문 배열은 확인하지 않았다. /qrorder 화면은 API의 orders.length === 0일 때 /qrorder/order로 다시 보내므로, 주문 없는 테이블에서는 이동 후 원래 메뉴로 되돌아올 수 있다. PENDING도 배열에 존재하는 제출된 주문이므로 접수/승인 여부와 무관하게 주문내역으로 이동시키고, 빈 배열일 때만 현재 메뉴에서 안내한다.
+
+
+검증 결과: 주문 판별 모델에서 빈 배열은 없음, PENDING·CANCELLED 기록은 있음으로 처리하는 테스트를 추가했고 QR 주문내역/타이틀/장바구니 테스트 18개, TypeScript, ESLint, diff 검사를 통과했다. 인증 쿠키 없는 로컬 API 요청은 401을 반환해 무인증 접근이 차단됨을 확인했다. 실제 tableNo 1의 API 응답과 브라우저 상호작용은 현재 브라우저 인증 세션을 사용할 수 없어 확인하지 못했다.
+
+## TDKON QRS Table QR sharing
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace table QR authentication and active sticker URL mapping | Existing `/q/[identifier]` route, session resolver, QR tables and public URL helper reviewed | PASS |
+| 2 | Add an authenticated read-only endpoint and QR sharing dialog | Endpoint resolves only the active QR linked to the authenticated table; no token creation; UI uses the same URL for QR, copy and share | PASS |
+| 3 | Run TypeScript, focused ESLint, production build and diff review | Authenticated browser/mobile checks are recorded separately because no customer session is available | PASS |
+
+## TDKON 1단계 — QR 토큰 상태 및 POS·HOS 테이블 표시
+
+| 단계 | 목표 | 확인 기준 | 상태 |
+|---|---|---|---|
+| 1 | QR 세션 발급·검증·초기화, POS/HOS 갱신 및 테이블 표시 흐름 조사 | QR 세션 상태/12시간 유효 기준, 현재 주문 대기 판별과 화면 슬롯 확인 | PASS |
+| 2 | 공통 서버 조회로 테이블별 유효 토큰과 미처리 QR 주문 상태 제공 | POS/HOS가 같은 활성 QR 세션 및 PENDING 주문 데이터 사용 | PASS |
+| 3 | POS/HOS 테이블 번호 하단에 상태 아이콘/QR 표시 | 크기·위치·클릭 동작 유지, 다중 테이블 독립 표시 | PASS |
+| 4 | TypeScript, ESLint, 관련 테스트 및 diff 검증 | 검증 결과와 브라우저 미검증 범위를 구분 보고 | IN_PROGRESS |
+
+## TDKON Stage 2 — QR Orders Tab and Table List UI (2026-11-18)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Extend the shared active-token query with issuance time, table number, pending state, and registered party counts | Uses current active token/sticker/session and pending QR order rules; no schema change | PASS |
+| 2 | Add a stable token-issuance-ordered QR table list and selection pane to POS and HOS | Two-line list rows, unregistered people remain explicit, selecting a table is local and never changes on new orders | PASS |
+| 3 | Preserve default table screen and existing POS/HOS workflows | POS defaults to Tables; HOS defaults to its existing table canvas; HOS retains its existing routes and has no takeout/reservation/waiting top-level screens | PASS |
+| 4 | Run focused tests, TypeScript, ESLint, build, and diff review | Browser/device checks and existing unrelated lint findings are reported separately | IN_PROGRESS |
+
+Verification update: `tsc --noEmit`, focused ESLint for the QR workspace, list model, shared data loader, HOS and POS route passed. Seven focused QR list/token indicator tests passed. `next build` completed successfully; it emitted the existing dynamic filesystem tracing warnings in `src/lib/menu-image-storage.ts`. `PosShell.tsx` ESLint still reports the pre-existing React Compiler manual-memoization errors and unused `handlePosExit` warning, so the full modified-screen lint stage remains partial. `git diff --check` passed. No browser/device validation, DB mutation, schema change, or deployment was performed.
+
+## TDKON Stage 3 — QR Order Detail View (2026-11-18)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace QR order session/table ownership, statuses, option snapshots, AI helper use tracking, and billing policy | Reuse `qr_orders` history and `PENDING`/`ACCEPTED` billing policy; AI helper has only a preparation toast and no usage record; no schema change | PASS |
+| 2 | Add shared authenticated read-only QR order history for POS and HOS | Restrict to the selected table's currently valid QR session and current TABLE_ORDER sticker; no approval/rejection mutation | PASS |
+| 3 | Show token info, order count/amount, newest-first rounds, line items/options, and statuses | Keep selection stable; poll details while selected; token cancel and pending decision buttons remain UI-only | PASS |
+| 4 | Run focused tests, TypeScript, ESLint, build, diff review, and browser checks | Browser checks are reported separately when unavailable | IN_PROGRESS |
+
+Verification update: `tsc --noEmit` passed; focused ESLint for the shared detail UI, staff history API, HOS/POS loaders, and QR history models passed with no findings. Eleven QR history, round ordering, token list, and billing tests passed. `next build` completed successfully and includes `/api/qr/staff-order-history`; only the existing `menu-image-storage.ts` dynamic filesystem tracing warnings were emitted. `git diff --check` passed. POS/HOS live records and browser screens were not available for interactive verification; approval/rejection and token cancellation remain disabled UI. No DB/schema change or deployment was made.
+
+## TDKON Stage 4 — QR Order Processing and Token Cancellation
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace QR approval/rejection, POS order/KDS delivery, customer history, and token invalidation | Reuse the existing transactional QR decision endpoint; identify static sticker retirement behavior and pending-order guard | PASS |
+| 2 | Enable approval and confirmed rejection from the selected table panel for both POS and HOS | Preserve one-time PENDING transition and refresh authoritative data after conflicts | PASS |
+| 3 | Add confirmed token cancellation with pending-order safety and invalidate existing shared sticker URLs | Close active table QR sessions and retire current sticker only after no PENDING orders remain; preserve order rows | PASS |
+| 4 | Run race/status, amount/history, TypeScript, ESLint, build, diff and available browser checks | No schema change or operating deployment | PASS |
+
+Verification update: confirmed that accepted QR orders are inserted as standard accepted POS orders with ordered items, and `syncKdsOrders()` materializes eligible open-session orders into `kds_tasks`; rejected QR orders do not create POS orders. The existing QR decision row lock and PENDING guard prevent a second decision after the first commits. Token cancellation blocks when related QR orders remain PENDING, closes active QR sessions, revokes invites, retires the linked table sticker (so existing `/q/[identifier]` links cannot mint a new session), and preserves QR/order rows. Added the same QR manager authorization used by sticker retirement. Re-ran `tsc --noEmit`, focused ESLint, 13 QR history/policy/list/indicator tests, production build, and scoped `git diff --check`; all passed. Build emitted only the existing dynamic filesystem warnings in `menu-image-storage.ts`. No browser automation is available in this environment; database-backed concurrency and cancellation checks, POS/HOS browser/device validation, actual QR rescan, and live customer/KDS synchronization remain unverified. No database migration or operating deployment was performed.
+
+## TDKON Stage 5 - QR tab navigation and request alerts
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace POS/HOS table click, QR order polling, and request message UI | Preserve occupied-table click behavior and current non-QR request messages | PASS |
+| 2 | Route empty pending-QR table clicks and alert actions to the selected QR order table | Blue-token/no-token/occupied table clicks keep their existing action | PASS |
+| 3 | Detect accepted QR order submissions in both clients and show deduplicated clickable alerts | Events are sourced only from inserted qr_orders rows; both clients share the authenticated endpoint and deduplicate by order ID | PASS |
+| 4 | Verify full workflow and QR/POS/KDS regressions; record browser and live-system limits | No production DB or NAS changes | IN_PROGRESS |
+
+Verification update: added the shared authenticated notification cursor API, 3-second POS/HOS polling, order-ID deduplication, exact Korean alert text, clickable table routing, live QR indicator refresh, and empty pending-QR table shortcut with newest pending order highlight. Token/menu/cart/page-view events do not create notifications because the API reads only persisted qr_orders. TypeScript and production build passed; 22 focused notification, QR policy/history/list/indicator, and POS summary tests passed; ESLint passed for changed files except PosShell.tsx, where the existing refresh-return state update and React Compiler memoization findings remain. The build emitted the existing menu-image-storage.ts dynamic filesystem tracing warnings. Interactive POS/HOS, connected database, customer QR rescan, and live KDS verification were unavailable, so full workflow validation remains IN_PROGRESS. No production DB change or NAS deployment was made.
+## TDKON - QR token conflicts and full order flow audit (2026-11-18)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace token issuance/sharing, order submission/decision, checkout, session reset, and KDS | Confirm source-level rejection condition and timestamp/session ownership semantics; individual DB row remains unavailable | PASS |
+| 2 | Fix verified session/order conflict behavior without weakening occupancy protection | First QR-created table session adopts same-table active unbound sessions with pending orders; existing POS session still blocks unbound orders | PASS |
+| 3 | Add persistent rejected-order hiding only if current schema has a safe supported field/table | Persist staff hide action in existing audit_logs; never delete QR order rows or affect customer history | PASS |
+| 4 | Verify checkout closes temporary QR sessions while preserving fixed QR stickers and history | COMPLETE closes QR sessions and revokes invites; token cancellation preserves the assigned fixed sticker | PASS |
+| 5 | Run focused regression, TypeScript, ESLint, build, and available integration checks | 89 focused QR/POS/KDS policy and summary tests, TypeScript, ESLint, and production build pass; live DB/browser/KDS scenarios remain unverified | IN_PROGRESS |
+
+Findings: the exact rejection note is written only when an order's QR session is still unbound (session_id IS NULL) while the table already has an OPEN DINE_IN session. The first accepted standalone QR order creates the table session and previously bound only its own qr_session_id; another customer's independently scanned token with a pending order remained unbound and was then rejected. The acceptance transaction now adopts all active unbound QR sessions on that table that own PENDING orders, but only when there was no open table session before acceptance. A pre-existing POS session continues to reject unrelated unbound QR orders; invite-linked tokens already share the bound session.
+
+Timestamp findings: customer QR tokens use a 12-hour fixed lifetime from qr_sessions.created_at; lastActiveAt does not extend it. The staff table label is MIN(created_at) across the table's active QR sessions, so it is the earliest active token for that table, not necessarily the token that submitted each order. New QR order ordered_at values now use the database CURRENT_TIMESTAMP default, matching token issuance's DB clock. Expired tokens remain unusable, while their still-pending orders remain visible to staff and are not dropped from QR history. The supplied 11:47/07:31 row could not be queried: the local environment targets TDK_POS_TEST and the read-only connection returned EACCES. The source-level rejection condition is confirmed, but that specific row's qr_session_id and stored timestamps are not independently verified.
+
+Lifecycle findings and changes: explicit checkout COMPLETE previously closed table_sessions but not qr_sessions or invites. It now closes all active QR sessions attached to the completed session or its table and revokes its invite links. COMPLETE, manual close, and table cancellation now block while PENDING QR orders exist, so closure cannot strand a request. Partial payment and payment cancellation still do not close table use. The prior staff token-cancel route retired qr_codes and removed qr_table_links; it now closes temporary QR sessions and revokes invites while preserving the fixed sticker assignment and code. Rejected QR orders remain in qr_orders and do not cancel tokens. Staff deletion of a rejected round is a durable audit_logs event (QR_ORDER_HIDE / QR_ORDER); POS/HOS history hides it after refresh, while customer order history and settlement rows remain unchanged. Server deletion rechecks authentication and REJECTED status under a row lock. No schema or operational data was changed.
+
+Verification update: 89 focused tests passed, including multi-session adoption/occupancy policy, hide eligibility, token list expiry behavior, QR history, POS summaries, and KDS grouping. TypeScript, changed-file ESLint, production build, and scoped git diff --check passed. Build emitted the existing menu-image-storage.ts dynamic filesystem tracing warnings. The read-only TDK_POS_TEST database connection was denied (EACCES), so row-level reproduction, concurrent DB transactions, POS/HOS browser flows, customer QR rescan, payment/reset integration, and live KDS synchronization remain unverified. No operating DB writes or NAS deployment were performed.
+
+Pre-change checkpoint: checkpoints/20261118-qr-full-flow-prechange.zip.
+
+Final verification addendum (2026-11-18): fixed the staff notification cursor query to use `latestOrderId` instead of the MariaDB-reserved alias `cursor` reported by the runtime error screen. Removed row locks from pending-order existence reads in closure/cancellation guards to avoid lock inversion with QR approval; these transactions continue to lock the table/session rows they mutate. Re-ran TypeScript, changed-file ESLint, production build, and diff check successfully. Focused QR/POS financial regression tests: 23 passed. Full repository test discovery: 471 passed / 41 environment-dependent failures, limited to test DB EACCES and Chrome automation timeouts. The full environment run is not a QR flow PASS. Post-change checkpoint refreshed after this addendum. Live MariaDB SQL execution, row reproduction, POS/HOS browser, customer QR, concurrency, and KDS integration remain unverified; no DB/schema changes or deployment were performed.
+
+## TDKON 2nd task - invitation token expiry aligned to the first QR order session (2026-11-19)
+
+Status: implementation complete; code-level verification PASS. The customer-session lifetime remains six hours, and the development test-token lifetime remains thirty minutes. New invitation expiry is calculated in MariaDB as the first accepted QR order owner's `qr_sessions.created_at + QR_ORDER_ACCESS_MAX_AGE_SECONDS`; invitation creation or reuse does not extend it. Invite redemption clamps the new customer's cookie to the smaller remaining time of the invitation and the original table-session deadline. Bound customer-token authentication, POS/HOS active-token indicators, and staff QR history use the same root deadline. No schema or operational data change was made.
+
+Verification: 18 focused QR expiry/order/session tests passed; TypeScript, changed-file ESLint, production build, and scoped `git diff --check` passed. Build emitted the existing `menu-image-storage.ts` dynamic filesystem warnings. DB-backed invite expiry/redeem and POS/HOS integration were not run; no NAS deployment was performed. Pre-change checkpoint: `checkpoints/20261119-qr-invite-session-expiry-prechange.zip`.
+
+## TDKON - TDKADM QR usage history and anomaly indicators (2026-11-19)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace QR sticker, audit, customer session, cart, order, and checkout storage and authorization | Only events with a direct QR ID are attributed; identify data that requires schema support | PASS |
+| 2 | Add a manager-authorized, read-only per-QR history API and separate history page | Validate QR ID, return only records whose audit entity ID matches that QR, never infer past use from current table | PASS |
+| 3 | Open the history page from the QR image and show supported events plus explicit unavailable metrics | Preserve image dimensions, test-window action, and QR lifecycle; no invented session/order events | PASS |
+| 4 | Run focused tests, TypeScript, changed-file ESLint, production build, and scoped diff review | Report unavailable live DB/browser validation and any schema-dependent follow-up | PASS |
+
+Checkpoint before implementation: `checkpoints/20261119-qr-usage-history-prechange.zip`.
+
+Verification update: the manager-authorized read-only history API and protected history route are implemented. The QR image opens the selected code's history in a separate tab. The viewer includes issue time, current mapping/status, and up to 200 QR-ID-scoped audit events (issue, mapping/target changes, unassignment, retirement); scan, invite, cart, QR order, and checkout metrics remain explicitly unavailable because those records have no fixed QR ID relationship. 93 QR-related automation tests passed, including two new history mapping/attribution tests. TypeScript, changed-file ESLint, production build, and scoped diff check passed. Build emitted only the existing dynamic filesystem tracing warnings from src/lib/menu-image-storage.ts. Browser and live database verification were unavailable. No schema change, operating DB access/write, or NAS deployment was performed.
+
+## TDKON - QR fixed-sticker access anomaly monitoring (2026-11-19)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace fixed QR lookup, token reuse/issuance/failure points, existing history, and business-hours settings | Use only direct QR ID; distinguish malformed identifiers that cannot be attributed | PASS |
+| 2 | Record minimum QR access outcome using the existing audit log structure without blocking customer routing | Persist issued, reused, and typed failure events; logging errors do not alter auth response | PASS |
+| 3 | Detect after-hours, 5-minute repeat access/failure, and retired QR attempts in history and the QR list | Show one investigation badge per QR; do not treat findings as confirmed abuse | PASS |
+| 4 | Run focused tests, TypeScript, ESLint, production build, and review retention/performance limits | No schema/operating DB/NAS changes; report unverified live DB/browser behavior | PASS |
+
+Checkpoint before implementation: `checkpoints/20261119-qr-access-monitor-prechange.zip`.
+
+Verification update: fixed table QR attempts are written to the existing audit_logs table as QR_ACCESS_ISSUED, QR_ACCESS_REUSED, or QR_ACCESS_FAILED, scoped by qr_codes.qr_code_id. Failure codes are limited to non-sensitive reason labels. Log failures are caught and writes time out after 250 ms so they cannot change the customer authentication decision. The protected history screen and QR card badge detect configured business-hours exceptions, 10 access events or 5 failures within a rolling 5-minute window, and retired table QR attempts; indicators are review signals only. No schema or operational data change was made. QR test suite: 95 passed; TypeScript, changed-file ESLint, production build, and scoped diff check passed. Existing menu-image-storage.ts tracing warnings remain. Browser/live DB verification was unavailable. audit_logs has no index/retention policy declared in the source schema; QR history is capped at 200 records and the manager indicator analyzes at most the newest 10,000 access records. The actual production index and volume are unverified.
+## TDKON ? Current table QR order history indicator
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace QR order-to-table-session ownership and expiry/checkout lifecycle | Read-only TDK_POS_TEST check; no production DB or schema changes | PASS |
+| 2 | Add a current-use-session QR order history indicator without changing pending-order data | All submitted statuses count only when tied to the current open session or its time-bounded unbound order | PASS |
+| 3 | Reuse the state in POS/HOS table labels while preserving QR Orders tab pending behavior | POS/HOS use the shared history indicator; QR Orders list and notification semantics remain pending-based | PASS |
+| 4 | Run focused tests, TypeScript, ESLint, build, and verify test DB 1T indicator | 11 focused tests, TypeScript and build pass; changed files lint clean except existing PosShell rules; test DB 1T shows current-session order history | PASS |
+
+Verification detail: TDK_POS_TEST read-only query confirms 1T open session 426 with one ACCEPTED order and no pending order; the other 4 of the five lifetime orders (2 ACCEPTED, 2 REJECTED) belong to earlier/unbound sessions. Indicator SQL returns hasActiveQrToken=1, hasPendingQrOrder=0, hasQrOrderHistory=1, so the state resolves to ORDER_HISTORY. 11 targeted tests passed; tsc and production build passed. Targeted ESLint passed for all changed files except PosShell reports pre-existing react-hooks/preserve-manual-memoization and react-hooks/set-state-in-effect errors; rerun with those existing rules disabled leaves only its existing unused-variable warning. Browser verification was unavailable. No DB writes/schema changes/NAS deployment.
+
+## TDKON - POS QR approval table selection (2026-11-19)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace QR approval response, POS table selection, and server order-summary refresh | Existing API returns success only after commit and acceptedOrderId; POS server page loads authoritative order details by table session | PASS |
+| 2 | Navigate only after successful acceptance and select the approved table by numeric tableId | Reuse POS tab/selection state; refresh server snapshot without optimistic order insertion or another approval request | PASS |
+| 3 | Keep failure/rejection on QR Orders and guard repeated clicks | Synchronous in-flight ref; existing server PENDING lock/idempotency policy unchanged | PASS |
+| 4 | Run related tests, TypeScript, ESLint, build, and inspect HOS scope | 22 related tests, tsc, build passed; targeted ESLint passed; existing PosShell lint findings remain outside changed lines; no browser integration available | PASS |
+
+Verification detail: HOS uses the shared QR order workspace and approval endpoint, but its screen opens a table through an asynchronous detail-loading flow rather than the POS table-summary selection. The optional approval callback is wired only from POS, as requested; HOS behavior remains unchanged. The approved table summary is rebuilt from the server page's refreshed orders/order_items/options and existing summary aggregation. No API/database/schema changes, operational DB access, or deployment.
+
+## TDKON - HOS cart management on menu selection (2026-11-21)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace current HOS draft state, table binding, submit path, and QRS cart behavior | Reuse existing draft/order API and table guard; checkpoint existing dirty files | PASS |
+| 2 | Remove draft cart from detail screen and add QRS-style menu cart drawer | Existing orders and cancellation actions remain separate; table-specific draft preserved | PASS |
+| 3 | Submit from drawer, clear only on success, and refresh the same table detail | Failed send retains draft; success returns to current table detail | PASS |
+| 4 | Run targeted tests, TypeScript, ESLint, and review scoped diff | Report browser verification separately | PASS |
+
+Checkpoint before implementation: `checkpoints/20261121-hos-cart-menu-integration-prechange.zip`.
+
+Verification update: HOS draft cart was moved to a QRS-style menu drawer; detail now shows confirmed orders only. Existing send APIs remain in use. Successful send clears the draft and refreshes the same table detail; failed send preserves the draft. TypeScript, ESLint, 8 focused tests, and scoped diff check passed. Browser interactions were not verified.
+
+## TDKON - POS QR orders idle return and store tab label (2026-11-21)
+
+| Stage | Goal | Verification | Status |
+|---|---|---|---|
+| 1 | Trace configured idle duration, activity events, blocking UI, reset scope, and tab label | Reuse existing idle timer and seconds setting; no polling treated as user input | PASS |
+| 2 | Return from QR Orders to Store on idle and clear QR selection state | Only UI workspace state changes; pending QR operations block reset | PASS |
+| 3 | Rename the visible Tables tab to Store without changing internal table identifiers | Preserve open-table count and tab order | PASS |
+| 4 | Run TypeScript, changed-file ESLint, relevant tests, and review scoped diff | Report browser verification separately | PARTIAL |
+
+Checkpoint before implementation: `checkpoints/20261121-pos-idle-reset-prechange.zip`.
+
+Verification update: QR Orders idle timeout returns to the Store tab and clears the selected table while preserving the configured timeout and input event list. QR approval/rejection and token confirmation work block the timer. The visible tab is renamed to 매장. TypeScript, focused unit tests, and diff check pass; ESLint passes for QrOrdersWorkspace and the helper but PosShell reports existing React Compiler/set-state-in-effect diagnostics outside this change. Browser interactions were not verified.

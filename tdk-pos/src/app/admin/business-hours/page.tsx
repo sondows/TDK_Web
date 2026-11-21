@@ -3,6 +3,7 @@ import AdminWorkspaceShell from "../AdminWorkspaceShell";
 import styles from "../admin.module.css";
 import { getCurrentAdminStaff, getOwnerSecurityState } from "@/lib/admin-auth";
 import { canManageMenu } from "@/lib/permissions";
+import { getAdminSidebarPermissions } from "@/lib/admin-sidebar-permissions";
 import { getQrBusinessHoursSettings } from "@/lib/qr-title-settings";
 import QrBusinessHoursSettings from "../qr/title/QrBusinessHoursSettings";
 
@@ -12,6 +13,7 @@ export default async function BusinessHoursPage() {
   const staff = await getCurrentAdminStaff();
   if (!staff) redirect("/tdkadm/login");
   if (!canManageMenu(staff.role)) redirect("/tdkadm");
+  const sidebarPermissions = await getAdminSidebarPermissions(staff);
   const ownerSecurityState = await getOwnerSecurityState();
 
   let weekly: Awaited<ReturnType<typeof getQrBusinessHoursSettings>>["weekly"] = [];
@@ -33,7 +35,7 @@ export default async function BusinessHoursPage() {
     error = "영업시간 설정을 불러오지 못했습니다. 화면을 새로고침해 주세요.";
   }
 
-  return <AdminWorkspaceShell canManageMenu userName={staff.name}>
+  return <AdminWorkspaceShell {...sidebarPermissions} userName={staff.name}>
     <div className={styles.content}>
       <div className={styles.pageHeading}><h1>영업시간설정</h1><p className={styles.pageDescription}>저장한 영업시간은 매장 운영과 /qr 및 /qr/wait 고객 화면에 공통 적용됩니다.</p></div>
       <QrBusinessHoursSettings initialWeekly={weekly} initialSpecialHours={specialHours} initialBusinessHoursMode={businessHoursMode} initialClosedDates={closedDates} initialHolidayRules={holidayRules} initialTodayOverride={todayOverride} ownerSecurityState={ownerSecurityState} initialError={error} />

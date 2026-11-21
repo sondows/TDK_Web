@@ -1,8 +1,9 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { diningTables, qrSessionInvites, qrSessions, tableSessionMerges, tableSessions } from "@/db/schema";
+import { diningTables, qrOrders, qrSessionInvites, qrSessions, tableSessionMerges, tableSessions } from "@/db/schema";
 import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
 
@@ -21,12 +22,20 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
     const closed = await db.transaction(async tx => {
       if (tableSession.tableId !== null) await tx.select({ tableId: diningTables.tableId }).from(diningTables)
         .where(eq(diningTables.tableId, tableSession.tableId)).for("update").limit(1);
-      const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
-      if (updateResult.affectedRows !== 1) return false;
-      const closedAt = new Date();
       const customerSessionScope = tableSession.tableId === null
         ? eq(qrSessions.sessionId, sessionId)
-        : or(eq(qrSessions.sessionId, sessionId), eq(qrSessions.tableId, tableSession.tableId));
+        : or(eq(qrSessions.sessionId, sessionId), eq(qrSessions.tableId, tableSession.tableId))!;
+      const relatedQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId })
+        .from(qrSessions).where(customerSessionScope).for("update");
+      const qrSessionIds = relatedQrSessions.map(row => Number(row.qrSessionId));
+      if (qrSessionIds.length) {
+        const pendingQrOrders = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
+          .where(and(eq(qrOrders.status, "PENDING"), inArray(qrOrders.qrSessionId, qrSessionIds)));
+        if (pendingQrOrders.length) return { kind: "PENDING_QR" as const, count: pendingQrOrders.length };
+      }
+      const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
+      if (updateResult.affectedRows !== 1) return { kind: "CONFLICT" as const };
+      const closedAt = new Date();
       await tx.update(qrSessions).set({ status: "CLOSED", closedAt }).where(and(customerSessionScope, eq(qrSessions.status, "ACTIVE")));
       await tx.update(qrSessionInvites).set({ revokedAt: closedAt }).where(and(eq(qrSessionInvites.sessionId, sessionId), isNull(qrSessionInvites.revokedAt)));
       await cancelOrphanedUnpaidCheckouts(tx, [sessionId]);
@@ -34,9 +43,11 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
         eq(tableSessionMerges.status, "ACTIVE"),
         or(eq(tableSessionMerges.sourceSessionId, sessionId), eq(tableSessionMerges.destinationSessionId, sessionId)),
       ));
-      return true;
+      return { kind: "CLOSED" as const };
     });
-    if (!closed) return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
+    if (closed.kind === "PENDING_QR") return Response.json({ success: false,
+      message: `미처리 QR 주문 ${closed.count}건을 먼저 승인하거나 거절한 뒤 테이블을 종료해 주세요.` }, { status: 409 });
+    if (closed.kind !== "CLOSED") return Response.json({ success: false, message: "이미 종료되었거나 취소된 테이블입니다." }, { status: 409 });
     return Response.json({ success: true, message: "테이블 사용을 종료했습니다." });
   } catch {
     return Response.json({ success: false, message: "테이블 종료 처리에 실패했습니다." }, { status: 500 });
@@ -45,8 +56,9 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
 
 export async function PUT(request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   const currentStaff = await getCurrentStaff();
+  const hosStaff = currentStaff ? null : await getCurrentHosStaff();
   const sharedMode = await getPosLoginMode() === "SHARED";
-  if (!currentStaff && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
+  if (!currentStaff && !hosStaff && !sharedMode) return Response.json({ success: false, message: "로그인이 필요합니다." }, { status: 401 });
   const sessionId = Number((await params).sessionId);
   if (!Number.isInteger(sessionId) || sessionId <= 0) return Response.json({ success: false, message: "유효한 세션이 필요합니다." }, { status: 400 });
   try {

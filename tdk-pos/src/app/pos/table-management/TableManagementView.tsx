@@ -8,6 +8,7 @@ import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { resolveTableLayout } from "@/lib/table-layout";
 import { calculateTableFinancials } from "@/lib/table-session-financials";
 import { toQrLanguageDisplayCode } from "@/lib/qr-language-code";
+import { loadQrTableIndicators } from "@/lib/qr-table-indicators";
 import TableManagementClient from "./TableManagementClient";
 import type { RowDataPacket } from "mysql2";
 
@@ -31,6 +32,7 @@ export default async function TableManagementView({ modal = false, closeToPos = 
   }).from(diningTables).where(eq(diningTables.isActive, 1)).orderBy(diningTables.sortOrder),
   db.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId, groupId: tableSessions.groupId, personCount: tableSessions.personCount, babyCount: tableSessions.babyCount, openedAtEpoch: sql<number>`UNIX_TIMESTAMP(${tableSessions.openedAt})` }).from(tableSessions).where(eq(tableSessions.status, "OPEN")),
   db.select({ mergeId: tableSessionMerges.mergeId, sourceSessionId: tableSessionMerges.sourceSessionId, sourceTableId: tableSessionMerges.sourceTableId, destinationSessionId: tableSessionMerges.destinationSessionId, destinationTableId: tableSessionMerges.destinationTableId }).from(tableSessionMerges).where(eq(tableSessionMerges.status, "ACTIVE"))]);
+  const qrTableIndicators = await loadQrTableIndicators();
   const floorSessions = openSessions.filter((session): session is typeof session & { tableId: number } => session.tableId !== null);
   const openSessionIds = new Set(floorSessions.map(session => session.sessionId));
   const activeOpenMerges = activeMerges.filter(merge => openSessionIds.has(merge.sourceSessionId) && openSessionIds.has(merge.destinationSessionId));
@@ -90,6 +92,9 @@ export default async function TableManagementView({ modal = false, closeToPos = 
     amountDue: table.sessionId ? financialsByTableId.get(table.tableId)?.remaining ?? 0 : 0,
     prepaidAmount: table.sessionId ? financialsByTableId.get(table.tableId)?.prepaid ?? 0 : 0,
     hasQrOrder: table.sessionId !== null && qrBySessionId.has(table.sessionId),
+    hasActiveQrToken: qrTableIndicators.get(table.tableId)?.hasActiveQrToken ?? false,
+    hasPendingQrOrder: qrTableIndicators.get(table.tableId)?.hasPendingQrOrder ?? false,
+    hasQrOrderHistory: qrTableIndicators.get(table.tableId)?.hasQrOrderHistory ?? false,
     qrLanguageCode: table.sessionId === null ? null : qrBySessionId.get(table.sessionId) ?? null,
   }))} />;
 }

@@ -1,16 +1,25 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { RowDataPacket } from "mysql2/promise";
 import { db, pool } from "@/db";
-import { diningTables, menus, qrCodes, qrOrderItemOptions, qrOrderItems, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { diningTables, menuCategories, menus, modifierGroups, modifierOptions, orderItemCancellations, orderItemOptions, orderItems, orders as posOrderTable, paymentSessionAllocations, payments, qrCodes, qrOrderItemOptions, qrOrderItems, qrOrders, qrSessions, qrTableLinks, tableSessionDiscounts, tableSessions } from "@/db/schema";
 import { isSameOriginQrRequest } from "@/lib/qr-visit-session";
-import { resolveQrOrderRequest } from "@/lib/qr-order-auth";
+import { classifyQrOrderRequestFailure, resolveQrOrderRequest } from "@/lib/qr-order-auth";
 import { enrichQrCatalog, qrWaitCartTotal, validateQrWaitCart } from "@/lib/qr-wait-order-data";
 import { loadQrMenuCatalog } from "@/lib/qr-menu-catalog";
+import { isQrCookingProgressMenu } from "@/lib/qr-cooking-progress";
+import { isQrMenuAddonGroupName } from "@/lib/qr-menu-addon-model";
+import { buildQrConfirmedOrderSummary } from "@/lib/qr-confirmed-order-summary";
+import { buildOrderSummaryRows } from "@/lib/pos-order-summary-rows";
 
 export const dynamic = "force-dynamic";
 
 type StandardItemRow = RowDataPacket & { orderId: number; orderItemId: number; menuId: number };
-type KdsTaskRow = RowDataPacket & { orderId: number; memberItems: string; kind: string; status: string; postCookTimerMinutes: number | null; postCookTimerStartedAtMs: number | null };
+type KdsTaskRow = RowDataPacket & { orderId: number; memberItems: string; kind: string; status: string; postCookTimerMinutes: number | null; postCookTimerStartedAtMs: number | string | null; cookingStartedAtMs: number | string | null; cookingCompletedAtMs: number | string | null };
+
+const timestampMs = (value: number | string | null | undefined) => {
+  const parsed = value === null || value === undefined ? Number.NaN : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 export async function POST(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403 });
@@ -52,7 +61,7 @@ export async function POST(request: Request) {
         : { kind: "DUPLICATE" as const };
       if (customer.sessionId === null && openSessions.length) return { kind: "JOIN_REQUIRED" as const };
       const [created] = await tx.insert(qrOrders).values({ qrSessionId: customer.qrSessionId, clientRequestId: requestId,
-        status: "PENDING", subtotalAmount: total.toFixed(2), discountAmount: "0.00", totalAmount: total.toFixed(2), orderedAt: new Date() });
+        status: "PENDING", subtotalAmount: total.toFixed(2), discountAmount: "0.00", totalAmount: total.toFixed(2) });
       const qrOrderId = Number(created.insertId);
       for (const entry of lines) {
         const [item] = await tx.insert(qrOrderItems).values({ qrOrderId, menuId: entry.line.menuId, itemName: entry.itemName,
@@ -81,16 +90,99 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const member = await resolveQrOrderRequest(request);
-  if (!member) return Response.json({ success: false }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  if (!member) {
+    try {
+      const accessState = await classifyQrOrderRequestFailure(request);
+      if (accessState === "PAYMENT_COMPLETED") return Response.json({
+        success: true, accessState, canViewOrders: false, orders: [], items: [],
+      }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ success: false, code: accessState }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return Response.json({ success: false, code: "ACCESS_CHECK_FAILED" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+  }
   try {
     const [occupiedTable] = member.sessionId === null ? await db.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
       .where(and(eq(tableSessions.tableId, member.tableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).limit(1) : [];
+    const [activeSession] = member.sessionId === null ? [] : await db.select({
+      personCount: tableSessions.personCount,
+      babyCount: tableSessions.babyCount,
+    }).from(tableSessions).where(and(
+      eq(tableSessions.sessionId, member.sessionId),
+      eq(tableSessions.sessionKind, "DINE_IN"),
+      eq(tableSessions.status, "OPEN"),
+    )).limit(1);
+    const registeredPeople = activeSession ? Number(activeSession.personCount) + Number(activeSession.babyCount) : 0;
+    const totalPersonCount = registeredPeople > 0 ? registeredPeople : null;
     const orderSelection = { qrOrderId: qrOrders.qrOrderId, status: qrOrders.status, totalAmount: qrOrders.totalAmount,
-      orderedAt: qrOrders.orderedAt, acceptedOrderId: qrOrders.acceptedOrderId, acceptedAt: qrOrders.acceptedAt, note: qrOrders.note };
+      orderedAt: sql<string>`CONCAT(DATE_FORMAT(${qrOrders.orderedAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00')`,
+      acceptedOrderId: qrOrders.acceptedOrderId, acceptedAt: qrOrders.acceptedAt, note: qrOrders.note };
     const orders = member.sessionId === null
       ? await db.select(orderSelection).from(qrOrders).where(eq(qrOrders.qrSessionId, member.qrSessionId)).orderBy(asc(qrOrders.orderedAt), asc(qrOrders.qrOrderId))
       : await db.select(orderSelection).from(qrOrders).innerJoin(qrSessions, eq(qrSessions.qrSessionId, qrOrders.qrSessionId))
         .where(eq(qrSessions.sessionId, member.sessionId)).orderBy(asc(qrOrders.orderedAt), asc(qrOrders.qrOrderId));
+    const posOrderRows = member.sessionId === null ? [] : await db.select({ orderId: posOrderTable.orderId, sessionId: posOrderTable.sessionId,
+      orderType: posOrderTable.orderType, status: posOrderTable.status, totalAmount: posOrderTable.totalAmount,
+      orderedAt: sql<string>`CONCAT(DATE_FORMAT(${posOrderTable.orderedAt}, '%Y-%m-%dT%H:%i:%s'), '+09:00')` })
+      .from(posOrderTable).where(and(eq(posOrderTable.sessionId, member.sessionId), eq(posOrderTable.orderType, "POS")))
+      .orderBy(desc(posOrderTable.orderedAt), desc(posOrderTable.orderId));
+    const acceptedQrIdByPosOrderId = new Map(orders.flatMap(order => order.acceptedOrderId === null ? [] : [[Number(order.acceptedOrderId), Number(order.qrOrderId)] as const]));
+    const posOrders = posOrderRows.map(order => ({ ...order, orderId: Number(order.orderId), sessionId: Number(order.sessionId),
+      acceptedQrOrderId: acceptedQrIdByPosOrderId.get(Number(order.orderId)) ?? null }));
+    const posOrderIds = posOrders.map(order => order.orderId);
+    const posItemRows = posOrderIds.length ? await db.select({ orderId: orderItems.orderId, orderItemId: orderItems.orderItemId,
+      parentOrderItemId: orderItems.parentOrderItemId, menuId: orderItems.menuId, actualComponentQty: orderItems.actualComponentQty,
+      itemType: orderItems.itemType, status: orderItems.status, itemName: orderItems.itemName, qty: orderItems.qty,
+      unitPrice: orderItems.unitPrice, totalAmount: orderItems.totalAmount })
+      .from(orderItems).where(inArray(orderItems.orderId, posOrderIds)).orderBy(asc(orderItems.orderedAt), asc(orderItems.orderItemId)) : [];
+    const posItemIds = posItemRows.map(item => Number(item.orderItemId));
+    const posCancellationRows = posItemIds.length ? await db.select({ orderItemId: orderItemCancellations.orderItemId,
+      cancelledQty: orderItemCancellations.cancelledQty, cancelledAmount: orderItemCancellations.cancelledAmount })
+      .from(orderItemCancellations).where(inArray(orderItemCancellations.orderItemId, posItemIds)) : [];
+    const posOptions = posItemIds.length ? await db.select({ orderItemId: orderItemOptions.orderItemId,
+      modifierOptionId: orderItemOptions.modifierOptionId, optionName: orderItemOptions.optionName, qty: orderItemOptions.qty,
+      unitPrice: orderItemOptions.unitPrice, totalAmount: orderItemOptions.totalAmount, groupName: modifierGroups.posName })
+      .from(orderItemOptions).leftJoin(modifierOptions, eq(orderItemOptions.modifierOptionId, modifierOptions.modifierOptionId))
+      .leftJoin(modifierGroups, eq(modifierOptions.modifierGroupId, modifierGroups.modifierGroupId))
+      .where(inArray(orderItemOptions.orderItemId, posItemIds)).orderBy(asc(orderItemOptions.orderItemOptionId)) : [];
+    const cancelledQtyByItem = new Map<number, number>();
+    posCancellationRows.forEach(row => cancelledQtyByItem.set(Number(row.orderItemId),
+      (cancelledQtyByItem.get(Number(row.orderItemId)) ?? 0) + Number(row.cancelledQty)));
+    const posOrderStatusById = new Map(posOrders.map(order => [order.orderId, order.status]));
+    const posItemDetails = posItemRows.map(item => {
+      const orderId = Number(item.orderId);
+      const orderStatus = posOrderStatusById.get(orderId);
+      const orderItemId = Number(item.orderItemId);
+      const originalQty = Number(item.actualComponentQty ?? item.qty);
+      const cancelledQty = cancelledQtyByItem.get(orderItemId) ?? 0;
+      const effectiveQty = orderStatus === "CANCELLED" || item.status === "CANCELLED" ? 0 : Math.max(0, originalQty - cancelledQty);
+      const options = posOptions.filter(option => Number(option.orderItemId) === orderItemId).map(option => ({
+        modifierOptionId: option.modifierOptionId === null ? null : Number(option.modifierOptionId),
+        optionName: option.optionName, qty: Number(option.qty), unitPrice: option.unitPrice,
+        independentQty: isQrMenuAddonGroupName(option.groupName ?? ""),
+      }));
+      const originalAmountCents = Math.round(Number(item.totalAmount) * 100);
+      const independentAddonCents = options.filter(option => option.independentQty)
+        .reduce((sum, option) => sum + Math.round(Number(option.unitPrice) * 100) * option.qty, 0);
+      const effectiveAmountCents = item.itemType === "SERVICE" || effectiveQty <= 0 ? 0
+        : Math.round((originalAmountCents - independentAddonCents) * effectiveQty / Math.max(1, Number(item.qty))) + independentAddonCents;
+      return { ...item, orderId, orderItemId, menuId: Number(item.menuId), parentOrderItemId: item.parentOrderItemId === null ? null : Number(item.parentOrderItemId),
+        qty: Number(item.qty), actualComponentQty: item.actualComponentQty === null ? null : Number(item.actualComponentQty), originalQty,
+        effectiveQty, cancelledQty, effectiveTotalAmount: (effectiveAmountCents / 100).toFixed(2), options };
+    });
+    const sessionDiscountRows = member.sessionId === null ? [] : await db.select({ amount: tableSessionDiscounts.discountAmount })
+      .from(tableSessionDiscounts).where(eq(tableSessionDiscounts.sessionId, member.sessionId));
+    const sessionPaymentRows = member.sessionId === null ? [] : await db.select({ amount: paymentSessionAllocations.appliedAmount })
+      .from(paymentSessionAllocations).innerJoin(payments, eq(paymentSessionAllocations.paymentId, payments.paymentId))
+      .where(and(eq(paymentSessionAllocations.sessionId, member.sessionId), eq(payments.status, "APPROVED")));
+    const confirmedSummary = buildQrConfirmedOrderSummary({
+      orders: posOrders,
+      items: posItemDetails.map(item => ({ ...item, status: item.status,
+        options: item.options.map(option => ({ ...option, totalAmount: (Number(option.unitPrice) * option.qty).toFixed(2) })) })),
+      cancellations: posCancellationRows.map(row => ({ orderItemId: Number(row.orderItemId), cancelledQty: Number(row.cancelledQty) })),
+      discountAmount: sessionDiscountRows.reduce((sum, row) => sum + Number(row.amount), 0),
+      prepaidAmount: sessionPaymentRows.reduce((sum, row) => sum + Number(row.amount), 0),
+    }, buildOrderSummaryRows);
     const ids = orders.map(order => Number(order.qrOrderId));
     const items = ids.length ? await db.select({ qrOrderId: qrOrderItems.qrOrderId, qrOrderItemId: qrOrderItems.qrOrderItemId,
       menuId: qrOrderItems.menuId, itemName: qrOrderItems.itemName, qty: qrOrderItems.qty, unitPrice: qrOrderItems.unitPrice,
@@ -99,7 +191,7 @@ export async function GET(request: Request) {
     const options = itemIds.length ? await db.select({ qrOrderItemId: qrOrderItemOptions.qrOrderItemId,
       optionName: qrOrderItemOptions.optionName, qty: qrOrderItemOptions.qty, totalAmount: qrOrderItemOptions.totalAmount })
       .from(qrOrderItemOptions).where(inArray(qrOrderItemOptions.qrOrderItemId, itemIds)) : [];
-    const taskByItem = new Map<number, { status: string; timerMinutes: number | null; timerStartedAtMs: number | null; kind: string }>();
+    const taskByItem = new Map<number, { status: string; timerMinutes: number | null; timerStartedAtMs: number | string | null; cookingStartedAtMs: number | string | null; cookingCompletedAtMs: number | string | null; kind: string }>();
     const acceptedIds = orders.flatMap(order => order.acceptedOrderId ? [Number(order.acceptedOrderId)] : []);
     const standardItemByQrItem = new Map<number, number>();
     if (acceptedIds.length) {
@@ -116,35 +208,70 @@ export async function GET(request: Request) {
         }
       }
     }
-    if (acceptedIds.length) {
+    if (posOrderIds.length) {
       const [tasks] = await pool.query<KdsTaskRow[]>(
         `SELECT order_id AS orderId, member_items AS memberItems, kind, status,
-          post_cook_timer_minutes AS postCookTimerMinutes, post_cook_timer_started_at_ms AS postCookTimerStartedAtMs
-         FROM kds_tasks WHERE order_id IN (${acceptedIds.map(() => "?").join(",")})`, acceptedIds);
+          post_cook_timer_minutes AS postCookTimerMinutes, post_cook_timer_started_at_ms AS postCookTimerStartedAtMs,
+          cooking_started_at_ms AS cookingStartedAtMs, cooking_completed_at_ms AS cookingCompletedAtMs
+         FROM kds_tasks WHERE order_id IN (${posOrderIds.map(() => "?").join(",")})`, posOrderIds);
       for (const task of tasks) {
         try {
           for (const memberItem of JSON.parse(task.memberItems) as Array<{ itemId?: number; kind?: string }>) {
             if (memberItem.kind !== "COMPONENT" && Number.isInteger(memberItem.itemId)) taskByItem.set(memberItem.itemId!, {
-              status: task.status, timerMinutes: task.postCookTimerMinutes, timerStartedAtMs: task.postCookTimerStartedAtMs, kind: task.kind });
+              status: task.status, timerMinutes: task.postCookTimerMinutes, timerStartedAtMs: task.postCookTimerStartedAtMs,
+              cookingStartedAtMs: task.cookingStartedAtMs, cookingCompletedAtMs: task.cookingCompletedAtMs, kind: task.kind });
           }
         } catch { /* malformed historical KDS snapshot: omit progress for this task */ }
       }
     }
-    const menuIds = [...new Set(items.map(item => Number(item.menuId)))];
-    const menuKinds = menuIds.length ? await db.select({ menuId: menus.menuId, kdsKind: menus.kdsKind, postCookTimer: menus.kdsPostCookTimer })
-      .from(menus).where(inArray(menus.menuId, menuIds)) : [];
-    const kindByMenu = new Map(menuKinds.map(menu => [Number(menu.menuId), { kdsKind: menu.kdsKind, postCookTimer: menu.postCookTimer === 1 }]));
+    const menuIds = [...new Set([...items.map(item => Number(item.menuId)), ...posItemDetails.map(item => item.menuId)])];
+    const menuKinds = menuIds.length ? await db.select({ menuId: menus.menuId, kdsKind: menus.kdsKind, kdsVisible: menus.kdsVisible,
+      postCookTimer: menus.kdsPostCookTimer, categoryName: menuCategories.posName })
+      .from(menus).leftJoin(menuCategories, eq(menus.categoryId, menuCategories.categoryId)).where(inArray(menus.menuId, menuIds)) : [];
+    const kindByMenu = new Map(menuKinds.map(menu => [Number(menu.menuId), {
+      kdsKind: menu.kdsKind, kdsVisible: menu.kdsVisible === 1, postCookTimer: menu.postCookTimer === 1, categoryName: menu.categoryName,
+    }]));
     const stageItems = items.map(item => {
       const kds = taskByItem.get(standardItemByQrItem.get(Number(item.qrOrderItemId)) ?? -1);
       const menu = kindByMenu.get(Number(item.menuId));
-      const stage = !menu || menu.kdsKind === "NONE" ? null : !kds ? "WAITING" : kds.status;
-      const timerEndsAtMs = kds?.status === "DONE" && menu?.postCookTimer && kds.timerMinutes && kds.timerStartedAtMs
-        ? kds.timerStartedAtMs + (kds.timerMinutes * 60 + 30) * 1000 : null;
+      const stage = !menu || !menu.kdsVisible || menu.kdsKind === "NONE" ? null : !kds ? "WAITING" : kds.status;
+      const timerStartedAtMs = kds?.status === "DONE" ? timestampMs(kds.timerStartedAtMs) : null;
+      const timerMinutes = kds?.status === "DONE" && Number.isInteger(Number(kds.timerMinutes)) && Number(kds.timerMinutes) > 0
+        ? Number(kds.timerMinutes) : null;
       return { ...item, qrOrderItemId: Number(item.qrOrderItemId), qty: Number(item.qty), options: options.filter(option => Number(option.qrOrderItemId) === Number(item.qrOrderItemId)),
-        kdsKind: menu?.kdsKind ?? "NONE", stage, timerEndsAtMs };
+        kdsKind: menu?.kdsKind ?? "NONE", stage, kdsStartedAtMs: timestampMs(kds?.cookingStartedAtMs),
+        kdsCompletedAtMs: timestampMs(kds?.cookingCompletedAtMs), postCookTimerEligible: Boolean(menu?.kdsVisible && menu.kdsKind === "POT" && menu.postCookTimer),
+        postCookTimerMinutes: timerMinutes, postCookTimerStartedAtMs: timerStartedAtMs,
+        showCookingProgress: menu ? isQrCookingProgressMenu({ categoryName: menu.categoryName, kdsKind: menu.kdsKind,
+          kdsVisible: menu.kdsVisible }) : false };
     });
-    return Response.json({ success: true, tableNo: member.tableNo, capacity: member.capacity, qrSessionId: member.qrSessionId, isTest: member.isTest, canViewOrders: member.canViewOrders, needsJoin: Boolean(occupiedTable),
-      serverNow: Date.now(), orders, items: stageItems }, { headers: { "Cache-Control": "no-store" } });
+    const stagePosItems = posItemDetails.map(item => {
+      const kds = taskByItem.get(item.orderItemId);
+      const menu = kindByMenu.get(item.menuId);
+      const stage = !menu || !menu.kdsVisible || menu.kdsKind === "NONE" ? null : !kds ? "WAITING" : kds.status;
+      return { ...item, kdsKind: menu?.kdsKind ?? "NONE", stage,
+        postCookTimerEligible: Boolean(menu?.kdsVisible && menu.kdsKind === "POT" && menu.postCookTimer),
+        postCookTimerMinutes: kds?.status === "DONE" && Number.isInteger(Number(kds.timerMinutes)) && Number(kds.timerMinutes) > 0 ? Number(kds.timerMinutes) : null,
+        postCookTimerStartedAtMs: kds?.status === "DONE" ? timestampMs(kds.timerStartedAtMs) : null,
+        showCookingProgress: menu ? isQrCookingProgressMenu({ categoryName: menu.categoryName, kdsKind: menu.kdsKind,
+          kdsVisible: menu.kdsVisible }) : false };
+    });
+    return Response.json({ success: true, tableNo: member.tableNo, capacity: member.capacity, qrSessionId: member.qrSessionId, isTest: member.isTest, canViewOrders: member.canViewOrders, needsJoin: Boolean(occupiedTable), totalPersonCount,
+      serverNow: Date.now(), orders, items: stageItems,
+      posOrders: posOrders.map(order => ({ orderId: order.orderId, acceptedQrOrderId: order.acceptedQrOrderId, status: order.status, totalAmount: order.totalAmount, orderedAt: order.orderedAt })),
+      posItems: stagePosItems.map(item => ({ orderId: item.orderId, orderItemId: item.orderItemId, parentOrderItemId: item.parentOrderItemId,
+        menuId: item.menuId, itemType: item.itemType, status: item.status, itemName: item.itemName, qty: item.qty, originalQty: item.originalQty,
+        effectiveQty: item.effectiveQty, cancelledQty: item.cancelledQty, unitPrice: item.unitPrice, totalAmount: item.totalAmount,
+        effectiveTotalAmount: item.effectiveTotalAmount, kdsKind: item.kdsKind, stage: item.stage, postCookTimerEligible: item.postCookTimerEligible,
+        postCookTimerMinutes: item.postCookTimerMinutes, postCookTimerStartedAtMs: item.postCookTimerStartedAtMs, showCookingProgress: item.showCookingProgress,
+        options: item.options.map(option => ({ modifierOptionId: option.modifierOptionId, optionName: option.optionName, qty: option.qty,
+          unitPrice: option.unitPrice, independentQty: option.independentQty })) })),
+      confirmedSummary: { items: confirmedSummary.rows.map(row => ({ menuId: row.rowKey, itemName: row.name, qty: row.qty,
+        totalAmount: row.total, optionLabel: row.optionLabel ?? "", itemType: row.itemType ?? "NORMAL",
+        components: row.components.map(component => ({ itemName: component.name, qty: component.qty, totalAmount: component.total })) })),
+        grossAmount: confirmedSummary.grossAmount, discountAmount: confirmedSummary.discountAmount, prepaidAmount: confirmedSummary.prepaidAmount,
+        totalAmount: confirmedSummary.totalAmount, receivableAmount: confirmedSummary.receivableAmount } },
+    { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ success: false, message: "주문내역을 불러오지 못했습니다." }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }

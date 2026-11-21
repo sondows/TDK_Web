@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import QRCode from "qrcode";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { qrOriginHasDisplayText, qrOriginTextRuns } from "@/lib/qr-menu-description-model";
+import { hasQrOrderHistory } from "@/lib/qr-order-history-model";
 import { addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartTotal, qrImmediateAddLine, qrMenuAddonGroups, qrOtherOptionalGroups,
   QR_CART_STORAGE_KEY, qrLineItemCount, qrLineTotal, qrLocaleFromPreferences,
   selectedQrOptions, splitQrCartAddonLines, validQrSelections, isQrSpiceGroupName, type QrCartLine, type QrCatalog, type QrLocale, type QrMenu } from "@/lib/qr-menu-cart";
 import { acknowledgeQrCartEvents, appendQrCartEvents, normalizeQrCartEventOutbox, QR_CART_EVENT_BATCH_SIZE, QR_CART_EVENT_OUTBOX_KEY,
   qrCartEventSourceFromSearch, type QrCartAnalyticsEvent, type QrCartEventSource, type QrCartEventType } from "@/lib/qr-cart-analytics";
-import QrStoreTitle, { type QrTitleSnapDetail } from "./QrStoreTitle";
+import QrStoreTitle from "./QrStoreTitle";
 import QrTitleCarousel from "./QrTitleCarousel";
-import QrOrderTitleBar from "@/app/qrorder/QrOrderTitleBar";
+import QrDoubleDivider from "./QrDoubleDivider";
+import QrMenuAddIcon from "@/components/QrMenuAddIcon";
 import { qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, type QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
 
@@ -35,13 +38,6 @@ function won(value: number, locale: QrLocale = "ko") {
 function menuCardPrice(value: number, locale: QrLocale) {
   if (locale === "ko") return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(Math.round(value))}원`;
   return won(value, locale);
-}
-
-function QrDoubleDivider({ fullBleed = false }: { fullBleed?: boolean }) {
-  return <div aria-hidden="true" className={`relative h-4 bg-slate-50 ${fullBleed ? "left-1/2 z-[2] w-screen -translate-x-1/2" : "w-full"}`}>
-    <span className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-px bg-[#D0D8E2]" style={{ boxShadow: "0 3px 3px rgba(0, 0, 0, 0.2)" }} />
-    <span className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[#E5EAF0]" />
-  </div>;
 }
 
 function qrOptionLabel(option: { optionName: string; qrDescription?: string }, locale: QrLocale) {
@@ -109,6 +105,18 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const originDragStartRef = useRef<number | null>(null);
   const addSubmittedRef = useRef(false);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [frontQrExited, setFrontQrExited] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
+  const [exitError, setExitError] = useState("");
+  const [historyNoticeMessage, setHistoryNoticeMessage] = useState("");
+  const [tableQrOpen, setTableQrOpen] = useState(false);
+  const [tableQrBusy, setTableQrBusy] = useState(false);
+  const [tableQrError, setTableQrError] = useState("");
+  const [tableQrUrl, setTableQrUrl] = useState("");
+  const [tableQrImage, setTableQrImage] = useState("");
+  const [tableQrNo, setTableQrNo] = useState<string | number | null>(null);
+  const [tableQrNotice, setTableQrNotice] = useState("");
   const [selections, setSelections] = useState<Record<number, number[]>>({});
   const [addonQuantities, setAddonQuantities] = useState<Record<number, number>>({});
   const [quantity, setQuantity] = useState(1);
@@ -127,7 +135,6 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const categoryTabNavRef = useRef<HTMLElement>(null);
   const categoryTabRefs = useRef(new Map<number, HTMLButtonElement>());
   const menuRowRefs = useRef(new Map<number, HTMLElement>());
-  const titleSnapHandlerRef = useRef<((detail: QrTitleSnapDetail) => void) | null>(null);
   const menuBottomSpacerRef = useRef<HTMLDivElement>(null);
   const categoryScrollProgrammaticRef = useRef(false);
   const categoryScrollSettleTimerRef = useRef<number | null>(null);
@@ -1043,14 +1050,140 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     finally { setWaitBusy(false); }
   };
 
+  const requestQrExit = () => {
+    if (waitingMode || (tableOrderMode && !cartReady)) return;
+    setExitError("");
+    setHistoryNoticeMessage("");
+    if (tableOrderMode && cart.length === 0) {
+      void moveToTableOrderHistory();
+      return;
+    }
+    setExitDialogOpen(true);
+  };
+
+  const moveToTableOrderHistory = async () => {
+    setExitBusy(true);
+    setExitError("");
+    try {
+      const response = await fetch("/api/qr/table-orders", { cache: "no-store", credentials: "same-origin" });
+      const payload = await response.json() as { success?: boolean; tableNo?: string; orders?: unknown[] };
+      if (!response.ok || !payload.success || !payload.tableNo) {
+        throw new Error("유효한 테이블 주문 인증을 확인할 수 없습니다. 테이블 QR을 다시 스캔해 주세요.");
+      }
+      if (!Array.isArray(payload.orders)) throw new Error("주문내역을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      if (!hasQrOrderHistory(payload.orders)) {
+        const message = "아직 주문내역이 없습니다.";
+        if (cart.length > 0) setExitError(message);
+        else setHistoryNoticeMessage(message);
+        return;
+      }
+      router.push("/qrorder");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "주문내역으로 이동하지 못했습니다.";
+      if (cart.length > 0) {
+        setExitError(message);
+        setExitDialogOpen(true);
+      } else {
+        setHistoryNoticeMessage(message);
+      }
+    } finally {
+      setExitBusy(false);
+    }
+  };
+
+  const openTableQrShare = async () => {
+    setTableQrOpen(true);
+    setTableQrBusy(true);
+    setTableQrError("");
+    setTableQrNotice("");
+    setTableQrUrl("");
+    setTableQrImage("");
+    setTableQrNo(null);
+    try {
+      const response = await fetch("/api/qr/table-order-link", { cache: "no-store", credentials: "same-origin" });
+      const payload = await response.json().catch(() => null) as { success?: boolean; url?: unknown; tableNo?: unknown } | null;
+      if (!response.ok || !payload?.success || typeof payload.url !== "string" || typeof payload.tableNo !== "string") {
+        setTableQrError(response.status === 401
+          ? "테이블 QR 인증이 만료되었습니다. 테이블 QR을 다시 스캔해 주세요."
+          : "현재 테이블의 주문 QR을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+      const image = await QRCode.toDataURL(payload.url, { width: 320, margin: 2, errorCorrectionLevel: "H" });
+      setTableQrNo(payload.tableNo);
+      setTableQrUrl(payload.url);
+      setTableQrImage(image);
+    } catch {
+      setTableQrError("현재 테이블의 주문 QR을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setTableQrBusy(false);
+    }
+  };
+
+  const copyTableQrLink = async () => {
+    if (!tableQrUrl) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(tableQrUrl);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = tableQrUrl;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        const copied = document.execCommand("copy");
+        input.remove();
+        if (!copied) throw new Error("Clipboard copy failed");
+      }
+      setTableQrNotice("주문 링크를 복사했습니다.");
+    } catch {
+      setTableQrNotice("링크를 복사하지 못했습니다. QR코드를 스캔하거나 공유하기를 이용해 주세요.");
+    }
+  };
+
+  const shareTableQrLink = async () => {
+    if (!tableQrUrl) {
+      setTableQrNotice("QR 링크를 아직 불러오지 못했습니다.");
+      return;
+    }
+    if (!navigator.share) {
+      setTableQrNotice("이 브라우저에서는 공유 기능을 지원하지 않습니다. 링크 복사를 이용해 주세요.");
+      return;
+    }
+    try {
+      await navigator.share({ title: "탑동김치찌개 함께 주문하기", text: "같은 테이블에서 함께 메뉴를 골라주세요.", url: tableQrUrl });
+      setTableQrNotice("");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      setTableQrNotice("공유를 열지 못했습니다. 링크 복사를 이용해 주세요.");
+    }
+  };
+
+  useEffect(() => {
+    if (!tableQrOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [tableQrOpen]);
+
+  const finishFrontQr = () => {
+    setExitDialogOpen(false);
+    try { window.close(); } catch { /* Browsers may refuse closing a tab not opened by script. */ }
+    window.setTimeout(() => setFrontQrExited(true), 200);
+  };
+
+  if (frontQrExited) return <main className="grid min-h-svh place-items-center bg-white px-6 text-center text-slate-900">
+    <p className="text-lg font-bold">메뉴 둘러보기를 종료했습니다.</p>
+  </main>;
+
   return <main className="min-h-svh bg-white text-slate-900" style={{ paddingBottom: `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
-    {tableOrderMode && <QrOrderTitleBar fetchTableNo fixedImageOverlay snapHandlerRef={titleSnapHandlerRef} title="주문하기" />}
     {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 bottom-[69.6px] z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status">{quickAddFeedback}</div>}
-    {titleData.photos.length > 0 && <QrTitleCarousel fixedHero photos={titleData.photos} />}
+    {titleData.photos.length > 0 && <QrTitleCarousel exitDisabled={tableOrderMode && !cartReady} fixedHero onExitRequest={!waitingMode ? requestQrExit : undefined} photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>
     {titleData.photos.length > 0 && <span aria-hidden="true" className="absolute left-0 top-0 h-px w-px" data-qr-content-start />}
     <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-white top-[var(--qr-menu-backdrop-top,0px)]" data-qr-menu-backdrop />
-    <QrStoreTitle fixedHero={titleData.photos.length > 0} snapEnabled={titleData.photos.length > 0} notices={notices} settings={titleData} snapHandlerRef={titleSnapHandlerRef} />
+    <QrStoreTitle fixedHero={titleData.photos.length > 0} menuOrderHeader notices={notices} onShareTableQr={tableOrderMode ? () => void openTableQrShare() : undefined} screenSettings={tableOrderMode ? titleData.screenSettings : undefined} settings={titleData} snapEnabled={titleData.photos.length > 0} tableOrderMode={tableOrderMode} />
     <header data-qr-header className="sticky top-0 z-20 border-b border-slate-200 bg-transparent px-3 py-2 data-[qr-stuck=true]:bg-white">
       <nav aria-label="메뉴 분류" className="mx-auto flex max-w-2xl gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={categoryTabNavRef}>
         {catalog?.categories.map(category => { const active = selectedCategoryId === category.categoryId; return <button aria-current={active ? "location" : undefined} aria-pressed={active} className={`min-h-10 shrink-0 rounded-lg px-3 text-center text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-800 ${active ? "bg-[#777777] text-white" : "bg-transparent text-[#777777]"}`} key={category.categoryId} onClick={() => selectCategory(category.categoryId)} ref={element => {
@@ -1102,10 +1235,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
                       event.preventDefault();
                       event.stopPropagation();
                       quickAddMenu(menu);
-                    }} type="button"><svg aria-hidden="true" className="pointer-events-none h-[25px] w-[25px] overflow-visible" fill="none" viewBox="0 0 256 256">
-                      <g stroke="#FFFFFF" strokeLinecap="round" strokeLinejoin="round" strokeWidth="44"><path d="M34 58h22c8 0 14 5 16 13l20 92c2 8 9 14 17 14h79c8 0 15-6 17-14l17-71" /><path d="M145 78v58M116 107h58" /><circle cx="116" cy="207" r="14" /><circle cx="184" cy="207" r="14" /></g>
-                      <g stroke="#1769D2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"><path d="M34 58h22c8 0 14 5 16 13l20 92c2 8 9 14 17 14h79c8 0 15-6 17-14l17-71" /><path d="M145 78v58M116 107h58" /><circle cx="116" cy="207" r="14" /><circle cx="184" cy="207" r="14" /></g>
-                    </svg></button>}
+                    }} type="button"><QrMenuAddIcon className="pointer-events-none h-[25px] w-[25px] overflow-visible" /></button>}
                   </div>
                 </article>;
               })}</div>
@@ -1116,8 +1246,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     </div>
 
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
-    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl bg-blue-700 pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
-      <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex shrink-0 flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
+    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
+      <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex shrink-0 flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
         <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />
         {cartHeaderVisible && <span className="flex w-full max-w-xl items-center justify-between gap-3">
           <span className="flex min-w-0 items-center gap-2 font-extrabold"><svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 1.9-1.4L22 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span>{t.cart}</span><span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{itemCount}{t.count}</span></span>
@@ -1130,7 +1260,23 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
             const menu = catalog?.menus.find(item => item.menuId === line.menuId);
             if (!menu) return null;
             const optionNames = line.options.map(selected => { const group = menu.groups.find(candidate => candidate.options.some(option => option.modifierOptionId === selected.modifierOptionId)); const option = group?.options.find(candidate => candidate.modifierOptionId === selected.modifierOptionId); return option ? `${option.optionName}${group?.source === "MENU_ADDON" ? ` ×${selected.qty}` : ""}` : ""; }).filter(Boolean);
-            return <div className="py-3" key={line.menuId + "-" + line.options.map(option => option.modifierOptionId).join("-") + "-" + index}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><strong className="block truncate">{menu.name}</strong>{optionNames.length > 0 && <p className="mt-1 text-xs text-slate-500">{optionNames.join("\u00b7")}</p>}<p className="mt-1 text-sm font-bold tabular-nums">{formatQrCartPrice(qrLineTotal(menu, line.options, line.qty))}</p></div><div className="flex shrink-0 items-center gap-2"><button aria-label={menu.name + " " + t.qty + " -"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, -1)} type="button">-</button><span className="min-w-5 text-center tabular-nums">{line.qty}</span><button aria-label={menu.name + " " + t.qty + " +"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, 1)} type="button">+</button><button aria-label={menu.name + " " + t.remove} className="ml-1 px-2 py-2 text-xs font-semibold text-red-600" onClick={() => removeCartLine(line)} type="button">{t.remove}</button></div></div></div>;
+            return <div className="py-3" key={line.menuId + "-" + line.options.map(option => option.modifierOptionId).join("-") + "-" + index}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <strong className={optionNames.length ? "max-w-[70%] shrink-0 truncate" : "min-w-0 flex-1 truncate"}>{menu.name}</strong>
+                    {optionNames.length > 0 && <span className="min-w-0 flex-1 truncate text-xs font-normal text-slate-500">{optionNames.join(" · ")}</span>}
+                  </div>
+                  <p className="mt-1 text-sm font-bold tabular-nums">{formatQrCartPrice(qrLineTotal(menu, line.options, line.qty))}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button aria-label={menu.name + " " + t.qty + " -"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, -1)} type="button">-</button>
+                  <span className="min-w-5 text-center tabular-nums">{line.qty}</span>
+                  <button aria-label={menu.name + " " + t.qty + " +"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, 1)} type="button">+</button>
+                  <button aria-label={menu.name + " " + t.remove} className="ml-1 px-2 py-2 text-xs font-semibold text-red-600" onClick={() => removeCartLine(line)} type="button">{t.remove}</button>
+                </div>
+              </div>
+            </div>;
           })}</div>}
         </div>
         <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl"><div className="flex items-center justify-between text-lg font-extrabold"><span>{t.total}</span><span className="tabular-nums">{formatQrCartPrice(total)}</span></div>
@@ -1304,6 +1450,56 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     </section></div>}
 
     </div>
+    {tableQrOpen && <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-4" onClick={() => setTableQrOpen(false)}>
+      <section aria-labelledby="qr-table-share-title" aria-modal="true" className="max-h-[min(92dvh,44rem)] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5 shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="dialog">
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900" id="qr-table-share-title">함께 주문하기</h2>
+            {tableQrNo !== null && <p className="mt-1 text-sm font-semibold text-slate-600">{tableQrNo} 테이블</p>}
+          </div>
+          <button aria-label="닫기" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-700" onClick={() => setTableQrOpen(false)} type="button">
+            <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </header>
+        <p className="mt-3 text-center text-sm text-slate-600">함께 주문할 사람에게 QR을 공유하세요.</p>
+        <div className="mx-auto mt-4 grid aspect-square w-[min(72vw,18rem)] place-items-center rounded-2xl border border-slate-200 bg-white p-2">
+          {tableQrBusy
+            ? <span className="text-sm font-medium text-slate-500">주문 QR을 불러오는 중…</span>
+            : tableQrImage
+              ? <Image alt={`${tableQrNo ?? "현재 테이블"} 테이블 함께 주문 QR`} className="h-full w-full object-contain" height={320} priority src={tableQrImage} unoptimized width={320} />
+              : <span className="px-4 text-center text-sm font-medium text-slate-500">QR을 표시할 수 없습니다.</span>}
+        </div>
+        {tableQrError && <p className="mt-3 text-center text-sm font-semibold text-red-700" role="alert">{tableQrError}</p>}
+        {tableQrNotice && <p className="mt-3 text-center text-sm font-semibold text-slate-700" role="status">{tableQrNotice}</p>}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button className="min-h-12 rounded-xl border border-blue-700 px-3 font-bold text-blue-700 disabled:opacity-50" disabled={!tableQrUrl || tableQrBusy} onClick={() => void copyTableQrLink()} type="button">링크 복사</button>
+          <button className="min-h-12 rounded-xl bg-blue-700 px-3 font-bold text-white disabled:opacity-50" disabled={!tableQrUrl || tableQrBusy} onClick={() => void shareTableQrLink()} type="button">공유하기</button>
+        </div>
+      </section>
+    </div>}
+    {historyNoticeMessage && <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4" onClick={() => setHistoryNoticeMessage("")}>
+      <section aria-labelledby="qr-history-notice-title" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="alertdialog">
+        <h2 className="text-lg font-extrabold" id="qr-history-notice-title">주문내역</h2>
+        <p className="mt-2 text-sm text-slate-600">{historyNoticeMessage}</p>
+        <button className="mt-5 min-h-12 w-full rounded-xl bg-blue-700 font-bold text-white" onClick={() => setHistoryNoticeMessage("")} type="button">확인</button>
+      </section>
+    </div>}
+    {exitDialogOpen && <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4" onClick={() => { if (!exitBusy) setExitDialogOpen(false); }}>
+      <section aria-labelledby="qr-exit-title" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="dialog">
+        <h2 className="text-lg font-extrabold" id="qr-exit-title">{tableOrderMode ? "주문내역으로 이동할까요?" : "TDKON을 종료할까요?"}</h2>
+        {tableOrderMode && cart.length > 0 && <p className="mt-2 text-sm text-slate-600">장바구니에 담긴 메뉴가 있습니다.</p>}
+        {exitError && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{exitError}</p>}
+        {tableOrderMode
+          ? <div className="mt-5 grid grid-cols-2 gap-2">
+              <button className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-700 disabled:opacity-50" disabled={exitBusy} onClick={() => { setExitDialogOpen(false); setExitError(""); }} type="button">계속 주문</button>
+              <button className="min-h-12 rounded-xl bg-blue-700 px-3 font-bold text-white disabled:opacity-50" disabled={exitBusy || exitError === "아직 주문내역이 없습니다."} onClick={() => void moveToTableOrderHistory()} type="button">{exitBusy ? "확인 중..." : "주문내역"}</button>
+            </div>
+          : <div className="mt-5 grid grid-cols-2 gap-2">
+              <button className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-700" onClick={() => setExitDialogOpen(false)} type="button">취소</button>
+              <button className="min-h-12 rounded-xl bg-slate-900 px-3 font-bold text-white" onClick={finishFrontQr} type="button">종료</button>
+            </div>}
+      </section>
+    </div>}
     {detailGalleryOpen && currentMenu && currentDetailImages.length > 0 && <div aria-label={`${currentMenu.name} 이미지 갤러리`} aria-modal="true" className="fixed inset-0 z-[100] flex h-[100dvh] w-full touch-none select-none flex-col items-center justify-center bg-black text-white" onClick={event => event.stopPropagation()} role="dialog" onWheel={event => {
       event.preventDefault();
       const nextScale = Math.max(1, Math.min(4, galleryScale * (event.deltaY < 0 ? 1.15 : 0.87)));
