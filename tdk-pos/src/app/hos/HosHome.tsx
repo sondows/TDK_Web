@@ -17,6 +17,7 @@ import type { QrOrderTableListItem } from "@/lib/qr-orders-list-model";
 import { shouldOpenQrOrdersForTable } from "@/lib/qr-order-notification-model";
 import { POS_IDLE_RESET_ACTIVITY_EVENTS } from "@/lib/pos-idle-reset";
 import { formatHosNavBadge } from "@/lib/hos-nav-counts";
+import { shouldShowHosEmptyTableState } from "@/lib/hos-table-view-state";
 
 type TableRow = {
   tableId: number; tableNo: string; tableName: string | null; positionX: number; positionY: number;
@@ -236,8 +237,8 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
         if (Number.isSafeInteger(result.qrPendingOrderCount) && Number(result.qrPendingOrderCount) >= 0) setQrPendingOrderCount(Number(result.qrPendingOrderCount));
         setDividerPositions(Array.isArray(result.dividerPositions) ? result.dividerPositions : []);
         setError("");
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "테이블 정보를 불러오지 못했습니다.");
+      } catch {
+        setError("테이블 정보를 불러오지 못했습니다.");
       } finally {
         setRefreshing(false);
         setManualRefreshing(false);
@@ -1352,7 +1353,10 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
         <button aria-label={"\uC8FC\uBB38\uD558\uAE30 \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC00\uAE30"} className="flex min-h-11 min-w-0 items-center gap-1.5 bg-transparent pr-2 text-2xl font-bold text-slate-700" onClick={() => setScreen("detail")} type="button"><svg aria-hidden="true" className="size-6 shrink-0" fill="none" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" /></svg><span>{"\uC8FC\uBB38\uD558\uAE30"}</span></button>
       </div>
     </header>}
-    {error && <div className={`mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">{error}</div>}
+    {error && <div className={`mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 ${screen === "detail" ? "text-[17px]" : "text-sm"} font-semibold text-red-700`} role="alert">
+      <span>{error}</span>
+      {screen === "tables" && <button className="shrink-0 rounded-md border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 disabled:opacity-50" disabled={refreshing} onClick={() => void loadTables(true)} type="button">{refreshing ? "조회 중" : "다시 시도"}</button>}
+    </div>}
 
     {customerError && <div className="mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700" role="alert">{customerError}</div>}
     {screen === "customer" && <section className="flex min-h-0 flex-1 flex-col">
@@ -1419,8 +1423,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
             ? tables.find(candidate => candidate.tableNo === table.mergedIntoTableNo) : null;
           void openTable(destination ?? table);
         }} />
-        : !refreshing && <p className="mx-auto grid min-h-40 max-w-[900px] place-items-center rounded-xl border border-slate-300 bg-white text-sm text-slate-500">사용 가능한 테이블이 없습니다.</p>}
-      <p className="mt-2 text-center text-xs text-slate-500">QR 주문 승인 기능은 아직 연결되어 있지 않습니다.</p>
+        : shouldShowHosEmptyTableState(tables.length, refreshing, error) && <p className="mx-auto grid min-h-40 max-w-[900px] place-items-center rounded-xl border border-slate-300 bg-white text-sm text-slate-500">사용 가능한 테이블이 없습니다.</p>}
     </section>}
     {screen === "qrOrders" && <section className="flex min-h-0 flex-1 overflow-hidden px-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]"><HosQrPendingOrders onBlockingUiChange={setQrOrdersBlockingUiOpen} onChanged={() => void loadTables(true)} onPendingCountChange={setQrPendingOrderCount} /></section>}
 

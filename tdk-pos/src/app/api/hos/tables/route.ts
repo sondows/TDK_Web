@@ -11,8 +11,16 @@ export async function GET() {
     const result = await loadHosTables();
     return Response.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    console.error("HOS table list unavailable", { code: (error as { code?: string }).code });
-    return Response.json({ success: false, message: "HOS table data unavailable." }, { status: 503,
+    const rootCause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+    const databaseError = rootCause as Error & { code?: string; errno?: number; sqlState?: string; sqlMessage?: string };
+    console.error("HOS table list unavailable", {
+      name: error instanceof Error ? error.name : undefined,
+      code: databaseError.code,
+      errno: databaseError.errno,
+      sqlState: databaseError.sqlState,
+      message: databaseError.sqlMessage ?? databaseError.message,
+    });
+    return Response.json({ success: false, message: "테이블 정보를 불러오지 못했습니다." }, { status: 503,
       headers: { "Cache-Control": "no-store" } });
   }
 }

@@ -158,7 +158,7 @@ export async function loadHosTables(includeHidden = false) {
     qrOrderTables: [...qrTableIndicators.values()],
     storeOrderTableCount,
     qrPendingOrderCount,
-    qrOrdersAvailable: false,
+    qrOrdersAvailable: true,
     dividerPositions: parseHosDividerPositions(dividerSettings[0]?.settingValue),
   };
 }

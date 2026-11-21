@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getHosQrOrderNetworkError, getHosQrOrderResponseError } from "@/lib/hos-qr-order-errors";
 
 type PendingQrOrder = {
   qrOrderId: number;
@@ -57,14 +58,18 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
     const requestSequence = ++requestSequenceRef.current;
     try {
       const response = await fetch("/api/pos/qr-table-orders", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; orders?: PendingQrOrder[]; message?: string };
-      if (!response.ok || !result.success || !Array.isArray(result.orders)) throw new Error(result.message || "QR 주문 목록을 불러오지 못했습니다.");
+      const result = await response.json().catch(() => null) as { success?: boolean; orders?: PendingQrOrder[]; message?: string } | null;
+      if (response.status === 401) window.dispatchEvent(new Event("tdk-hos-session-expired"));
+      if (!response.ok) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "load"));
+      if (!result?.success || !Array.isArray(result.orders)) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "load"));
       if (requestSequence !== requestSequenceRef.current) return;
       setOrders(result.orders);
       onPendingCountChange?.(result.orders.length);
       setLoadError("");
     } catch (cause) {
-      if (requestSequence === requestSequenceRef.current) setLoadError(cause instanceof Error ? cause.message : "QR 주문 목록을 불러오지 못했습니다.");
+      if (requestSequence === requestSequenceRef.current) setLoadError(cause instanceof TypeError
+        ? getHosQrOrderNetworkError("load")
+        : cause instanceof Error ? cause.message : getHosQrOrderResponseError(0, null, "load"));
     } finally {
       if (requestSequence === requestSequenceRef.current) setLoaded(true);
       loadInFlightRef.current = false;
@@ -99,15 +104,19 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrOrderId, action }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
-      if (!response.ok || !result.success) throw new Error(result.message || "QR 주문을 처리하지 못했습니다.");
+      const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+      if (response.status === 401) window.dispatchEvent(new Event("tdk-hos-session-expired"));
+      if (!response.ok) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "decision"));
+      if (!result?.success) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "decision"));
       requestSequenceRef.current += 1;
       setOrders(current => current.filter(order => order.qrOrderId !== qrOrderId));
       onPendingCountChange?.(Math.max(0, orders.length - 1));
       setRejectPromptId(null);
       onChanged?.();
     } catch (cause) {
-      setDecisionError(cause instanceof Error ? cause.message : "QR 주문을 처리하지 못했습니다.");
+      setDecisionError(cause instanceof TypeError
+        ? getHosQrOrderNetworkError("decision")
+        : cause instanceof Error ? cause.message : getHosQrOrderResponseError(0, null, "decision"));
       void loadPendingOrders();
     } finally {
       processingIdRef.current = null;
@@ -117,10 +126,14 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
 
   return <div className="mx-auto h-full min-h-0 w-full max-w-3xl overflow-y-auto overscroll-contain px-2 pb-5" data-hos-qr-pending-orders>
     {decisionError && rejectPromptId === null && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" role="alert">{decisionError}</p>}
-    {loadError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" role="alert">{loadError}</p>}
+    {loadError && <div className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" role="alert">
+      <span>{loadError}</span>
+      <button className="shrink-0 rounded-md border border-red-200 px-2.5 py-1.5 text-xs font-bold" onClick={() => void loadPendingOrders()} type="button">다시 시도</button>
+    </div>}
     {!loaded && !loadError ? <p className="grid min-h-32 place-items-center text-sm text-slate-500">QR 주문을 불러오는 중입니다.</p>
       : !loaded && loadError ? null
-      : orders.length === 0 ? loadError ? null : <p className="grid min-h-48 place-items-center text-center text-sm font-medium text-slate-500">대기 중인 QR 주문이 없습니다.</p>
+      : loadError ? null
+      : orders.length === 0 ? <p className="grid min-h-48 place-items-center text-center text-sm font-medium text-slate-500">승인 대기 중인 QR 주문이 없습니다.</p>
         : <div>
           {orders.map((order, index) => <div key={order.qrOrderId}>
             {index > 0 && <QrReceiptDivider />}
