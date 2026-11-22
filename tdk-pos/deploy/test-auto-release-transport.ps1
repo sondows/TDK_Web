@@ -42,13 +42,15 @@ if ($nativeReceived -cne $remoteCommand) {
 }
 $localShell = 'C:\Program Files\Git\bin\sh.exe'
 if (-not (Test-Path -LiteralPath $localShell)) { throw 'Git Bash shell is unavailable for transport validation.' }
-$decodeCommand = $remoteCommand -replace '\| sh -s -- inspect\s*$', '| sha256sum'
+$decodeCommand = $remoteCommand -replace '\| sh -s -- inspect\s+-\s+-\s*$', '| sha256sum'
 if ($decodeCommand -ceq $remoteCommand) { throw 'Could not isolate NAS helper decoding.' }
 $testFileName = '.transport-check-' + [guid]::NewGuid().ToString('N') + '.sh'
 $testFile = Join-Path $PSScriptRoot $testFileName
 try {
   [IO.File]::WriteAllText($testFile, $decodeCommand, (New-Object Text.UTF8Encoding($false)))
-  $decodedHashOutput = @(& $localShell (Join-Path 'tdk-pos/deploy' $testFileName))
+  Push-Location -LiteralPath (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+  try { $decodedHashOutput = @(& $localShell (Join-Path 'tdk-pos/deploy' $testFileName)) }
+  finally { Pop-Location }
   if ($LASTEXITCODE -ne 0) { throw 'NAS helper payload could not be decoded by the shell.' }
 } finally {
   if (Test-Path -LiteralPath $testFile) { Remove-Item -LiteralPath $testFile -Force }
@@ -63,4 +65,13 @@ try { Invoke-Nas 'inspect;echo injected' | Out-Null; throw 'Unsafe NAS action wa
 catch { if ($_.Exception.Message -eq 'Unsafe NAS action was accepted.') { throw } }
 if ($script:seenSsh.Count -ne $beforeInvalid) { throw 'Unsafe NAS action reached SSH.' }
 
-Write-Output 'PASS: interactive SSH terminal, helper payload, native argument passing, captured result, action validation'
+Invoke-Nas 'prepare' ('b' * 40) ('a' * 40) '' ('sha256:' + ('c' * 64)) | Out-Null
+if ($script:seenSsh[-1] -notmatch ('sh -s -- prepare b{40} a{40} - sha256:c{64}$')) {
+  throw 'Legacy image ID or positional argument placeholder was not forwarded.'
+}
+$beforeInvalid = $script:seenSsh.Count
+try { Invoke-Nas 'prepare' ('b' * 40) ('a' * 40) '' 'bad-image-id' | Out-Null; throw 'Unsafe image ID was accepted.' }
+catch { if ($_.Exception.Message -eq 'Unsafe image ID was accepted.') { throw } }
+if ($script:seenSsh.Count -ne $beforeInvalid) { throw 'Unsafe image ID reached SSH.' }
+
+Write-Output 'PASS: interactive SSH terminal, helper payload, native argument passing, captured result, action and legacy image ID validation'

@@ -146,6 +146,34 @@ grep -q 'release SHA must be 40' "$sandbox/invalid-sha.txt"
 
 legacy_id=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 evidence=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+legacy_release=ffffffffffffffffffffffffffffffffffffffff
+wrong_id=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" inspect > "$sandbox/legacy-inspect.txt"
+grep -q '^IMAGE_REVISION=UNKNOWN$' "$sandbox/legacy-inspect.txt"
+grep -q '^REVISION_SOURCE=UNVERIFIED$' "$sandbox/legacy-inspect.txt"
+if TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" prepare "$legacy_release" "$TDK_TEST_BASE_SHA" > "$sandbox/no-legacy-id.txt" 2>&1; then
+  echo 'unverified image was accepted without its inspected image ID' >&2; exit 1
+fi
+grep -q 'running image revision does not match' "$sandbox/no-legacy-id.txt"
+if TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" prepare "$legacy_release" "$TDK_TEST_BASE_SHA" - "$wrong_id" > "$sandbox/wrong-legacy-id.txt" 2>&1; then
+  echo 'a different running image ID was accepted' >&2; exit 1
+fi
+grep -q 'running image changed since inspection' "$sandbox/wrong-legacy-id.txt"
+test ! -e "$sandbox/backups/$legacy_release"
+if TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" deploy "$legacy_release" "$TDK_TEST_BASE_SHA" http://127.0.0.1:5168 "$wrong_id" > "$sandbox/wrong-deploy-id.txt" 2>&1; then
+  echo 'deployment accepted a different running image ID' >&2; exit 1
+fi
+grep -q 'running image changed since inspection' "$sandbox/wrong-deploy-id.txt"
+test ! -e "$sandbox/backups/$legacy_release"
+TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" prepare "$legacy_release" "$TDK_TEST_BASE_SHA" - "$legacy_id" > "$sandbox/legacy-prepare.txt"
+grep -q '^LEGACY IMAGE SOURCE UNKNOWN:' "$sandbox/legacy-prepare.txt"
+grep -q '^ROLLBACK PREPARED:' "$sandbox/legacy-prepare.txt"
+test "$(cat "$sandbox/backups/$legacy_release/old-image-id")" = "$legacy_id"
+(cd "$sandbox/backups/$legacy_release" && sha256sum -c old-image.tar.sha256 >/dev/null)
+if sh "$sandbox/helper.sh" prepare "$legacy_release" "$TDK_TEST_BASE_SHA" - "$legacy_id" > "$sandbox/labeled-legacy.txt" 2>&1; then
+  echo 'labeled image was accepted through the legacy exception' >&2; exit 1
+fi
+grep -q 'legacy image exception requires an unverified image' "$sandbox/labeled-legacy.txt"
 TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" register-baseline "$TDK_TEST_BASE_SHA" "$legacy_id" "$evidence" > "$sandbox/baseline.txt"
 TDK_TEST_NO_LABEL=1 sh "$sandbox/helper.sh" inspect > "$sandbox/baseline-inspect.txt"
 grep -q '^REVISION_SOURCE=APPROVED_BASELINE$' "$sandbox/baseline-inspect.txt"
@@ -161,4 +189,4 @@ if TDK_TEST_DOCKER_MISSING=1 sh "$sandbox/helper.sh" inspect > "$sandbox/docker-
 fi
 grep -q 'Docker preflight failed (sudo -n docker version): sudo: docker: command not found' "$sandbox/docker-missing.txt"
 
-printf 'PASS: inspect, Compose env_file hash fallback and drift guard, interactive sudo validation, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'
+printf 'PASS: inspect, Compose hash, interactive sudo, missing Git, backup/checksum, rollback, corruption guards, legacy image ID and provenance guard, approved baseline, sudo denial, missing Docker\n'

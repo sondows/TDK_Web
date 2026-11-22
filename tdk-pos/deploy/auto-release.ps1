@@ -20,11 +20,12 @@ function Assert-Exit([string]$Label) {
   if ($LASTEXITCODE -ne 0) { throw "$Label failed with exit code $LASTEXITCODE" }
 }
 
-function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha = '', [string]$AgentUrl = '') {
+function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha = '', [string]$AgentUrl = '', [string]$ExpectedImageId = '') {
   if ($Action -notin @('inspect', 'prepare', 'deploy', 'rollback')) { throw "Unsupported NAS action: $Action" }
   if ($ReleaseSha -and $ReleaseSha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid NAS release SHA.' }
   if ($BaseSha -and $BaseSha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid NAS base SHA.' }
   if ($AgentUrl -and $AgentUrl -notmatch '^http://127\.0\.0\.1:[0-9]{2,5}$') { throw 'Invalid NAS Device Agent URL.' }
+  if ($ExpectedImageId -and $ExpectedImageId -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Invalid NAS running image ID.' }
   # Put the public helper in the SSH command, leaving stdin attached to the
   # terminal for SSH and sudo passwords. Never pass a password through stdin.
   $scriptText = (Get-Content -LiteralPath $helper -Raw -Encoding UTF8).Replace("`r`n", "`n")
@@ -39,7 +40,9 @@ export TDK_INTERACTIVE_SUDO
 printf 'NAS sudo password may be requested; input is hidden.\n'
 printf %s __PAYLOAD__ | base64 -d | sh -s -- __ARGUMENTS__
 '@
-  $remoteCommand = $remoteCommand.Replace('__PAYLOAD__', $payload).Replace('__ARGUMENTS__', "$Action $ReleaseSha $BaseSha $AgentUrl")
+  $remoteAgentUrl = if ($AgentUrl) { $AgentUrl } else { '-' }
+  $remoteImageId = if ($ExpectedImageId) { $ExpectedImageId } else { '-' }
+  $remoteCommand = $remoteCommand.Replace('__PAYLOAD__', $payload).Replace('__ARGUMENTS__', "$Action $ReleaseSha $BaseSha $remoteAgentUrl $remoteImageId")
   if ($remoteCommand.Length -gt 30000) { throw 'NAS helper exceeds the safe Windows SSH command length.' }
   $sshArguments = @($sshOptions + @($sshTarget, $remoteCommand))
   Write-Host "Connecting to NAS for $Action. After SSH login, enter the NAS sudo password if requested and press Enter; input is hidden."
@@ -138,9 +141,13 @@ try {
   Write-Output "NAS free space: $($inspection.FREE_KB) KiB"
   Write-Output "Compose configuration hash verification: $($inspection.COMPOSE_HASH_METHOD)"
   if ($inspection.CONTAINER_STATE -ne 'running' -or $inspection.HEALTH -ne 'healthy') { throw 'Current NAS container is not healthy; investigate before replacing it.' }
-  if ($inspection.IMAGE_REVISION -notmatch '^[0-9a-f]{40}$') { throw 'Running image has no trusted Git revision label. Verify prior deployment evidence and register a separately approved baseline before automated deployment.' }
-  if ($inspection.SOURCE_SHA -cne $inspection.IMAGE_REVISION) { throw 'Running image revision and NAS checkout differ. Do not infer a base SHA from the mutable image tag.' }
-  $baseSha = $inspection.IMAGE_REVISION
+  $legacyImage = $inspection.IMAGE_REVISION -eq 'UNKNOWN' -and $inspection.REVISION_SOURCE -eq 'UNVERIFIED'
+  if (-not $legacyImage -and $inspection.IMAGE_REVISION -notmatch '^[0-9a-f]{40}$') { throw 'Running image revision has an unexpected value.' }
+  if (-not $legacyImage -and $inspection.SOURCE_SHA -cne $inspection.IMAGE_REVISION) { throw 'Running image revision and NAS checkout differ. Do not infer a base SHA from the mutable image tag.' }
+  if ($legacyImage -and $inspection.IMAGE_ID -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Unverified running image has an invalid image ID.' }
+  $expectedImageId = if ($legacyImage) { $inspection.IMAGE_ID } else { '' }
+  $baseSha = if ($legacyImage) { $inspection.SOURCE_SHA } else { $inspection.IMAGE_REVISION }
+  if ($legacyImage) { Write-Warning 'The current image has no verified commit identity. NAS Git HEAD is used only as the checkout base for the file diff; the running image source remains UNKNOWN.' }
   $verifiedBase = @(Invoke-Git @('rev-parse', '--verify', "$baseSha^{commit}"))[0].Trim()
   if ($verifiedBase -cne $baseSha) { throw 'NAS base commit is absent locally. Fetch and verify the commit before deployment.' }
   Invoke-Git @('merge-base', '--is-ancestor', $baseSha, $releaseSha) | Out-Null
@@ -193,7 +200,7 @@ try {
 
 
   Write-Output 'Creating and verifying the protected running-image backup before final deployment approval...'
-  $backup = @(Invoke-Nas 'prepare' $releaseSha $baseSha)
+  $backup = @(Invoke-Nas 'prepare' $releaseSha $baseSha '' $expectedImageId)
   $backup | ForEach-Object { Write-Output $_ }
   if (-not @($backup | Where-Object { $_ -match '^ROLLBACK PREPARED:' }).Count) { throw 'NAS backup did not report a verified rollback archive.' }
   Write-Output 'Rollback archive checksum and tar listing are verified. A container restore has not been exercised.'
@@ -201,7 +208,8 @@ try {
   Write-Output 'TDKON production deployment ready for review'
   Write-Output "NAS: 192.168.0.83; container: $($inspection.CONTAINER_ID)"
   Write-Output "Current image: $($inspection.IMAGE_ID)"
-  Write-Output "NAS base SHA: $baseSha"
+  Write-Output "NAS checkout base SHA: $baseSha"
+  Write-Output "Running image source: $($inspection.IMAGE_REVISION); immutable image ID: $($inspection.IMAGE_ID)"
   Write-Output "Release SHA: $releaseSha"
   Write-Output "Changed paths: $($paths.Count); local checks: PASS; backup: verified; rollback: prepared, restore untested"
   Write-Output "Approved path manifest SHA-256: $manifestHash"
@@ -216,7 +224,7 @@ try {
   Write-Output 'Final approval received. Deploying the committed release...'
   $deployed = $false
   try {
-    $result = @(Invoke-Nas 'deploy' $releaseSha $baseSha $agentUrl)
+    $result = @(Invoke-Nas 'deploy' $releaseSha $baseSha $agentUrl $expectedImageId)
     $result | ForEach-Object { Write-Output $_ }
     if (-not @($result | Where-Object { $_ -match '^RELEASE CONTAINER HEALTHY:' }).Count) { throw 'NAS deployment did not confirm the new healthy image.' }
     $deployed = $true

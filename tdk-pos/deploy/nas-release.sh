@@ -7,6 +7,7 @@ mode=${1:-}
 release_sha=${2:-}
 base_sha=${3:-}
 device_agent_url=${4:-}
+expected_image_id=${5:-}
 repo=/volume1/TDK-POS
 app_dir=$repo/tdk-pos
 backup_root=/volume1/tdk-pos-release-backups
@@ -217,6 +218,9 @@ if [ "$mode" = rollback ]; then
 fi
 [ "$mode" = deploy ] || [ "$mode" = prepare ] || fail 'mode must be inspect, prepare, deploy, or rollback'
 valid_sha "$base_sha" || fail 'NAS base SHA must be 40 lowercase hex characters'
+if [ -n "$expected_image_id" ] && [ "$expected_image_id" != - ]; then
+  valid_image_id "$expected_image_id" || fail 'expected running image ID is invalid'
+fi
 if [ "$mode" = deploy ]; then
   case "$device_agent_url" in
     http://127.0.0.1:*) device_agent_port=${device_agent_url##*:} ;;
@@ -239,7 +243,13 @@ container=$(sudo -n docker compose ps -q tdk-pos)
 old_id=$(sudo -n docker inspect --format '{{.Image}}' "$container")
 case "$old_id" in sha256:*) ;; *) fail 'running image ID has an unexpected format' ;; esac
 resolve_revision "$old_id" "$base_sha"
-[ "$revision" = "$base_sha" ] || fail 'running image revision does not match approved NAS base SHA'
+if [ "$expected_image_id" != - ] && [ -n "$expected_image_id" ]; then
+  [ "$old_id" = "$expected_image_id" ] || fail 'running image changed since inspection'
+  [ "$revision" = UNKNOWN ] && [ "$revision_source" = UNVERIFIED ] || fail 'legacy image exception requires an unverified image'
+  printf 'LEGACY IMAGE SOURCE UNKNOWN: image=%s; NAS checkout=%s (Git diff base only)\n' "$old_id" "$base_sha"
+else
+  [ "$revision" = "$base_sha" ] || fail 'running image revision does not match approved NAS base SHA'
+fi
 old_container_created=$(sudo -n docker inspect --format '{{.Created}}' "$container")
 old_image_created=$(sudo -n docker image inspect "$old_id" --format '{{.Created}}')
 running_db=$(sudo -n docker exec "$container" sh -c 'printf %s "${DB_NAME-}"')
