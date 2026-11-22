@@ -79,7 +79,7 @@ async function main() {
       [qrCodeId, tableId, staff.staff_id],
     );
 
-    const entry = await fetch(`${origin}/q/${qr.identifier}`, { redirect: "manual", signal: AbortSignal.timeout(15000) });
+    const entry = await fetch(`${origin}/tdkqrs/${qr.identifier}`, { redirect: "manual", signal: AbortSignal.timeout(15000) });
     assert.equal(entry.status, 302);
     const destination = new URL(entry.headers.get("location"), origin).pathname;
     if (destination !== "/qrorder/order") {

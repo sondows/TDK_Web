@@ -591,7 +591,7 @@ export const qrTableLinks = mysqlTable("qr_table_links", {
   assignedAt: datetime("assigned_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, table => [uniqueIndex("uq_qr_table_links_table").on(table.tableId)]);
 
-/** Invitation bearer values are one-time, expiring, and stored only as a hash. */
+/** Invitation bearer values may be reused until expiry/revocation and are stored only as a hash. */
 export const qrSessionInvites = mysqlTable("qr_session_invites", {
   inviteId: bigint("invite_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
   sessionId: bigint("session_id", { mode: "number", unsigned: true }).notNull().references(() => tableSessions.sessionId),

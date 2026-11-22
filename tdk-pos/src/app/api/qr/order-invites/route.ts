@@ -37,7 +37,8 @@ export async function POST(request: Request) {
     });
     if (result.kind !== "CREATED") return Response.json({ success: false, ...getQrOrderInviteFailure(result.kind) }, { status: 409 });
     const expiresAt = new Date(Date.now() + result.remainingSeconds * 1000).toISOString();
-    return Response.json({ success: true, url: new URL(`/q/join/${token}`, request.url).toString(), expiresAt }, { headers: { "Cache-Control": "no-store" } });
+    const publicOrigin = "https://tdkon.myasustor.com";
+    return Response.json({ success: true, url: new URL(`/tdkqrs/join/${token}`, publicOrigin).toString(), expiresAt }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ success: false, message: "초대 링크를 만들지 못했습니다." }, { status: 503 });
   }

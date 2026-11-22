@@ -15,7 +15,7 @@ export function publicQrUrl(identifier: string): string {
       throw new Error("QR_PUBLIC_BASE_URL must be https://tdkon.myasustor.com");
     }
   }
-  return new URL(`/q/${identifier}`, QR_PUBLIC_ORIGIN).toString();
+  return new URL(`/tdkqrs/${identifier}`, QR_PUBLIC_ORIGIN).toString();
 }
 
 export function parseQrPngBackground(value: string | null): QrPngBackground | null {

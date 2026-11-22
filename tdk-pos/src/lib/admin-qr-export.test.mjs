@@ -18,13 +18,13 @@ function withPublicBaseUrl(value, run) {
 
 test("table QR URL always uses the public HTTPS origin when config is missing", () => {
   withPublicBaseUrl(undefined, () => {
-    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/q/23456789ABCDEFGH");
+    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/tdkqrs/23456789ABCDEFGH");
   });
 });
 
 test("table QR URL accepts only the configured canonical HTTPS origin", () => {
   withPublicBaseUrl("https://tdkon.myasustor.com/", () => {
-    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/q/23456789ABCDEFGH");
+    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/tdkqrs/23456789ABCDEFGH");
   });
   for (const invalid of ["http://tdkon.myasustor.com", "http://192.168.0.83", "https://192.168.0.83",
     "https://tdkon.myasustor.com.evil.example", "https://tdkon.myasustor.com/other",

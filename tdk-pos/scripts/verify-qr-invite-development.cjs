@@ -76,17 +76,17 @@ async function main() {
       [rootQrSessionId],
     );
 
-    const invalidFormat = await request("/q/join/not-a-token");
+    const invalidFormat = await request("/tdkqrs/join/not-a-token");
     assert.equal(redirectPath(invalidFormat), "/qrorder/invite-invalid");
-    const nonexistent = await request(`/q/join/${token()}`);
+    const nonexistent = await request(`/tdkqrs/join/${token()}`);
     assert.equal(redirectPath(nonexistent), "/qrorder/invite-invalid");
     const withoutCookie = await request("/api/qr/table-orders", { headers: { origin } });
     assert.equal(withoutCookie.status, 401);
 
     const expired = await makeInvite(connection, sessionId, rootQrSessionId, "DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 SECOND)");
-    assert.equal(redirectPath(await request(`/q/join/${expired.raw}`)), "/qrorder/invite-invalid");
+    assert.equal(redirectPath(await request(`/tdkqrs/join/${expired.raw}`)), "/qrorder/invite-invalid");
     const revoked = await makeInvite(connection, sessionId, rootQrSessionId, "DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 HOUR)", true);
-    assert.equal(redirectPath(await request(`/q/join/${revoked.raw}`)), "/qrorder/invite-invalid");
+    assert.equal(redirectPath(await request(`/tdkqrs/join/${revoked.raw}`)), "/qrorder/invite-invalid");
     const [[beforeJoin]] = await connection.query("SELECT COUNT(*) AS count FROM qr_sessions WHERE session_id = ?", [sessionId]);
     assert.equal(Number(beforeJoin.count), 1, "invalid invites do not create guest sessions");
 
@@ -96,7 +96,7 @@ async function main() {
     assert.notEqual(storedInvite.token_hash, invite.raw);
     assert.equal(storedInvite.redeemed_at, null);
 
-    const joined = await request(`/q/join/${invite.raw}`, { headers: { "x-forwarded-proto": "https" } });
+    const joined = await request(`/tdkqrs/join/${invite.raw}`, { headers: { "x-forwarded-proto": "https" } });
     assert.equal(joined.status, 302);
     assert.equal(redirectPath(joined), "/qrorder");
     const setCookie = joined.headers.get("set-cookie") ?? "";
@@ -159,29 +159,29 @@ async function main() {
     const [[guestOrder]] = await connection.query("SELECT status FROM qr_orders WHERE qr_session_id = ?", [guestRows[0].qr_session_id]);
     assert.equal(guestOrder.status, "PENDING");
 
-    const repeatWithCookie = await request(`/q/join/${invite.raw}`, { headers: { cookie } });
+    const repeatWithCookie = await request(`/tdkqrs/join/${invite.raw}`, { headers: { cookie } });
     assert.equal(redirectPath(repeatWithCookie), "/qrorder");
     assert.equal(repeatWithCookie.headers.get("set-cookie"), null);
     const [afterRepeat] = await connection.query("SELECT qr_session_id FROM qr_sessions WHERE session_id = ?", [sessionId]);
     assert.equal(afterRepeat.length, 2);
     // The existing route permits a second customer to redeem the same unexpired invite.
-    const secondGuest = await request(`/q/join/${invite.raw}`);
+    const secondGuest = await request(`/tdkqrs/join/${invite.raw}`);
     assert.equal(redirectPath(secondGuest), "/qrorder");
     assert.match(secondGuest.headers.get("set-cookie") ?? "", /tdkon_qr_session=/);
     const [afterSecond] = await connection.query("SELECT qr_session_id FROM qr_sessions WHERE session_id = ?", [sessionId]);
     assert.equal(afterSecond.length, 3);
 
     const [[otherQr]] = await connection.query("SELECT identifier FROM qr_codes WHERE qr_code_id = ?", [qrCodeIds[1]]);
-    const otherTable = await request(`/q/${otherQr.identifier}`, { headers: { cookie } });
+    const otherTable = await request(`/tdkqrs/${otherQr.identifier}`, { headers: { cookie } });
     assert.equal(redirectPath(otherTable), "/qrorder/unavailable");
     await connection.query("UPDATE dining_tables SET is_active = 0 WHERE table_id = ?", [tableIds[0]]);
-    assert.equal(redirectPath(await request(`/q/join/${invite.raw}`)), "/qrorder/invite-invalid");
+    assert.equal(redirectPath(await request(`/tdkqrs/join/${invite.raw}`)), "/qrorder/invite-invalid");
     await connection.query("UPDATE dining_tables SET is_active = 1 WHERE table_id = ?", [tableIds[0]]);
     await connection.query("UPDATE qr_codes SET status = 'LOCKED' WHERE qr_code_id = ?", [qrCodeIds[0]]);
-    assert.equal(redirectPath(await request(`/q/join/${invite.raw}`)), "/qrorder/invite-invalid");
+    assert.equal(redirectPath(await request(`/tdkqrs/join/${invite.raw}`)), "/qrorder/invite-invalid");
     await connection.query("UPDATE qr_codes SET status = 'IN_USE' WHERE qr_code_id = ?", [qrCodeIds[0]]);
     await connection.query("UPDATE table_sessions SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE session_id = ?", [sessionId]);
-    assert.equal(redirectPath(await request(`/q/join/${invite.raw}`)), "/qrorder/invite-invalid");
+    assert.equal(redirectPath(await request(`/tdkqrs/join/${invite.raw}`)), "/qrorder/invite-invalid");
     const [[afterInvalid]] = await connection.query("SELECT COUNT(*) AS count FROM qr_sessions WHERE session_id = ?", [sessionId]);
     assert.equal(Number(afterInvalid.count), 3, "disabled or closed targets do not create guest sessions");
     const afterClose = await request("/api/qr/table-orders", { headers: { cookie, origin } });
