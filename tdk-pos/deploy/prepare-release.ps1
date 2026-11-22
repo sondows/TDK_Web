@@ -61,6 +61,12 @@ function Invoke-DevelopmentChecks() {
   if ($LASTEXITCODE -ne 0) { throw 'NAS helper shell syntax failed.' }
   & $shell (Join-Path $app 'deploy/test-nas-release.sh')
   if ($LASTEXITCODE -ne 0) { throw 'NAS helper isolated behavior failed.' }
+  & $shell -n (Join-Path $app 'deploy/simple-nas-release.sh')
+  if ($LASTEXITCODE -ne 0) { throw 'Simple NAS helper shell syntax failed.' }
+  & $shell (Join-Path $app 'deploy/test-simple-nas-release.sh')
+  if ($LASTEXITCODE -ne 0) { throw 'Simple NAS helper isolated behavior failed.' }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'deploy/test-simple-release-transport.ps1')
+  if ($LASTEXITCODE -ne 0) { throw 'Simple SSH transport verification failed.' }
   Write-Output 'Checking interactive SSH transport...'
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'deploy/test-auto-release-transport.ps1')
   if ($LASTEXITCODE -ne 0) { throw 'Interactive SSH transport verification failed.' }

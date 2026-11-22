@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Auto', 'PrepareRelease', 'DryRun', 'Deploy')][string]$Mode = 'Auto',
+  [ValidateSet('Auto', 'Guarded', 'PrepareRelease', 'DryRun', 'Deploy')][string]$Mode = 'Auto',
   [string]$ApprovedSha,
   [string]$BaseSha,
   [string]$ApprovedPathsFile,
@@ -8,6 +8,12 @@ param(
 )
 
 if ($Mode -eq 'Auto') {
+  & (Join-Path $PSScriptRoot 'prepare-release.ps1')
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & (Join-Path $PSScriptRoot 'simple-release.ps1')
+  exit $LASTEXITCODE
+}
+if ($Mode -eq 'Guarded') {
   & (Join-Path $PSScriptRoot 'prepare-release.ps1')
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & (Join-Path $PSScriptRoot 'auto-release.ps1')

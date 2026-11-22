@@ -1,13 +1,13 @@
-# TDKON `deploy.bat` 원클릭 배포 절차
+# TDKON 선택형 백업·롤백 배포 절차
 
-작성일: 2026-11-22. 이 문서는 **배포 자동화 코드의 동작**을 설명한다. `-Mode PrepareRelease`는 로컬 검사·범위 검증·커밋·푸시만 수행하며 NAS에 접속하지 않는다. 기존 4.5단계의 수동 `-Mode DryRun`/`-Mode Deploy` 경로는 유지된다.
+작성일: 2026-11-22. 이 문서는 **선택형 `-Mode Guarded`** 경로를 설명한다. 기본 `deploy.bat`는 [간단 배포 절차](SIMPLE-RELEASE.md)를 따른다. `-Mode PrepareRelease`는 로컬 검사·범위 검증·커밋·푸시만 수행하며 NAS에 접속하지 않는다. 기존 4.5단계의 수동 `-Mode DryRun`/`-Mode Deploy` 경로는 유지된다.
 
 ## 실행
 
 저장소 루트의 Windows 터미널에서 실행한다. 로컬 검사가 통과하면 `deploy.bat`와 `tdk-pos` 안의 제작 파일만 커밋하고 `origin/main`에 일반 푸시한 다음 NAS 사전점검으로 넘어간다.
 
 ```cmd
-.\deploy.bat
+.\deploy.bat -Mode Guarded
 ```
 
 SHA 인자는 필요 없다. 화면에 나타나는 전체 릴리스 SHA와 변경 파일 목록을 직접 확인한다. **최종 승인 입력 전에는 앱 컨테이너가 교체되지 않는다.** 단, 최종 승인 전 백업 준비 단계는 NAS의 백업 디렉터리와 Docker 이미지 태그에 쓰기를 수행한다. 운영 NAS에서 이 단계를 실행하려면 사전에 해당 백업 작업이 허가돼 있어야 한다. Enter 또는 다른 입력은 배포 취소다.
