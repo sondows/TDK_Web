@@ -96,6 +96,26 @@ require_docker_sudo() {
     fail "Docker preflight failed (sudo -n docker version): $docker_preflight"
 }
 
+verify_compose_config_hash() {
+  hash_container=$1
+  running_config_hash=$(sudo -n docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$hash_container") || fail 'running Compose config hash unavailable'
+  configured_hash=$(sudo -n docker compose config --hash tdk-pos | awk 'NF {print $NF}') || fail 'Compose configuration hash unavailable'
+  compose_hash_method=DIRECT
+  if [ -n "$running_config_hash" ] && [ "$running_config_hash" = "$configured_hash" ]; then return 0; fi
+
+  # Compose versions affected by docker/compose#14001 omit env_file contents
+  # from config --hash. Re-render in memory with env_file resolved, then hash
+  # that canonical model. No environment values are printed or saved to disk.
+  resolved_config=$(sudo -n docker compose config --format json 2>/dev/null) || fail 'resolved Compose configuration unavailable'
+  resolved_hash_output=$(printf '%s\n' "$resolved_config" | sudo -n docker compose -f - config --hash tdk-pos 2>/dev/null) || fail 'resolved Compose configuration hash unavailable'
+  unset resolved_config
+  resolved_hash=$(printf '%s\n' "$resolved_hash_output" | awk 'NF {print $NF}')
+  if [ -z "$running_config_hash" ] || [ "$running_config_hash" != "$resolved_hash" ]; then
+    fail "Compose configuration differs from the running container (label=$running_config_hash direct=$configured_hash resolved=$resolved_hash)"
+  fi
+  compose_hash_method=RESOLVED_ENV_FILE
+}
+
 # Separate, explicit baseline registration for a legacy image without a Git label.
 # The operator must first verify historical deployment evidence and approve its hash.
 if [ "$mode" = register-baseline ]; then
@@ -146,13 +166,11 @@ if [ "$mode" = inspect ]; then
   health=$(sudo -n docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container")
   running_db=$(sudo -n docker exec "$container" sh -c 'printf %s "${DB_NAME-}"') || fail 'running DB identity unavailable'
   [ "$running_db" = TDK_POS ] || fail 'running container does not use TDK_POS'
-  running_config_hash=$(sudo -n docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$container")
-  configured_hash=$(sudo -n docker compose config --hash tdk-pos | awk 'NF {print $NF}') || fail 'Compose configuration hash unavailable'
-  [ -n "$running_config_hash" ] && [ "$running_config_hash" = "$configured_hash" ] || fail 'Compose files or environment differ from the running container'
+  verify_compose_config_hash "$container"
   free_kb=$(df -Pk /volume1 | awk 'NR==2 {print $4}')
   case "$free_kb" in *[!0-9]*|'') fail 'NAS free space unavailable' ;; esac
-  printf 'SOURCE_SHA=%s\nIMAGE_REVISION=%s\nREVISION_SOURCE=%s\nBASELINE_EVIDENCE_SHA256=%s\nDEVICE_AGENT_URL=%s\nIMAGE_ID=%s\nCONTAINER_ID=%s\nCONTAINER_STATE=%s\nHEALTH=%s\nFREE_KB=%s\n' \
-    "$source_sha" "$revision" "$revision_source" "$evidence_sha" "$agent_url" "$old_id" "$container" "$state" "$health" "$free_kb"
+  printf 'SOURCE_SHA=%s\nIMAGE_REVISION=%s\nREVISION_SOURCE=%s\nBASELINE_EVIDENCE_SHA256=%s\nDEVICE_AGENT_URL=%s\nIMAGE_ID=%s\nCONTAINER_ID=%s\nCONTAINER_STATE=%s\nHEALTH=%s\nFREE_KB=%s\nCOMPOSE_HASH_METHOD=%s\n' \
+    "$source_sha" "$revision" "$revision_source" "$evidence_sha" "$agent_url" "$old_id" "$container" "$state" "$health" "$free_kb" "$compose_hash_method"
   exit 0
 fi
 
@@ -226,9 +244,7 @@ old_container_created=$(sudo -n docker inspect --format '{{.Created}}' "$contain
 old_image_created=$(sudo -n docker image inspect "$old_id" --format '{{.Created}}')
 running_db=$(sudo -n docker exec "$container" sh -c 'printf %s "${DB_NAME-}"')
 [ "$running_db" = TDK_POS ] || fail 'running container does not use TDK_POS'
-running_config_hash=$(sudo -n docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$container")
-configured_hash=$(sudo -n docker compose config --hash tdk-pos | awk 'NF {print $NF}') || fail 'Compose configuration hash unavailable'
-[ -n "$running_config_hash" ] && [ "$running_config_hash" = "$configured_hash" ] || fail 'Compose files or environment differ from the running container'
+verify_compose_config_hash "$container"
 [ ! -L "$backup_root" ] && [ ! -L "$backup_dir" ] || fail 'backup path must not be a symbolic link'
 free_kb=$(df -Pk /volume1 | awk 'NR==2 {print $4}')
 case "$free_kb" in *[!0-9]*|'') fail 'NAS free space unavailable' ;; esac

@@ -50,7 +50,11 @@ old=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 case "$1 $2 $3" in
   'version --format '*) echo 27.0.0 ;;
   'compose config --quiet') exit 0 ;;
-  'compose config --hash') echo 'tdk-pos cfghash' ;;
+  'compose config --hash')
+    if [ "${TDK_TEST_HASH_BUG:-0}" = 1 ]; then echo 'tdk-pos hash-without-env'; else echo 'tdk-pos cfghash'; fi
+    ;;
+  'compose config --format') printf '{"services":{"tdk-pos":{"environment":{"PASSWORD":"fixture-secret"}}}}\n' ;;
+  'compose -f -') cat >/dev/null; echo 'tdk-pos cfghash' ;;
   'compose ps -q') echo fake-container ;;
   'compose up -d') [ "${TDK_TEST_UP_FAIL:-0}" = 0 ] || exit 1 ;;
   'image inspect '*)
@@ -67,7 +71,9 @@ case "$1 $2 $3" in
   'inspect --format '*)
     case "$*" in
       *'{{.Image}}'*) echo "$old" ;;
-      *com.docker.compose.config-hash*) echo cfghash ;;
+      *com.docker.compose.config-hash*)
+        if [ "${TDK_TEST_HASH_DRIFT:-0}" = 1 ]; then echo changed-runtime-hash; else echo cfghash; fi
+        ;;
       *'{{.State.Status}}'*) echo running ;;
       *'.State.Health'*) echo healthy ;;
       *'{{.Created}}'*) echo '2026-11-22T00:00:00Z' ;;
@@ -90,6 +96,15 @@ chmod +x "$sandbox/bin/sudo" "$sandbox/bin/git" "$sandbox/bin/df" "$sandbox/bin/
 release=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sh "$sandbox/helper.sh" inspect > "$sandbox/inspect.txt"
 grep -q "IMAGE_REVISION=$TDK_TEST_BASE_SHA" "$sandbox/inspect.txt"
+grep -q '^COMPOSE_HASH_METHOD=DIRECT$' "$sandbox/inspect.txt"
+TDK_TEST_HASH_BUG=1 sh "$sandbox/helper.sh" inspect > "$sandbox/hash-bug.txt"
+grep -q '^COMPOSE_HASH_METHOD=RESOLVED_ENV_FILE$' "$sandbox/hash-bug.txt"
+if grep -q 'fixture-secret' "$sandbox/hash-bug.txt"; then echo 'resolved environment leaked' >&2; exit 1; fi
+if TDK_TEST_HASH_BUG=1 TDK_TEST_HASH_DRIFT=1 sh "$sandbox/helper.sh" inspect > "$sandbox/hash-drift.txt" 2>&1; then
+  echo 'actual Compose drift was accepted' >&2; exit 1
+fi
+grep -q 'Compose configuration differs from the running container' "$sandbox/hash-drift.txt"
+if grep -q 'fixture-secret' "$sandbox/hash-drift.txt"; then echo 'resolved environment leaked on error' >&2; exit 1; fi
 TDK_INTERACTIVE_SUDO=1 sh "$sandbox/helper.sh" inspect > "$sandbox/interactive-inspect.txt" 2> "$sandbox/interactive-prompt.txt"
 test -f "$sandbox/state/sudo-validated"
 grep -q '^NAS sudo password (input hidden):$' "$sandbox/interactive-prompt.txt"
@@ -146,4 +161,4 @@ if TDK_TEST_DOCKER_MISSING=1 sh "$sandbox/helper.sh" inspect > "$sandbox/docker-
 fi
 grep -q 'Docker preflight failed (sudo -n docker version): sudo: docker: command not found' "$sandbox/docker-missing.txt"
 
-printf 'PASS: inspect, interactive sudo validation, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'
+printf 'PASS: inspect, Compose env_file hash fallback and drift guard, interactive sudo validation, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'

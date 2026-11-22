@@ -136,6 +136,7 @@ try {
   Write-Output "Revision source: $($inspection.REVISION_SOURCE); evidence SHA-256: $($inspection.BASELINE_EVIDENCE_SHA256)"
   Write-Output "NAS Git HEAD: $($inspection.SOURCE_SHA)"
   Write-Output "NAS free space: $($inspection.FREE_KB) KiB"
+  Write-Output "Compose configuration hash verification: $($inspection.COMPOSE_HASH_METHOD)"
   if ($inspection.CONTAINER_STATE -ne 'running' -or $inspection.HEALTH -ne 'healthy') { throw 'Current NAS container is not healthy; investigate before replacing it.' }
   if ($inspection.IMAGE_REVISION -notmatch '^[0-9a-f]{40}$') { throw 'Running image has no trusted Git revision label. Verify prior deployment evidence and register a separately approved baseline before automated deployment.' }
   if ($inspection.SOURCE_SHA -cne $inspection.IMAGE_REVISION) { throw 'Running image revision and NAS checkout differ. Do not infer a base SHA from the mutable image tag.' }
