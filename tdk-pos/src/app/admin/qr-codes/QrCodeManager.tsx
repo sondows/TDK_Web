@@ -23,6 +23,12 @@ type Filter = "AVAILABLE" | "RETIRED" | "ALL";
 type TargetChoice = "UNASSIGNED" | "GUEST_MENU" | "WAITING" | "ORPHANED_TABLE" | `TABLE:${number}`;
 
 const statusLabel: Record<QrStatus, string> = { UNUSED: "미사용", IN_USE: "사용 중", LOCKED: "기존 잠금", RETIRED: "폐기" };
+const accessAlertLabel: Record<string, string> = {
+  OUTSIDE_BUSINESS_HOURS: "영업시간 외 접속",
+  REPEATED_ACCESS: "5분 내 반복 접속",
+  REPEATED_FAILURE: "5분 내 인증 실패 반복",
+  RETIRED_QR_ACCESS: "폐기 QR 접속 시도",
+};
 
 function currentChoice(code: QrCode): TargetChoice {
   if (code.targetType === "TABLE_ORDER") return code.tableId ? `TABLE:${code.tableId}` : "ORPHANED_TABLE";
@@ -281,12 +287,12 @@ export default function QrCodeManager() {
     {error && <p className="qr-no-print mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
     {accessEventsTruncated && <p className="qr-no-print mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">최근 QR 접속기록 조회가 10,000건 한도에 도달했습니다. 기록량이 한도를 넘으면 오래된 QR의 이상징후가 목록에 나타나지 않을 수 있습니다.</p>}
     <div className="qr-print-area">
-      <div className="qr-print-grid mt-5 flex flex-wrap items-start justify-start gap-4">
+      <div className="qr-print-grid mt-5 grid w-full max-w-[1050px] grid-cols-[repeat(auto-fill,minmax(min(100%,460px),1fr))] items-start gap-4">
         {visibleCodes.map(code => {
           const choice = choiceByQr[code.qrCodeId] ?? currentChoice(code);
           const locked = code.status === "LOCKED";
           const retired = code.status === "RETIRED";
-          return <article className={`qr-print-card ${retired ? "qr-retired-card" : ""} w-fit max-w-full rounded-xl border border-slate-200 bg-white p-4`} key={code.qrCodeId}>
+          return <article className={`qr-print-card ${retired ? "qr-retired-card" : ""} min-w-0 w-full rounded-xl border border-slate-200 bg-white p-4`} key={code.qrCodeId}>
             <div className="qr-print-content flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
               {!retired && <div className="flex shrink-0 items-start gap-2">
                 <div className="qr-no-print flex shrink-0 items-start pt-1"><input aria-label={`${code.managementNumber} PNG 선택`} checked={selected.includes(code.qrCodeId)} disabled={!selected.includes(code.qrCodeId) && selectedForExport.length >= 500} onChange={() => toggleSelected(code.qrCodeId)} type="checkbox" /></div>
@@ -298,10 +304,10 @@ export default function QrCodeManager() {
                 <div className="flex min-h-8 flex-wrap items-center gap-2">
                   <strong className="qr-print-identifier break-all font-mono text-lg font-black tracking-tight sm:text-xl">{code.managementNumber}</strong>
                   <span className={`qr-print-status shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${locked ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>{statusLabel[code.status]}</span>
-                  {code.attentionRequired && <span aria-label={`확인 필요: ${(code.attentionLabels ?? []).join(", ")}`} className="qr-no-print text-xs font-bold text-red-700">확인 필요</span>}
                 </div>
+                {code.attentionRequired && <p className="qr-no-print mt-1 text-xs font-bold text-red-700">접속 이력: {(code.attentionLabels ?? []).map(label => accessAlertLabel[label] ?? "QR 접속 기록 확인 필요").join(", ") || "QR 접속 기록 확인 필요"}</p>}
                 {!retired && <p className="qr-print-target mt-2 text-sm font-medium text-slate-600">현재 연결: {targetDescription(currentChoice(code), tables)}</p>}
-                {!retired && <div className="qr-no-print mt-3 flex w-fit max-w-full flex-col items-start">
+                {!retired && <div className="qr-no-print mt-3 flex w-full max-w-full flex-col items-start">
                   <div className="flex w-full items-center gap-2">
                   <select aria-label={`QR ${code.managementNumber} 연결 대상`} className="min-h-10 w-0 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={busy || locked || retired} onChange={event => setChoiceByQr(current => ({ ...current, [code.qrCodeId]: event.target.value as TargetChoice }))} value={choice}>
                     <option value="UNASSIGNED">미연결</option>

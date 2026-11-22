@@ -656,7 +656,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
           return <div key={`${round.source}-${round.source === "QR" ? round.order.qrOrderId : round.order.orderId}`}>
             <article className="py-2">
               <div className="-mx-1 flex items-center gap-2 rounded-[10px] bg-[#F1F5F9] px-3 py-1.5">
-                <h2 className="shrink-0 whitespace-nowrap font-bold">{round.roundNumber}차 주문(<time className="font-normal text-slate-500" dateTime={round.order.orderedAt}>{orderTime(round.order.orderedAt)}</time>)</h2>
+                <h2 className="shrink-0 whitespace-nowrap font-bold">주문 (<time className="font-normal text-slate-500" dateTime={round.order.orderedAt}>{orderTime(round.order.orderedAt)}</time>)</h2>
                 {round.source === "QR" ? <>
                   <span className={`min-w-0 flex-1 truncate whitespace-nowrap text-center text-xs font-semibold ${round.order.status === "PENDING" ? "text-amber-700" : round.order.status === "ACCEPTED" ? "text-blue-700" : round.order.status === "REJECTED" ? "text-red-600" : "text-slate-500"}`}>
                     {round.order.status === "PENDING" ? "승인 대기중" : round.order.status === "ACCEPTED" ? "승인완료" : round.order.status === "REJECTED" ? "승인거절" : orderStatus === "COMPLETED" ? "결제 완료" : "주문 취소"}

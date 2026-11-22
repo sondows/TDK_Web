@@ -105,6 +105,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const originDragStartRef = useRef<number | null>(null);
   const addSubmittedRef = useRef(false);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
+  const [clearCartDialogOpen, setClearCartDialogOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [frontQrExited, setFrontQrExited] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
@@ -303,7 +304,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeCartSheet();
+      if (event.key === "Escape" && !clearCartDialogOpen) closeCartSheet();
     };
     const onPopState = (event: PopStateEvent) => {
       // A nested QR notice sheet may pop back to this still-open cart entry.
@@ -318,7 +319,16 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("popstate", onPopState);
     };
-  }, [cartSheetOpen, closeCartSheet]);
+  }, [cartSheetOpen, clearCartDialogOpen, closeCartSheet]);
+
+  useEffect(() => {
+    if (!clearCartDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setClearCartDialogOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [clearCartDialogOpen]);
 
   useEffect(() => {
     if (!view) return;
@@ -952,6 +962,13 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     setCart(current => current.filter(item => item.menuId !== line.menuId || JSON.stringify(item.options) !== JSON.stringify(line.options)));
     queueCartEvent("REMOVE", line.menuId, line.options.map(option => option.modifierOptionId), line.qty, 0);
   };
+  const clearCart = () => {
+    for (const line of cart) {
+      queueCartEvent("REMOVE", line.menuId, line.options.map(option => option.modifierOptionId), line.qty, 0);
+    }
+    setCart([]);
+    setClearCartDialogOpen(false);
+  };
 
   const loadWaitOrder = useCallback(async (id: number) => {
     const response = await fetch(`/api/qr/wait-orders/${id}`, { cache: "no-store", credentials: "same-origin" });
@@ -1247,13 +1264,18 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
 
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
     <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
-      <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex shrink-0 flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
-        <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />
-        {cartHeaderVisible && <span className="flex w-full max-w-xl items-center justify-between gap-3">
-          <span className="flex min-w-0 items-center gap-2 font-extrabold"><svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 1.9-1.4L22 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span>{t.cart}</span><span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{itemCount}{t.count}</span></span>
-          <span className="flex shrink-0 items-center gap-2 font-bold tabular-nums">{formatQrCartPrice(total)}<svg aria-hidden="true" className={`h-5 w-5 transition-transform duration-300 motion-reduce:transition-none ${cartSheetOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span>
-        </span>}
-      </button>
+      <div className="relative shrink-0">
+        <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex w-full flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
+          <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />
+          {cartHeaderVisible && <span className={`flex w-full max-w-xl items-center gap-3 ${tableOrderMode ? "pr-11" : "justify-between"}`}>
+            <span className="flex min-w-0 items-center gap-2 font-extrabold"><svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 1.9-1.4L22 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span>{t.cart}</span>{!tableOrderMode && <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{itemCount}{t.count}</span>}</span>
+            {!tableOrderMode && <span className="flex shrink-0 items-center gap-2 font-bold tabular-nums">{formatQrCartPrice(total)}<svg aria-hidden="true" className={`h-5 w-5 transition-transform duration-300 motion-reduce:transition-none ${cartSheetOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span>}
+          </span>}
+        </button>
+        {tableOrderMode && cartHasItems && <div className="pointer-events-none absolute inset-x-4 top-[6.8px] z-20 mx-auto flex max-w-xl justify-end">
+          <button aria-label="장바구니 비우기" className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-lg text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" onClick={() => setClearCartDialogOpen(true)} type="button"><svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 4v7m4-7v7" /></svg></button>
+        </div>}
+      </div>
       <div className="flex min-h-0 flex-1 flex-col bg-slate-50 text-slate-900" inert={!cartSheetOpen}>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
           {cart.length === 0 ? <p className="py-10 text-center text-slate-500">{t.empty}</p> : <div className="divide-y divide-slate-100">{cart.map((line, index) => {
@@ -1286,6 +1308,16 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         </div></div>
       </div>
     </section>
+
+    {clearCartDialogOpen && <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4" onClick={() => setClearCartDialogOpen(false)}>
+      <section aria-labelledby="qr-clear-cart-title" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="alertdialog">
+        <h2 className="text-lg font-extrabold" id="qr-clear-cart-title">장바구니를 모두 비우시겠습니까?</h2>
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-700" onClick={() => setClearCartDialogOpen(false)} type="button">취소</button>
+          <button className="min-h-12 rounded-xl bg-blue-700 px-3 font-bold text-white" onClick={clearCart} type="button">비우기</button>
+        </div>
+      </section>
+    </div>}
 
     {view && currentMenu && <section aria-label={currentMenu.name ?? t.title} aria-modal="true" className={`fixed inset-y-0 left-1/2 z-50 flex h-[100dvh] w-full max-w-2xl flex-col overflow-hidden bg-white transition-transform ${viewDragActive ? "duration-0" : "duration-[250ms] ease-out"} motion-reduce:duration-0`} onPointerDown={event => {
       const target = event.target as HTMLElement;
