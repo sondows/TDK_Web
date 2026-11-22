@@ -42,13 +42,13 @@ printf %s __PAYLOAD__ | base64 -d | sh -s -- __ARGUMENTS__
   $remoteCommand = $remoteCommand.Replace('__PAYLOAD__', $payload).Replace('__ARGUMENTS__', "$Action $ReleaseSha $BaseSha $AgentUrl")
   if ($remoteCommand.Length -gt 30000) { throw 'NAS helper exceeds the safe Windows SSH command length.' }
   $sshArguments = @($sshOptions + @($sshTarget, $remoteCommand))
-  Write-Host "Connecting to NAS for $Action. Enter SSH/sudo passwords in this terminal when prompted."
+  Write-Host "Connecting to NAS for $Action. After SSH login, enter the NAS sudo password if requested and press Enter; input is hidden."
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
     $result = @(& ssh @sshArguments 2>&1 | ForEach-Object {
       $line = "$($_)".TrimEnd("`r")
-      if ($line -match 'NAS sudo password may be requested|^\[sudo\]|^Password:|password for |^sudo:') { Write-Host $line }
+      if ($line -match 'NAS sudo password|^\[sudo\]|^Password:|password for |^sudo:') { Write-Host $line }
       $line
     })
     $code = $LASTEXITCODE

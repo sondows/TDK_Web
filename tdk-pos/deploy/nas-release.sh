@@ -64,7 +64,8 @@ fail() { printf 'RELEASE FAILED: %s\n' "$*" >&2; exit 1; }
 # before each privileged command. Other entry points remain non-interactive.
 sudo() {
   if [ "${TDK_INTERACTIVE_SUDO:-0}" = 1 ] && [ "${1:-}" = -n ]; then
-    command sudo -v || return
+    command sudo -p 'NAS sudo password (input hidden):
+' -v || return
   fi
   command sudo "$@"
 }

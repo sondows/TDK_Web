@@ -19,6 +19,7 @@ sed -e "s#^repo=/volume1/TDK-POS\$#repo=$sandbox/repo#" \
 
 cat > "$sandbox/bin/sudo" <<'EOF'
 #!/bin/sh
+if [ "$1" = -p ]; then printf '%s' "$2" >&2; shift 2; fi
 if [ "$1" = -v ]; then : > "$TDK_TEST_STATE/sudo-validated"; exit 0; fi
 [ "$1" = -n ] && shift
 if [ "${TDK_TEST_SUDO_DENY:-0}" = 1 ]; then echo 'sudo: a password is required' >&2; exit 1; fi
@@ -89,8 +90,9 @@ chmod +x "$sandbox/bin/sudo" "$sandbox/bin/git" "$sandbox/bin/df" "$sandbox/bin/
 release=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sh "$sandbox/helper.sh" inspect > "$sandbox/inspect.txt"
 grep -q "IMAGE_REVISION=$TDK_TEST_BASE_SHA" "$sandbox/inspect.txt"
-TDK_INTERACTIVE_SUDO=1 sh "$sandbox/helper.sh" inspect > "$sandbox/interactive-inspect.txt"
+TDK_INTERACTIVE_SUDO=1 sh "$sandbox/helper.sh" inspect > "$sandbox/interactive-inspect.txt" 2> "$sandbox/interactive-prompt.txt"
 test -f "$sandbox/state/sudo-validated"
+grep -q '^NAS sudo password (input hidden):$' "$sandbox/interactive-prompt.txt"
 rm "$sandbox/state/sudo-validated"
 if TDK_TEST_GIT_UNAVAILABLE=1 sh "$sandbox/helper.sh" inspect > "$sandbox/git-unavailable.txt" 2>&1; then
   echo 'unavailable Git was accepted' >&2; exit 1
