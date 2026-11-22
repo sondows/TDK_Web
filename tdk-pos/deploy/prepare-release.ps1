@@ -39,11 +39,12 @@ function Assert-ScopedPaths([string[]]$Paths) {
   }
 }
 
-function Invoke-LocalCheck([string]$Name, [string[]]$Args) {
+function Invoke-LocalCheck([string]$Name, [string[]]$NodeArguments) {
+  if (-not $NodeArguments.Count) { throw "$Name has no Node.js arguments; refusing to launch the interactive REPL." }
   Write-Output "Checking $Name..."
   Push-Location -LiteralPath $app
   try {
-    & node @Args
+    & node @NodeArguments
     if ($LASTEXITCODE -ne 0) { throw "$Name failed (exit $LASTEXITCODE). No files were staged." }
   } finally { Pop-Location }
 }

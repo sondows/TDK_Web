@@ -21,12 +21,12 @@ function Assert-Exit([string]$Label) {
 }
 
 function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha = '', [string]$AgentUrl = '') {
-  $args = @($sshOptions + @($sshTarget, "sh -s -- $Action $ReleaseSha $BaseSha $AgentUrl"))
+  $sshArguments = @($sshOptions + @($sshTarget, "sh -s -- $Action $ReleaseSha $BaseSha $AgentUrl"))
   # SSH obtains any login password from the console. Never pass credentials through stdin.
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    $result = @(Get-Content -LiteralPath $helper -Raw -Encoding UTF8 | & ssh @args 2>&1)
+    $result = @(Get-Content -LiteralPath $helper -Raw -Encoding UTF8 | & ssh @sshArguments 2>&1)
     $code = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $previousPreference
