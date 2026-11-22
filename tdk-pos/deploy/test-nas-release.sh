@@ -27,7 +27,9 @@ exec "$@"
 EOF
 cat > "$sandbox/bin/git" <<'EOF'
 #!/bin/sh
+if [ "${TDK_TEST_GIT_UNAVAILABLE:-0}" = 1 ]; then exit 127; fi
 case "$1 $2" in
+  '--version ') echo 'git version fake' ;;
   'branch --show-current') echo main ;;
   'rev-parse HEAD') echo "$TDK_TEST_BASE_SHA" ;;
   'diff --quiet'|'diff --cached') exit 0 ;;
@@ -85,6 +87,10 @@ chmod +x "$sandbox/bin/sudo" "$sandbox/bin/git" "$sandbox/bin/df" "$sandbox/bin/
 release=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sh "$sandbox/helper.sh" inspect > "$sandbox/inspect.txt"
 grep -q "IMAGE_REVISION=$TDK_TEST_BASE_SHA" "$sandbox/inspect.txt"
+if TDK_TEST_GIT_UNAVAILABLE=1 sh "$sandbox/helper.sh" inspect > "$sandbox/git-unavailable.txt" 2>&1; then
+  echo 'unavailable Git was accepted' >&2; exit 1
+fi
+grep -q 'Git CLI is unavailable in the NAS non-interactive SSH shell' "$sandbox/git-unavailable.txt"
 sh "$sandbox/helper.sh" prepare "$release" "$TDK_TEST_BASE_SHA" > "$sandbox/prepare.txt"
 grep -q '^ROLLBACK PREPARED:' "$sandbox/prepare.txt"
 test -s "$sandbox/backups/$release/old-image.tar"
@@ -128,4 +134,4 @@ if TDK_TEST_SUDO_DENY=1 sh "$sandbox/helper.sh" inspect > "$sandbox/sudo-fail.tx
 fi
 grep -q 'noninteractive Docker sudo is unavailable' "$sandbox/sudo-fail.txt"
 
-printf 'PASS: inspect, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial\n'
+printf 'PASS: inspect, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial\n'

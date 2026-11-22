@@ -60,6 +60,27 @@ trap cleanup 0 HUP INT TERM
 
 fail() { printf 'RELEASE FAILED: %s\n' "$*" >&2; exit 1; }
 
+require_git() {
+  # Non-interactive SSH sessions may omit application directories from PATH.
+  if ! command -v git >/dev/null 2>&1; then
+    for git_dir in /usr/local/bin /opt/bin /usr/bin /bin /volume1/.@plugins/AppCentral/git/bin /volume1/.@plugins/AppCentral/git/data/bin; do
+      if [ -x "$git_dir/git" ]; then
+        PATH="$git_dir:$PATH"
+        export PATH
+        break
+      fi
+    done
+  fi
+  command -v git >/dev/null 2>&1 && git --version >/dev/null 2>&1 ||
+    fail 'Git CLI is unavailable in the NAS non-interactive SSH shell. Check its installation and executable path; no deployment was started.'
+}
+
+require_main_branch() {
+  require_git
+  branch=$(git branch --show-current) || fail 'NAS Git branch lookup failed'
+  [ "$branch" = main ] || fail "NAS repository is not on main (branch: ${branch:-detached})"
+}
+
 # Separate, explicit baseline registration for a legacy image without a Git label.
 # The operator must first verify historical deployment evidence and approve its hash.
 if [ "$mode" = register-baseline ]; then
@@ -68,6 +89,7 @@ if [ "$mode" = register-baseline ]; then
   case "$device_agent_url" in *[!0-9a-f]*|'') fail 'evidence SHA-256 must be 64 lowercase hex characters' ;; esac
   [ "${#device_agent_url}" -eq 64 ] || fail 'evidence SHA-256 must be 64 lowercase hex characters'
   cd "$repo" || fail 'NAS repository missing'
+  require_git
   [ "$(git rev-parse HEAD)" = "$release_sha" ] || fail 'NAS checkout does not match the verified baseline SHA'
   cd "$app_dir" || fail 'NAS application directory missing'
   container=$(sudo -n docker compose ps -q tdk-pos) || fail 'Docker access unavailable'
@@ -92,7 +114,7 @@ fi
 # Inspect never writes to the NAS and never prints environment secrets.
 if [ "$mode" = inspect ]; then
   cd "$repo" || fail 'NAS repository missing'
-  [ "$(git branch --show-current)" = main ] || fail 'NAS repository is not on main'
+  require_main_branch
   source_sha=$(git rev-parse HEAD) || fail 'NAS Git HEAD unavailable'
   valid_sha "$source_sha" || fail 'NAS Git HEAD is not a full SHA'
   sudo -n docker version --format '{{.Server.Version}}' >/dev/null || fail 'noninteractive Docker sudo is unavailable; configure approved restricted sudo rules'
@@ -171,7 +193,7 @@ if [ "$mode" = deploy ]; then
 fi
 
 cd "$repo" || fail 'NAS repository missing'
-[ "$(git branch --show-current)" = main ] || fail 'NAS repository is not on main'
+require_main_branch
 [ "$(git rev-parse HEAD)" = "$base_sha" ] || fail 'NAS checkout differs from approved base SHA'
 git diff --quiet -- tdk-pos/docker-compose.yml || fail 'NAS Compose file has local edits'
 git diff --cached --quiet -- tdk-pos/docker-compose.yml || fail 'NAS Compose file has staged edits'
