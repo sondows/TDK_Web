@@ -2490,8 +2490,10 @@ Follow-up UX correction: Current HEAD does not contain the modified deployment c
 |---|---|---|
 | 1 | Inventory TDKON changes, existing staging, ignored credentials, and remote branch | PASS |
 | 2 | Implement scoped test → stage → review → commit → push flow without touching other projects | PASS — script syntax and path scope reviewed |
-| 3 | Verify safe staging, secret/path guards, failure behavior, and app tests | IN_PROGRESS — isolated staging found only TDKON files; app checks run in release preparation |
-| 4 | Prepare the reviewed TDKON release commit and push only after tests pass | TODO |
-| 5 | Confirm the resulting SHA, clean TDKON scope, remote match, and no NAS deployment | TODO |
+| 3 | Verify safe staging, secret/path guards, failure behavior, and app tests | PASS — 31 TDKON paths, path/whitespace guards, TypeScript/ESLint/28 units/build/TEST QR checks |
+| 4 | Prepare the reviewed TDKON release commit and push only after tests pass | PASS — `f72c10e4e127b6f92950138aed72a572655b9de9` pushed normally |
+| 5 | Confirm the resulting SHA, clean TDKON scope, remote match, and no NAS deployment | PASS — local and remote SHA matched; TDKON scope and index clean; no NAS call |
 
 The user explicitly authorized automatic commit and push after checks. Scope is root `deploy.bat` and `tdk-pos`, excluding ignored credentials, local HTTPS material, generated files, and unrelated projects. This task does not authorize an operating NAS deployment or database change.
+
+Release preparation completed: The `PrepareRelease` mode staged and committed exactly the 31 reviewed TDKON paths after all required local/TEST checks passed, then pushed without force. Its output and a separate read-only remote check showed `origin/main` at `f72c10e4e127b6f92950138aed72a572655b9de9`. The TDKON worktree and real index were clean afterward; 1292 unrelated working-tree changes remained untouched. No SSH, NAS image backup/deploy, Docker/Caddy restart, or operating DB change occurred. This final plan update is documentation only and must be committed separately without rerunning app tests.
