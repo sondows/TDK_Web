@@ -3,11 +3,12 @@ import { db } from "@/db";
 import { auditLogs, diningTables, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { createQrAccessToken, getQrAccessTokenFromCookies, hashQrToken, qrSessionRedirectResponse, resolveQrOrderSession } from "@/lib/qr-order-auth";
 import { recordQrAccess, type QrAccessFailureType } from "@/lib/qr-access-log";
+import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
 
 export const dynamic = "force-dynamic";
 
-const unavailable = (request: Request) => Response.redirect(new URL("/qrorder/unavailable", request.url));
-const serviceUnavailable = (request: Request) => Response.redirect(new URL("/qrorder/service-unavailable", request.url));
+const unavailable = (request: Request) => Response.redirect(qrCustomerRedirectUrl(request, "/qrorder/unavailable"));
+const serviceUnavailable = (request: Request) => Response.redirect(qrCustomerRedirectUrl(request, "/qrorder/service-unavailable"));
 
 function logQrAccessError(phase: string, qrCodeId: number | null, error: unknown) {
   const rootCause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
@@ -45,7 +46,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
 
     if (!wasTableQr) {
       if (qr.status === "LOCKED" || qr.status === "RETIRED" || qr.targetType === "UNASSIGNED") return unavailable(request);
-      return Response.redirect(new URL(qr.targetType === "WAITING" ? "/qrorder/wait" : "/qrorder/guest", request.url));
+      return Response.redirect(qrCustomerRedirectUrl(request, qr.targetType === "WAITING" ? "/qrorder/wait" : "/qrorder/guest"));
     }
     loggedQrCodeId = qrCodeId;
 
@@ -69,13 +70,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
       if (current?.tableId === qrTableId) {
         await recordQrAccess(qrCodeId, "QR_ACCESS_REUSED");
         authEventRecorded = true;
-        if (current.sessionId !== null) return Response.redirect(new URL("/qrorder", request.url));
+        if (current.sessionId !== null) return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
         const [ownOrder] = await db.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
           .where(eq(qrOrders.qrSessionId, current.qrSessionId)).limit(1);
-        if (ownOrder) return Response.redirect(new URL("/qrorder", request.url));
+        if (ownOrder) return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
         const [occupied] = await db.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
           .where(and(eq(tableSessions.tableId, qrTableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).limit(1);
-        return Response.redirect(new URL(occupied ? "/qrorder/join-required" : "/qrorder/order", request.url));
+        return Response.redirect(qrCustomerRedirectUrl(request, occupied ? "/qrorder/join-required" : "/qrorder/order"));
       }
       if (current) {
         await recordQrAccess(qrCodeId, "QR_ACCESS_FAILED", "SESSION_TABLE_MISMATCH");

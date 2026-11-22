@@ -28,6 +28,8 @@ test("the DDNS host is allowed only for QR development routes and the exact forw
   assert.equal(isQrDevelopmentHost("tdkimchi.iptime.org:8090", "production"), false);
   assert.equal(isQrDevelopmentPathAllowed("/qr", "GET"), true);
   assert.equal(isQrDevelopmentPathAllowed("/qr/wait", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/tdkqrs/23456789ABCDEFGH", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed(`/tdkqrs/join/${"a".repeat(43)}`, "GET"), true);
   assert.equal(isQrDevelopmentPathAllowed("/api/qr/wait-orders/123", "PATCH"), true);
   assert.equal(isQrDevelopmentPathAllowed("/api/menu-images/4/qr-image.webp", "GET"), true);
   for (const path of ["/tdkpos", "/pos", "/tdkadm", "/admin", "/tdkkds", "/kitchen", "/hos", "/api/auth/login", "/api/pos/qr-wait-orders", "/api/db-test"]) {
@@ -115,6 +117,10 @@ test("POS and KDS paths are blocked on the public Host, including old and API ro
 });
 
 test("external Host keeps management and read-only assets while rejecting unknown paths", () => {
+  for (const path of ["/tdkqrs/23456789ABCDEFGH", "/tdkqrs/not-a-qr", `/tdkqrs/join/${"a".repeat(43)}`, "/q/23456789ABCDEFGH"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+  }
   for (const path of ["/", "/admin/login", "/api/admin-center/login", "/api/admin-center/devices", "/api/admin/dashboard", "/api/customers", "/api/pos-settings/business-day", "/manifest.webmanifest", "/icons/tdk-pos-192.png", "/_next/static/chunks/app.js"]) {
     assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
   }

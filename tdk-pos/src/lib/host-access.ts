@@ -41,7 +41,7 @@ export function isQrDevelopmentHost(hostHeader: string | null, nodeEnv = process
 /** Only customer QR pages, QR APIs and the assets required to render them are exposed. */
 export function isQrDevelopmentPathAllowed(pathname: string, method: string): boolean {
   const verb = method.toUpperCase();
-  if ((pathname === "/qr" || pathname === "/qr/wait" || pathname === "/qrorder" || pathname.startsWith("/qrorder/") || /^\/q\/[A-Za-z0-9_-]+(?:\/join)?$/.test(pathname) || /^\/q\/join\/[A-Za-z0-9_-]+$/.test(pathname)) && (verb === "GET" || verb === "HEAD")) return true;
+  if ((pathname === "/qr" || pathname === "/qr/wait" || pathname === "/qrorder" || pathname.startsWith("/qrorder/") || /^\/(?:q|tdkqrs)\/[A-Za-z0-9_-]{1,64}$/.test(pathname) || /^\/(?:q|tdkqrs)\/join\/[A-Za-z0-9_-]{1,64}$/.test(pathname)) && (verb === "GET" || verb === "HEAD")) return true;
   if ((pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title" || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname) || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)) &&
       ["GET", "HEAD"].includes(verb)) return true;
   if ((pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" ||
@@ -79,7 +79,7 @@ function isCustomerQrApiPathAllowed(pathname: string, method: string): boolean {
 function isCustomerQrPageAllowed(pathname: string, method: string): boolean {
   if (!isReadOnly(method)) return false;
   return pathname === "/qr" || pathname === "/qr/wait" || pathname === "/qrorder" || pathname.startsWith("/qrorder/")
-    || /^\/q\/[A-Za-z0-9_-]{16}$/.test(pathname) || /^\/q\/join\/[A-Za-z0-9_-]{40,64}$/.test(pathname);
+    || /^\/(?:q|tdkqrs)\/[A-Za-z0-9_-]{1,64}$/.test(pathname) || /^\/(?:q|tdkqrs)\/join\/[A-Za-z0-9_-]{1,64}$/.test(pathname);
 }
 export function isExternalPosPath(pathname: string): boolean {
   return pathname === "/login" || isPathOrChild(pathname, "/pos") || isPathOrChild(pathname, "/tdkpos")

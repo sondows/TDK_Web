@@ -8,6 +8,7 @@ import { db, pool } from "@/db";
 import { checkouts, diningTables, orders, paymentSessionAllocations, payments, qrCodes, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { QR_ORDER_ACCESS_MAX_AGE_SECONDS, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 import { classifyQrOrderAccessState } from "@/lib/qr-order-access-state";
+import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
 
 export { QR_ORDER_ACCESS_MAX_AGE_SECONDS } from "@/lib/qr-session-expiry-policy";
 
@@ -54,7 +55,7 @@ export function qrSessionCookieAttributes(request: Request, maxAgeSeconds = QR_O
 
 export function qrSessionRedirectResponse(request: Request, destination: string, token: string, maxAgeSeconds = QR_ORDER_ACCESS_MAX_AGE_SECONDS) {
   return new Response(null, { status: 302, headers: {
-    Location: new URL(destination, request.url).toString(),
+    Location: qrCustomerRedirectUrl(request, destination).toString(),
     "Set-Cookie": `${QR_ORDER_ACCESS_COOKIE}=${encodeURIComponent(token)}; ${qrSessionCookieAttributes(request, maxAgeSeconds)}`,
   } });
 }

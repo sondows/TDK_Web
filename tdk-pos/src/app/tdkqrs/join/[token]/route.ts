@@ -4,12 +4,13 @@ import { db } from "@/db";
 import { diningTables, qrCodes, qrSessionInvites, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { createQrAccessToken, hashQrToken, qrSessionRedirectResponse, QR_ORDER_ACCESS_MAX_AGE_SECONDS, resolveQrOrderRequest } from "@/lib/qr-order-auth";
 import { qrSessionCookieMaxAgeSeconds, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
+import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const token = (await params).token;
-  if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return Response.redirect(new URL("/qrorder/invite-invalid", request.url));
+  if (!/^[A-Za-z0-9_-]{40,64}$/.test(token)) return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder/invite-invalid"));
   const now = new Date();
   const tokenHash = createHash("sha256").update(token).digest("hex");
   try {
@@ -61,10 +62,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
       return { kind: "JOINED" as const, response: qrSessionRedirectResponse(request, "/qrorder", accessToken, cookieMaxAgeSeconds) };
     });
-    if (result.kind === "JOINED_TEST") return Response.redirect(new URL("/qrorder", request.url));
-    if (result.kind !== "JOINED") return Response.redirect(new URL(result.kind === "EXISTING" ? "/qrorder" : result.kind === "FULL" ? "/qrorder/invite-full" : "/qrorder/invite-invalid", request.url));
+    if (result.kind === "JOINED_TEST") return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
+    if (result.kind !== "JOINED") return Response.redirect(qrCustomerRedirectUrl(request, result.kind === "EXISTING" ? "/qrorder" : result.kind === "FULL" ? "/qrorder/invite-full" : "/qrorder/invite-invalid"));
     return result.response;
   } catch {
-    return Response.redirect(new URL("/qrorder/invite-invalid", request.url));
+    return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder/invite-invalid"));
   }
 }
