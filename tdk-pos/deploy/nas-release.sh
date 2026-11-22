@@ -81,6 +81,11 @@ require_main_branch() {
   [ "$branch" = main ] || fail "NAS repository is not on main (branch: ${branch:-detached})"
 }
 
+require_docker_sudo() {
+  docker_preflight=$(sudo -n docker version --format '{{.Server.Version}}' 2>&1) ||
+    fail "Docker preflight failed (sudo -n docker version): $docker_preflight"
+}
+
 # Separate, explicit baseline registration for a legacy image without a Git label.
 # The operator must first verify historical deployment evidence and approve its hash.
 if [ "$mode" = register-baseline ]; then
@@ -117,7 +122,7 @@ if [ "$mode" = inspect ]; then
   require_main_branch
   source_sha=$(git rev-parse HEAD) || fail 'NAS Git HEAD unavailable'
   valid_sha "$source_sha" || fail 'NAS Git HEAD is not a full SHA'
-  sudo -n docker version --format '{{.Server.Version}}' >/dev/null || fail 'noninteractive Docker sudo is unavailable; configure approved restricted sudo rules'
+  require_docker_sudo
   cd "$app_dir" || fail 'NAS application directory missing'
   sudo -n docker compose config --quiet || fail 'Docker Compose configuration is invalid or Docker permission is missing'
   container=$(sudo -n docker compose ps -q tdk-pos) || fail 'Docker Compose lookup failed'
@@ -178,7 +183,7 @@ restore_image() {
 }
 
 if [ "$mode" = rollback ]; then
-  sudo -n docker version --format '{{.Server.Version}}' >/dev/null || fail 'noninteractive Docker sudo is required for rollback'
+  require_docker_sudo
   restore_image
   exit 0
 fi
@@ -199,7 +204,7 @@ git diff --quiet -- tdk-pos/docker-compose.yml || fail 'NAS Compose file has loc
 git diff --cached --quiet -- tdk-pos/docker-compose.yml || fail 'NAS Compose file has staged edits'
 [ -f "$app_dir/.env.production" ] || fail 'production environment file missing'
 tr -d '\r' < "$app_dir/.env.production" | grep -Eq '^DB_NAME=TDK_POS$' || fail 'production DB identity setting missing'
-sudo -n docker version --format '{{.Server.Version}}' >/dev/null || fail 'noninteractive Docker sudo is required for deployment'
+require_docker_sudo
 cd "$app_dir" || fail 'NAS application directory missing'
 container=$(sudo -n docker compose ps -q tdk-pos)
 [ -n "$container" ] || fail 'running app container not found'

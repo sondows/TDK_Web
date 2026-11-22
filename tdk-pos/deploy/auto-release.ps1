@@ -36,7 +36,7 @@ function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha 
     if ($message -match 'REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed') { throw 'NAS host key verification failed. Check the NAS fingerprint with the administrator; do not disable checking.' }
     if ($message -match 'Permission denied \(publickey|Permission denied \(password') { throw 'NAS SSH authentication failed. Use an approved SSH key or enter the account password at the console.' }
     if ($message -match 'Connection refused|Connection timed out|No route to host|Could not resolve hostname') { throw "NAS network connection failed: $message" }
-    if ($message -match 'noninteractive sudo|password is required|not allowed to run sudo') { throw 'NAS sudo -n permission is missing. An administrator must approve only the required deployment commands; no Docker socket change is made.' }
+    if ($message -match 'sudo:.*(password is required|not allowed|must have a tty|a terminal is required)') { throw "NAS sudo -n authorization failed: $message" }
     throw "NAS $Action failed (exit $code): $message"
   }
   return @($result | ForEach-Object { "$_" })

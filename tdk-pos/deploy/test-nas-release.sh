@@ -21,6 +21,7 @@ cat > "$sandbox/bin/sudo" <<'EOF'
 #!/bin/sh
 [ "$1" = -n ] && shift
 if [ "${TDK_TEST_SUDO_DENY:-0}" = 1 ]; then echo 'sudo: a password is required' >&2; exit 1; fi
+if [ "${TDK_TEST_DOCKER_MISSING:-0}" = 1 ] && [ "$1" = docker ]; then echo 'sudo: docker: command not found' >&2; exit 127; fi
 if [ "$1" = install ]; then shift 4; mkdir -p "$@"; exit 0; fi
 if [ "$1" = chmod ]; then exit 0; fi
 exec "$@"
@@ -132,6 +133,11 @@ grep -q "^BASELINE_EVIDENCE_SHA256=$evidence\$" "$sandbox/baseline-inspect.txt"
 if TDK_TEST_SUDO_DENY=1 sh "$sandbox/helper.sh" inspect > "$sandbox/sudo-fail.txt" 2>&1; then
   echo 'missing sudo permission was accepted' >&2; exit 1
 fi
-grep -q 'noninteractive Docker sudo is unavailable' "$sandbox/sudo-fail.txt"
+grep -q 'Docker preflight failed (sudo -n docker version): sudo: a password is required' "$sandbox/sudo-fail.txt"
 
-printf 'PASS: inspect, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial\n'
+if TDK_TEST_DOCKER_MISSING=1 sh "$sandbox/helper.sh" inspect > "$sandbox/docker-missing.txt" 2>&1; then
+  echo 'missing Docker executable was accepted' >&2; exit 1
+fi
+grep -q 'Docker preflight failed (sudo -n docker version): sudo: docker: command not found' "$sandbox/docker-missing.txt"
+
+printf 'PASS: inspect, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'
