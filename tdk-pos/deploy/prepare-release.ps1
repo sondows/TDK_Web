@@ -54,6 +54,16 @@ function Invoke-DevelopmentChecks() {
   Invoke-LocalCheck 'ESLint' @('node_modules/eslint/bin/eslint.js', 'src/app/api/admin/qr-codes', 'src/app/api/qr/table-order-link/route.ts', 'src/app/q', 'src/app/qrorder/[notice]/page.tsx', 'src/lib/admin-qr-export.test.mjs', 'src/lib/admin-qr-export.ts', 'src/lib/qr-order-auth.ts', 'scripts/verify-qr-cancellation-scope.cjs', 'scripts/verify-qr-entry-development.cjs', 'scripts/verify-qr-invite-development.cjs')
   Invoke-LocalCheck 'QR unit tests' @('--experimental-strip-types', '--test', 'src/lib/admin-qr-export.test.mjs', 'src/lib/qr-session-expiry-policy.test.mjs', 'src/lib/qr-processing-policy.test.mjs', 'src/lib/qr-order-access-state.test.mjs', 'src/lib/qr-table-indicators-model.test.mjs', 'src/lib/hos-table-view-state.test.mjs', 'src/lib/hos-qr-order-errors.test.mjs', 'src/lib/qr-order-invite-failure.test.mjs', 'src/lib/qr-pending-order-rounds.test.mjs', 'src/lib/qr-order-approval-navigation.test.mjs')
   Invoke-LocalCheck 'Next production build' @('node_modules/next/dist/bin/next', 'build')
+  $shell = 'C:\Program Files\Git\bin\sh.exe'
+  if (-not (Test-Path -LiteralPath $shell)) { throw 'Git Bash shell is required for NAS helper verification.' }
+  Write-Output 'Checking NAS helper syntax and isolated behavior...'
+  & $shell -n (Join-Path $app 'deploy/nas-release.sh')
+  if ($LASTEXITCODE -ne 0) { throw 'NAS helper shell syntax failed.' }
+  & $shell (Join-Path $app 'deploy/test-nas-release.sh')
+  if ($LASTEXITCODE -ne 0) { throw 'NAS helper isolated behavior failed.' }
+  Write-Output 'Checking interactive SSH transport...'
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'deploy/test-auto-release-transport.ps1')
+  if ($LASTEXITCODE -ne 0) { throw 'Interactive SSH transport verification failed.' }
   $priorTestBase = $env:TDK_QR_TEST_BASE_URL
   try {
     Push-Location -LiteralPath $app

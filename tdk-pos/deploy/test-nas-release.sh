@@ -19,6 +19,7 @@ sed -e "s#^repo=/volume1/TDK-POS\$#repo=$sandbox/repo#" \
 
 cat > "$sandbox/bin/sudo" <<'EOF'
 #!/bin/sh
+if [ "$1" = -v ]; then : > "$TDK_TEST_STATE/sudo-validated"; exit 0; fi
 [ "$1" = -n ] && shift
 if [ "${TDK_TEST_SUDO_DENY:-0}" = 1 ]; then echo 'sudo: a password is required' >&2; exit 1; fi
 if [ "${TDK_TEST_DOCKER_MISSING:-0}" = 1 ] && [ "$1" = docker ]; then echo 'sudo: docker: command not found' >&2; exit 127; fi
@@ -88,6 +89,9 @@ chmod +x "$sandbox/bin/sudo" "$sandbox/bin/git" "$sandbox/bin/df" "$sandbox/bin/
 release=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 sh "$sandbox/helper.sh" inspect > "$sandbox/inspect.txt"
 grep -q "IMAGE_REVISION=$TDK_TEST_BASE_SHA" "$sandbox/inspect.txt"
+TDK_INTERACTIVE_SUDO=1 sh "$sandbox/helper.sh" inspect > "$sandbox/interactive-inspect.txt"
+test -f "$sandbox/state/sudo-validated"
+rm "$sandbox/state/sudo-validated"
 if TDK_TEST_GIT_UNAVAILABLE=1 sh "$sandbox/helper.sh" inspect > "$sandbox/git-unavailable.txt" 2>&1; then
   echo 'unavailable Git was accepted' >&2; exit 1
 fi
@@ -140,4 +144,4 @@ if TDK_TEST_DOCKER_MISSING=1 sh "$sandbox/helper.sh" inspect > "$sandbox/docker-
 fi
 grep -q 'Docker preflight failed (sudo -n docker version): sudo: docker: command not found' "$sandbox/docker-missing.txt"
 
-printf 'PASS: inspect, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'
+printf 'PASS: inspect, interactive sudo validation, missing Git diagnostic, backup/checksum, rollback, corrupt-backup rejection, save failure, rollback failure, SHA guard, approved baseline, sudo denial, missing Docker diagnostic\n'

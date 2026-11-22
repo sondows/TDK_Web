@@ -60,6 +60,15 @@ trap cleanup 0 HUP INT TERM
 
 fail() { printf 'RELEASE FAILED: %s\n' "$*" >&2; exit 1; }
 
+# The one-click SSH path has a terminal and asks sudo to validate its timestamp
+# before each privileged command. Other entry points remain non-interactive.
+sudo() {
+  if [ "${TDK_INTERACTIVE_SUDO:-0}" = 1 ] && [ "${1:-}" = -n ]; then
+    command sudo -v || return
+  fi
+  command sudo "$@"
+}
+
 require_git() {
   # Non-interactive SSH sessions may omit application directories from PATH.
   if ! command -v git >/dev/null 2>&1; then

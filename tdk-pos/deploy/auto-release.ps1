@@ -8,7 +8,7 @@ $previousIndex = $env:GIT_INDEX_FILE
 $temporaryIndex = Join-Path ([IO.Path]::GetTempPath()) ('tdk-auto-index-' + [guid]::NewGuid().ToString('N'))
 $manifestFile = Join-Path ([IO.Path]::GetTempPath()) ('tdk-auto-paths-' + [guid]::NewGuid().ToString('N') + '.txt')
 $sshTarget = 'sondows@192.168.0.83'
-$sshOptions = @('-p', '22', '-o', 'StrictHostKeyChecking=yes', '-o', 'NumberOfPasswordPrompts=1', '-o', 'ConnectTimeout=10', '-T')
+$sshOptions = @('-p', '22', '-o', 'StrictHostKeyChecking=yes', '-o', 'NumberOfPasswordPrompts=1', '-o', 'ConnectTimeout=10', '-tt')
 
 function Invoke-Git([string[]]$GitArgs) {
   $result = @(& git -C $repo @GitArgs 2>&1)
@@ -21,12 +21,36 @@ function Assert-Exit([string]$Label) {
 }
 
 function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha = '', [string]$AgentUrl = '') {
-  $sshArguments = @($sshOptions + @($sshTarget, "sh -s -- $Action $ReleaseSha $BaseSha $AgentUrl"))
-  # SSH obtains any login password from the console. Never pass credentials through stdin.
+  if ($Action -notin @('inspect', 'prepare', 'deploy', 'rollback')) { throw "Unsupported NAS action: $Action" }
+  if ($ReleaseSha -and $ReleaseSha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid NAS release SHA.' }
+  if ($BaseSha -and $BaseSha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid NAS base SHA.' }
+  if ($AgentUrl -and $AgentUrl -notmatch '^http://127\.0\.0\.1:[0-9]{2,5}$') { throw 'Invalid NAS Device Agent URL.' }
+  # Put the public helper in the SSH command, leaving stdin attached to the
+  # terminal for SSH and sudo passwords. Never pass a password through stdin.
+  $scriptText = (Get-Content -LiteralPath $helper -Raw -Encoding UTF8).Replace("`r`n", "`n")
+  $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($scriptText))
+  $remoteCommand = @'
+PATH=$PATH:/opt/bin:/usr/local/bin:/usr/bin:/bin
+export PATH
+command -v base64 >/dev/null 2>&1 || { echo 'NAS base64 utility is unavailable' >&2; exit 127; }
+if [ $(printf Zg== | base64 -d) != f ]; then echo 'NAS base64 decoder failed its self-test' >&2; exit 127; fi
+TDK_INTERACTIVE_SUDO=1
+export TDK_INTERACTIVE_SUDO
+printf 'NAS sudo password may be requested; input is hidden.\n'
+printf %s __PAYLOAD__ | base64 -d | sh -s -- __ARGUMENTS__
+'@
+  $remoteCommand = $remoteCommand.Replace('__PAYLOAD__', $payload).Replace('__ARGUMENTS__', "$Action $ReleaseSha $BaseSha $AgentUrl")
+  if ($remoteCommand.Length -gt 30000) { throw 'NAS helper exceeds the safe Windows SSH command length.' }
+  $sshArguments = @($sshOptions + @($sshTarget, $remoteCommand))
+  Write-Host "Connecting to NAS for $Action. Enter SSH/sudo passwords in this terminal when prompted."
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    $result = @(Get-Content -LiteralPath $helper -Raw -Encoding UTF8 | & ssh @sshArguments 2>&1)
+    $result = @(& ssh @sshArguments 2>&1 | ForEach-Object {
+      $line = "$($_)".TrimEnd("`r")
+      if ($line -match 'NAS sudo password may be requested|^\[sudo\]|^Password:|password for |^sudo:') { Write-Host $line }
+      $line
+    })
     $code = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $previousPreference
@@ -36,7 +60,7 @@ function Invoke-Nas([string]$Action, [string]$ReleaseSha = '', [string]$BaseSha 
     if ($message -match 'REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed') { throw 'NAS host key verification failed. Check the NAS fingerprint with the administrator; do not disable checking.' }
     if ($message -match 'Permission denied \(publickey|Permission denied \(password') { throw 'NAS SSH authentication failed. Use an approved SSH key or enter the account password at the console.' }
     if ($message -match 'Connection refused|Connection timed out|No route to host|Could not resolve hostname') { throw "NAS network connection failed: $message" }
-    if ($message -match 'sudo:.*(password is required|not allowed|must have a tty|a terminal is required)') { throw "NAS sudo -n authorization failed: $message" }
+    if ($message -match 'sudo:.*(password is required|not allowed|must have a tty|a terminal is required)') { throw "NAS sudo authentication failed: $message" }
     throw "NAS $Action failed (exit $code): $message"
   }
   return @($result | ForEach-Object { "$_" })
