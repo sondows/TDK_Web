@@ -52,6 +52,13 @@ export function qrSessionCookieAttributes(request: Request, maxAgeSeconds = QR_O
   return `Path=/; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }
 
+export function qrSessionRedirectResponse(request: Request, destination: string, token: string, maxAgeSeconds = QR_ORDER_ACCESS_MAX_AGE_SECONDS) {
+  return new Response(null, { status: 302, headers: {
+    Location: new URL(destination, request.url).toString(),
+    "Set-Cookie": `${QR_ORDER_ACCESS_COOKIE}=${encodeURIComponent(token)}; ${qrSessionCookieAttributes(request, maxAgeSeconds)}`,
+  } });
+}
+
 export async function getQrAccessTokenFromCookies() {
   return (await cookies()).get(QR_ORDER_ACCESS_COOKIE)?.value ?? null;
 }

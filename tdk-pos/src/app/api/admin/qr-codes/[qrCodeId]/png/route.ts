@@ -18,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ qrCo
   if (!qr) return Response.json({ success: false, message: "QR을 찾을 수 없습니다." }, { status: 404 });
   if (qr.status === "RETIRED") return Response.json({ success: false, message: "폐기된 QR은 내보낼 수 없습니다." }, { status: 409 });
   try {
-    const png = await renderAdminQrPng(publicQrUrl(request, qr.identifier), background);
+    const png = await renderAdminQrPng(publicQrUrl(qr.identifier), background);
     return new Response(new Uint8Array(png), { headers: {
       "Content-Type": "image/png",
       "Content-Disposition": `attachment; filename="${qr.managementNumber}.png"`,
@@ -26,6 +26,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ qrCo
       "X-Content-Type-Options": "nosniff",
     } });
   } catch {
-    return Response.json({ success: false, message: "QR PNG 생성에 실패했습니다." }, { status: 503 });
+    return Response.json({ success: false, message: "QR 공개 주소 설정 또는 PNG 생성을 확인해 주세요." }, { status: 503 });
   }
 }

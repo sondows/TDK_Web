@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       return Response.json({ success: false }, { status: 404, headers: { "Cache-Control": "no-store" } });
     }
 
-    return Response.json({ success: true, tableNo: qr.tableNo, url: publicQrUrl(request, qr.identifier) }, {
+    return Response.json({ success: true, tableNo: qr.tableNo, url: publicQrUrl(qr.identifier) }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch {

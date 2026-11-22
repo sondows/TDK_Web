@@ -2383,3 +2383,115 @@ Verification update: HOS draft cart was moved to a QRS-style menu drawer; detail
 Checkpoint before implementation: `checkpoints/20261121-pos-idle-reset-prechange.zip`.
 
 Verification update: QR Orders idle timeout returns to the Store tab and clears the selected table while preserving the configured timeout and input event list. QR approval/rejection and token confirmation work block the timer. The visible tab is renamed to 매장. TypeScript, focused unit tests, and diff check pass; ESLint passes for QrOrdersWorkspace and the helper but PosShell reports existing React Compiler/set-state-in-effect diagnostics outside this change. Browser interactions were not verified.
+
+## QR session table_id emergency review — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Read-only comparison of TDK_POS_TEST and TDK_POS QR session column, index, FK, and existing references | PASS |
+| 2 | Review committed migration against actual schema and MariaDB behavior | PASS |
+| 3 | Trace POS/HOS/QRS/cancellation queries and available NAS runtime evidence | PASS |
+| 4 | Run development-safe query and code checks; report unverified interactive flows | PASS |
+| 5 | Prepare production application decision and recovery steps without applying or deploying | PASS |
+
+Stage 1: Both databases independently identified by `SELECT DATABASE()` on MariaDB 10.11.18. Each already has nullable `BIGINT UNSIGNED qr_sessions.table_id`, index `(table_id,status)`, and FK to `dining_tables(table_id)`. FK names differ (`fk_qr_sessions_table_id` in TEST; `fk_qr_sessions_dining_table` in production) but definitions agree. TEST has 43 closed QR sessions; production has 6 active and 1 closed. All 50 rows have non-NULL table IDs and no orphaned table reference. The two existing POS/HOS QR indicator SQL queries executed successfully in both databases and returned no 1054 error. Production schema repair is therefore currently unnecessary. No DB writes were made.
+
+Stage 2: `db-migrations/20261122_qr_sessions_table_id.sql` matches the production column/index/FK now present. It is a one-time DDL, not safe to rerun after application; it does not handle partial application. Do not edit the already committed/applied file or create a duplicate migration for the current schema.
+
+Completion update: Stages 3, 4, and 5 PASS for available evidence; see `checkpoints/20261122-qr-session-schema-review.md`. POS/HOS QR indicator SQL succeeded against both DBs; the development query returned zero indicators and production returned one. TypeScript and focused ESLint passed, 21 related unit tests passed, and production build passed with the two existing menu-image-storage tracing warnings. No authenticated POS/HOS/QRS browser or write API integration test was run, and the NAS execution commit and historical application logs remain unverified. The current schema needs no migration or code change; any continuing incident needs runtime version and log evidence before a different repair is chosen. No database write, source behavior change, or NAS deployment was performed.
+
+## TDKON emergency recovery 2/5 — incident cause and repair design — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Reconcile stage 1 schema findings with local Git and current worktree | PASS |
+| 2 | Trace POS/HOS shared failure paths and historical HOS UI signature | PASS |
+| 3 | Trace 8T cancellation and QRS URL/session paths without creating sessions | PASS |
+| 4 | Check reachable public HTTPS and available NAS access; record exact evidence gaps | PASS |
+| 5 | Write conditional stage 3 repair plan based on confirmed causes | PASS |
+
+See `checkpoints/20261122-emergency-recovery-stage-02.md`. No source code, DB row/schema, NAS, Docker, Caddy, or QR session was changed in this stage. Exact NAS build and historical server errors remain unconfirmed because batch SSH authentication was denied; the static public QR notice endpoint was reachable through Caddy over HTTPS.
+
+## TDKON emergency recovery 3/5 — confirmed URL fix and development verification — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Preserve worktree and check stage 1/2 findings and NAS evidence | PASS |
+| 2 | Recheck POS/HOS evidence; change only reproduced defects | PASS — no source change justified without NAS log |
+| 3 | Make fixed-sticker QR image/export/table-order URLs use one validated HTTPS public origin | PASS |
+| 4 | Verify QR cancellation scope and rollback with isolated TEST DB fixtures | PASS |
+| 5 | Run focused tests, TypeScript, ESLint, build, and record operational gaps | PASS |
+
+Existing modifications to QR entry, QR notice, and the QR export test predate this stage and must be preserved. Production DB, NAS, Docker, Caddy, and live QR sessions are out of scope.
+
+Stage 3 completion: The QR entry development HTTP test reproduced a post-commit `TypeError: immutable` while adding `Set-Cookie` to `Response.redirect`; returning a new redirect response with headers fixed QR entry, order submission, and closed-session rejection in TEST. The public QR URL is now fixed to the validated HTTPS production origin across display, PNG, SVG, ZIP, and table-order link generation. Cancellation SQL scope, pending-order guard, repeat behavior, and rollback passed in isolated TEST transactions. POS/HOS and historical 8T causes remain unverified without NAS runtime/log access, so their source was not changed. See `checkpoints/20261122-emergency-recovery-stage-03.md` for evidence and remaining gates.
+
+## TDKON emergency recovery 4/5 — NAS deployment readiness review — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Reconcile stage 1–3 evidence with current Git and deployment scope | PASS |
+| 2 | Inspect read-only NAS access, operating schema, QR security and dependency compatibility | PASS |
+| 3 | Audit actual deployment script, backup and rollback behavior, and staged path validation | PASS |
+| 4 | Repeat required local checks and define the exact release gates | PASS |
+| 5 | Write an actionable 5th-stage deployment and rollback runbook with a go/no-go decision | PASS |
+
+This stage is documentation, analysis, read-only NAS/production-DB checks, and local verification only. No NAS deployment, operating DB write, Docker/Caddy restart, QR session mutation, Git reset, or path migration.
+
+Stage 4 decision: **deployment hold**. See `checkpoints/20261122-emergency-recovery-stage-04.md`. The guest join route still appends `Set-Cookie` to an immutable `Response.redirect` after committing the guest QR session; Node 22 reproduces `TypeError: immutable`. NAS SSH authentication denied, so running image/commit/logs and rollback assets remain unknown. The current `deploy.bat` auto-includes all dirty `tdk-pos` files and has only a replaceable rollback tag. A temporary isolated Git index reproduced its staged-path whitespace check with exit 0, without altering the real staging area. Read-only TDK_POS schema check confirmed the QR column/index/FK. TypeScript, scoped ESLint, 28 related tests, TEST QR entry/order/closure, TEST cancellation scope/rollback, and Next production build passed; two existing menu-image tracing warnings remain. No app code or operating system/data was changed in this stage.
+
+## TDKON emergency recovery 4.5/5 — invite join and release safety — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Preserve existing worktree and inspect QR join, release script, and stage 1–4 evidence | PASS |
+| 2 | Fix immutable redirect cookie response with shared QR response helper and retain auth policy | PASS |
+| 3 | Verify guest join and ordinary QR flows using isolated TEST DB fixtures | PASS |
+| 4 | Make deployment scope explicit and protect prior image/config in a dry-run-safe release workflow | PASS |
+| 5 | Run static checks, related tests, build, dry run, and write the 5th-stage go/no-go report | PASS |
+
+No production DB data, NAS service, Caddy/Docker process, operational QR session, or environment setting may be changed in this stage. Existing uncommitted code and documents remain intact.
+
+Stage 4.5 completion: See `checkpoints/20261122-emergency-recovery-stage-04_5.md`. Both QR entry routes now construct the shared cookie redirect response inside their DB transactions. The invite route additionally requires the current table QR code/link to be active. TEST HTTP checks for ordinary QR entry and invite join/order/security exceptions passed; the existing invite URL can be reused by a second customer until expiry/capacity, so its schema comment is inaccurate and policy needs review. The release tooling no longer auto-stages/commits/pushes, checks a committed SHA and exact approved path manifest with a temporary Git index, builds from a clean Git archive, and prepares an immutable image/config backup and rollback. Local clean-fixture dry run passed; current dirty worktree was safely rejected. Docker and NAS rollback remain unverified because Docker CLI is absent and SSH authentication failed. TypeScript, scoped ESLint, 28 related tests, Next build, PowerShell/POSIX shell syntax passed; two existing menu-image tracing warnings remain. 5th-stage **preparation** may proceed conditionally, but production deployment remains gated on NAS evidence, backups, release approval, and rollback verification.
+
+## TDKON emergency recovery stage 5 — production preflight — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Check approved read-only NAS SSH access and identify operating evidence | PASS — authentication denied; operating evidence unavailable |
+| 2 | Review running-version, incident-log, image/config backup, and rollback requirements | PASS — unresolved NAS gates documented |
+| 3 | Inventory exact local release candidates and compare invite behavior with policy comment | PASS — 19 candidate paths; no release SHA yet |
+| 4 | Run TypeScript, ESLint, QR/TEST integration checks, build, script syntax, and safe dry run | PASS — tests/build pass; dirty checkout blocked as intended |
+| 5 | Record A–G preflight report and production go/no-go | PASS — deployment hold |
+
+See `checkpoints/20261122-emergency-recovery-stage-05-preflight.md`. NAS SSH reached authentication but failed; actual image/commit/logs/backups and rollback remain unverified. The current checkout has no approved release commit or known NAS base SHA, so the final manifest cannot be fixed. The local checks passed, and the script correctly rejected the uncommitted worktree. No production DB/NAS/Docker/Caddy state, Git index/commit/remote, or operating QR/order data was changed.
+
+## TDKON one-click guarded deployment automation — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Audit current launcher, local Git gates, NAS helper, and unresolved production evidence | PASS |
+| 2 | Add automatic local/NAS read-only discovery and explicit fail-closed diagnostics | PASS — local cancellation and isolated NAS inspect/permission checks |
+| 3 | Add protected backup preparation, final approval, post-release checks, and rollback handling | PASS — local script and isolated backup/rollback checks; NAS execution remains unverified |
+| 4 | Test the local controller and shell helper in isolation; run app checks | PASS — guard tests, TEST QR integration, 28 units, TypeScript/ESLint/build |
+| 5 | Document exact one-click behavior, prerequisites, limits, and no-deployment result | PASS |
+
+This task may change local deployment scripts, tests, and documentation. It must not deploy, restart NAS containers, alter operating DB, create NAS backups, change NAS privileges, commit/push, or reset the current worktree during Codex execution. A later interactive `deploy.bat` run may perform NAS backup and deployment only after its own gates and final user confirmation.
+
+Completion: See `deploy/ONE-CLICK-RELEASE.md` and `checkpoints/20261122-one-click-deployment-automation.md`. `deploy.bat` now enters `Auto` without SHA arguments. The controller blocks uncommitted tooling/app source, unverified NAS image-to-commit identity, failed SSH/sudo, invalid release scope, failed local checks, and failed image backup. It prints the exact diff and manifest digest, prepares a protected backup, then requires the full SHA before replacement. The NAS helper adds read-only inspect, explicit approved legacy baseline registration, backup preparation, post-start route/log checks, and rollback paths. A fake NAS test passed inspect, checksum, restore, corruption, save/restore failure, SHA, baseline, and sudo denial cases. The real NAS image/privileges/backup/restore and actual one-click success path remain unverified; no production action was taken. Current dirty tool/source checkout intentionally fails closed.
+
+Follow-up: `git status --untracked-files=all` encountered a permission warning while traversing the local `.local-dev-https` certificate directory. `auto-release.ps1` now verifies that directory has no tracked files, then excludes only that directory from untracked status traversal. The same `deploy.bat` invocation reached the intended approval/cancel prompt without the warning; choosing `EXISTING` reached the separate uncommitted-tooling guard. No certificate, Git index, or NAS state was changed.
+
+Follow-up UX correction: Current HEAD does not contain the modified deployment controller or QR source. The extra `EXISTING` prompt could not lead to a deployable release, so the controller now reports the uncommitted deployment-tool files and stops immediately. Unrelated dirty projects remain preserved without an extra prompt. The full release SHA remains the only final deployment approval after all gates pass.
+
+## TDKON scoped release commit and push — 2026-11-22
+
+| Stage | Goal | Status |
+|---|---|---|
+| 1 | Inventory TDKON changes, existing staging, ignored credentials, and remote branch | PASS |
+| 2 | Implement scoped test → stage → review → commit → push flow without touching other projects | PASS — script syntax and path scope reviewed |
+| 3 | Verify safe staging, secret/path guards, failure behavior, and app tests | IN_PROGRESS — isolated staging found only TDKON files; app checks run in release preparation |
+| 4 | Prepare the reviewed TDKON release commit and push only after tests pass | TODO |
+| 5 | Confirm the resulting SHA, clean TDKON scope, remote match, and no NAS deployment | TODO |
+
+The user explicitly authorized automatic commit and push after checks. Scope is root `deploy.bat` and `tdk-pos`, excluding ignored credentials, local HTTPS material, generated files, and unrelated projects. This task does not authorize an operating NAS deployment or database change.

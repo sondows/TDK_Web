@@ -1,12 +1,27 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, diningTables, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
-import { createQrAccessToken, getQrAccessTokenFromCookies, hashQrToken, qrSessionCookieAttributes, QR_ORDER_ACCESS_MAX_AGE_SECONDS, resolveQrOrderSession } from "@/lib/qr-order-auth";
+import { createQrAccessToken, getQrAccessTokenFromCookies, hashQrToken, qrSessionRedirectResponse, resolveQrOrderSession } from "@/lib/qr-order-auth";
 import { recordQrAccess, type QrAccessFailureType } from "@/lib/qr-access-log";
 
 export const dynamic = "force-dynamic";
 
 const unavailable = (request: Request) => Response.redirect(new URL("/qrorder/unavailable", request.url));
+const serviceUnavailable = (request: Request) => Response.redirect(new URL("/qrorder/service-unavailable", request.url));
+
+function logQrAccessError(phase: string, qrCodeId: number | null, error: unknown) {
+  const rootCause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  const detail = rootCause as Error & { code?: string; errno?: number; sqlState?: string };
+  console.error("QR customer entry failed", {
+    phase,
+    qrCodeId,
+    name: rootCause instanceof Error ? rootCause.name : undefined,
+    message: rootCause instanceof TypeError ? rootCause.message : undefined,
+    code: detail?.code,
+    errno: detail?.errno,
+    sqlState: detail?.sqlState,
+  });
+}
 
 export async function GET(request: Request, { params }: { params: Promise<{ identifier: string }> }) {
   const identifier = (await params).identifier;
@@ -70,7 +85,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
     }
 
     const token = createQrAccessToken();
-    let result: { inUse: boolean } | { failure: QrAccessFailureType } | null;
+    let result: { response: Response } | { failure: QrAccessFailureType } | null;
     try {
       result = await db.transaction(async tx => {
         const [lockedQr] = await tx.select({ qrCodeId: qrCodes.qrCodeId, status: qrCodes.status, targetType: qrCodes.targetType })
@@ -85,12 +100,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
         const openSessions = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
           .where(and(eq(tableSessions.tableId, table.tableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
         await tx.insert(qrSessions).values({ sessionId: null, tableId: table.tableId, tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
-        return { inUse: openSessions.length > 0 };
+        return { response: qrSessionRedirectResponse(request, openSessions.length > 0 ? "/qrorder/join-required" : "/qrorder/order", token) };
       });
-    } catch {
+    } catch (error) {
+      logQrAccessError("SESSION_ISSUE", qrCodeId, error);
       await recordQrAccess(qrCodeId, "QR_ACCESS_FAILED", "SESSION_ISSUE_FAILED");
       authEventRecorded = true;
-      return unavailable(request);
+      return serviceUnavailable(request);
     }
 
     if (!result || "failure" in result) {
@@ -101,12 +117,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
 
     await recordQrAccess(qrCodeId, "QR_ACCESS_ISSUED");
     authEventRecorded = true;
-    const destination = result.inUse ? "/qrorder/join-required" : "/qrorder/order";
-    const response = Response.redirect(new URL(destination, request.url));
-    response.headers.append("Set-Cookie", `tdkon_qr_session=${encodeURIComponent(token)}; ${qrSessionCookieAttributes(request, QR_ORDER_ACCESS_MAX_AGE_SECONDS)}`);
-    return response;
-  } catch {
+    return result.response;
+  } catch (error) {
+    logQrAccessError("AUTH_OR_DATABASE", loggedQrCodeId, error);
     if (loggedQrCodeId !== null && !authEventRecorded) await recordQrAccess(loggedQrCodeId, "QR_ACCESS_FAILED", "AUTH_ERROR");
-    return unavailable(request);
+    return serviceUnavailable(request);
   }
 }

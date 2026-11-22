@@ -11,3 +11,10 @@ coverage
 npm-debug.log*
 README.md
 sql
+checkpoints
+deploy
+PLANS.md
+**/*.test.mjs
+scripts/verify-qr-cancellation-scope.cjs
+scripts/verify-qr-entry-development.cjs
+scripts/verify-qr-invite-development.cjs

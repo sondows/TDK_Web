@@ -27,10 +27,15 @@ export async function POST(request: Request) {
   if (rows.length !== ids.length) return Response.json({ success: false, message: "선택한 QR 중 일부를 찾을 수 없습니다." }, { status: 404 });
   if (rows.some(row => row.status === "RETIRED")) return Response.json({ success: false, message: "폐기된 QR은 일괄 내보낼 수 없습니다. 목록을 새로고침해 주세요." }, { status: 409 });
   const byId = new Map(rows.map(row => [Number(row.qrCodeId), row]));
-  const entries = ids.map(id => {
-    const row = byId.get(id)!;
-    return { fileName: `${row.managementNumber}.png`, targetUrl: publicQrUrl(request, row.identifier) };
-  });
+  let entries: Array<{ fileName: string; targetUrl: string }>;
+  try {
+    entries = ids.map(id => {
+      const row = byId.get(id)!;
+      return { fileName: `${row.managementNumber}.png`, targetUrl: publicQrUrl(row.identifier) };
+    });
+  } catch {
+    return Response.json({ success: false, message: "QR 공개 주소 설정을 확인해 주세요." }, { status: 503 });
+  }
   const date = qrIssueDateInSeoul(new Date()).replaceAll("-", "");
   return new Response(createQrZipStream(entries, background), { headers: {
     "Content-Type": "application/zip",

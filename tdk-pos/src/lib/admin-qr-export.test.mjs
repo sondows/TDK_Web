@@ -1,7 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import QRCode from "qrcode";
 import sharp from "sharp";
-import { createQrZipStream, renderAdminQrPng } from "./admin-qr-export.ts";
+import { createQrZipStream, publicQrUrl, renderAdminQrPng } from "./admin-qr-export.ts";
+
+function withPublicBaseUrl(value, run) {
+  const previousBaseUrl = process.env.QR_PUBLIC_BASE_URL;
+  if (value === undefined) delete process.env.QR_PUBLIC_BASE_URL;
+  else process.env.QR_PUBLIC_BASE_URL = value;
+  try {
+    return run();
+  } finally {
+    if (previousBaseUrl === undefined) delete process.env.QR_PUBLIC_BASE_URL;
+    else process.env.QR_PUBLIC_BASE_URL = previousBaseUrl;
+  }
+}
+
+test("table QR URL always uses the public HTTPS origin when config is missing", () => {
+  withPublicBaseUrl(undefined, () => {
+    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/q/23456789ABCDEFGH");
+  });
+});
+
+test("table QR URL accepts only the configured canonical HTTPS origin", () => {
+  withPublicBaseUrl("https://tdkon.myasustor.com/", () => {
+    assert.equal(publicQrUrl("23456789ABCDEFGH"), "https://tdkon.myasustor.com/q/23456789ABCDEFGH");
+  });
+  for (const invalid of ["http://tdkon.myasustor.com", "http://192.168.0.83", "https://192.168.0.83",
+    "https://tdkon.myasustor.com.evil.example", "https://tdkon.myasustor.com/other",
+    "https://user:pass@tdkon.myasustor.com", "not a url"]) {
+    withPublicBaseUrl(invalid, () => assert.throws(() => publicQrUrl("23456789ABCDEFGH"), /QR_PUBLIC_BASE_URL/));
+  }
+});
+
+test("SVG and PNG render from the canonical URL", async () => {
+  const url = withPublicBaseUrl(undefined, () => publicQrUrl("23456789ABCDEFGH"));
+  const svg = await QRCode.toString(url, { type: "svg", errorCorrectionLevel: "M", margin: 2, width: 320 });
+  const png = await renderAdminQrPng(url, "white");
+  assert.match(svg, /<svg/);
+  assert.equal(png.toString("hex", 0, 8), "89504e470d0a1a0a");
+});
 
 test("PNG export renders at the requested 1000 by 1000 pixel size", async () => {
   const png = await renderAdminQrPng("https://example.test/q/0123456789abcdef", "transparent");

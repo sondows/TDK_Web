@@ -3,13 +3,19 @@ import QRCode from "qrcode";
 export type QrPngBackground = "transparent" | "white";
 export type QrZipEntry = { fileName: string; targetUrl: string };
 
-export function publicQrUrl(request: Request, identifier: string): string {
-  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",", 1)[0]?.trim();
-  const host = forwardedHost || request.headers.get("host");
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",", 1)[0]?.trim();
-  const baseUrl = process.env.QR_PUBLIC_BASE_URL?.trim()
-    || (host ? `${forwardedProto || new URL(request.url).protocol.replace(":", "")}://${host}` : new URL(request.url).origin);
-  return new URL(`/q/${identifier}`, baseUrl).toString();
+const QR_PUBLIC_ORIGIN = "https://tdkon.myasustor.com";
+
+export function publicQrUrl(identifier: string): string {
+  const configured = process.env.QR_PUBLIC_BASE_URL?.trim();
+  if (configured) {
+    let url: URL;
+    try { url = new URL(configured); }
+    catch { throw new Error("QR_PUBLIC_BASE_URL must be https://tdkon.myasustor.com"); }
+    if (url.origin !== QR_PUBLIC_ORIGIN || url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+      throw new Error("QR_PUBLIC_BASE_URL must be https://tdkon.myasustor.com");
+    }
+  }
+  return new URL(`/q/${identifier}`, QR_PUBLIC_ORIGIN).toString();
 }
 
 export function parseQrPngBackground(value: string | null): QrPngBackground | null {
