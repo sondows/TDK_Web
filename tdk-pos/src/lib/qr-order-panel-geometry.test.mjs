@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelDocumentScrollTop } from "./qr-order-panel-geometry.ts";
+import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelBackdropMinHeight, qrPanelDocumentScrollTop } from "./qr-order-panel-geometry.ts";
 
 test("the lowest history panel stop meets the full hero image bottom when the viewport allows it", () => {
   const geometry = getQrOrderPanelGeometry({ viewportHeight: 820, heroHeight: 292.5, titleHeight: 68, bottomReserved: 84 });
@@ -30,4 +30,9 @@ test("document scroll positions align the flow panel with each visual snap stop"
   assert.equal(qrPanelDocumentScrollTop(geometry, 2), 0);
   assert.equal(qrPanelDocumentScrollTop(geometry, 1), geometry.offsets[2]);
   assert.equal(qrPanelDocumentScrollTop(geometry, 0), geometry.offsets[2] - geometry.offsets[0]);
+});
+
+test("short history content keeps its backdrop to the fixed navigation boundary", () => {
+  assert.equal(qrPanelBackdropMinHeight(820, 80, 84), 656);
+  assert.equal(qrPanelBackdropMinHeight(500, 520, 96), 0);
 });

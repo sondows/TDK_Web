@@ -15,9 +15,17 @@ function Invoke-Git([string[]]$GitArgs) {
     $output = @(& git -C $repo @GitArgs 2>&1)
     $code = $LASTEXITCODE
   } finally { $ErrorActionPreference = $previousPreference }
-  if ($code -ne 0) { throw "git $($GitArgs[0]) failed (exit $code)." }
-  if (@($output | Where-Object { "$_" -match '^warning: could not open directory' }).Count) {
-    throw 'Git could not inspect a project directory. No release files were staged.'
+  $command = 'git ' + (($GitArgs | ForEach-Object { if ("$_" -match '\s') { '"' + $_.Replace('"', '\\"') + '"' } else { $_ } }) -join ' ')
+  $diagnostics = @($output | ForEach-Object { "$_" } | Where-Object { $_.Trim() })
+  if ($code -ne 0) {
+    $details = if ($diagnostics.Count) { ($diagnostics | Select-Object -First 12) -join "`n  " } else { '(Git returned no diagnostic output.)' }
+    if ($diagnostics.Count -gt 12) { $details += "`n  ... ($($diagnostics.Count - 12) additional lines omitted)" }
+    throw "Git inspection failed.`nCommand: $command`nWorking directory: $repo`nExit code: $code`nGit output:`n  $details`nNo release files were committed or pushed."
+  }
+  $directoryWarnings = @($diagnostics | Where-Object { $_ -match '^warning: could not open directory' })
+  if ($directoryWarnings.Count) {
+    $details = ($directoryWarnings | Select-Object -First 12) -join "`n  "
+    throw "Git could not inspect a project directory.`nCommand: $command`nWorking directory: $repo`nGit output:`n  $details`nNo release files were staged."
   }
   return @($output | ForEach-Object { "$_" } | Where-Object { $_ -notmatch '^warning: in the working copy of ' })
 }

@@ -37,6 +37,11 @@ async function main() {
   const marker = `ZZQI${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const tableIds = [];
   const qrCodeIds = [];
+  const extraQrSessionIds = [];
+  const extraTableSessionIds = [];
+  let staffSessionId;
+  let programTrustTokenId;
+  let staffCookie;
   let sessionId;
   try {
     const [[identity]] = await connection.query("SELECT DATABASE() AS name");
@@ -44,8 +49,21 @@ async function main() {
     const dbResponse = await request("/api/db-test");
     const dbPayload = await dbResponse.json();
     assert.equal(dbPayload.result?.[0]?.database_name, "TDK_POS_TEST", "HTTP server must use TEST DB");
-    const [[staff]] = await connection.query("SELECT staff_id FROM staff WHERE is_active = 1 ORDER BY staff_id LIMIT 1");
+    const [[staff]] = await connection.query("SELECT staff_id FROM staff WHERE is_active = 1 AND pos_enabled = 1 AND staff_code <> '000' ORDER BY staff_id LIMIT 1");
     assert.ok(staff);
+    const staffToken = token();
+    const trustToken = token();
+    const [trust] = await connection.query(
+      "INSERT INTO program_trust_tokens (program, token_hash, enrolled_by_staff_id) VALUES ('POS', ?, ?)",
+      [hash(trustToken), staff.staff_id],
+    );
+    programTrustTokenId = Number(trust.insertId);
+    const [staffSession] = await connection.query(
+      "INSERT INTO staff_sessions (staff_id, trust_token_id, session_token_hash, session_type, status) VALUES (?, ?, ?, 'POS', 'ACTIVE')",
+      [staff.staff_id, programTrustTokenId, hash(staffToken)],
+    );
+    staffSessionId = Number(staffSession.insertId);
+    staffCookie = `tdk_pos_session=${staffToken}; tdk_pos_trust_${programTrustTokenId}=${trustToken}`;
 
     for (const suffix of ["A", "B"]) {
       const [table] = await connection.query(
@@ -164,12 +182,42 @@ async function main() {
     assert.equal(repeatWithCookie.headers.get("set-cookie"), null);
     const [afterRepeat] = await connection.query("SELECT qr_session_id FROM qr_sessions WHERE session_id = ?", [sessionId]);
     assert.equal(afterRepeat.length, 2);
+
+    // An explicit invite reuses this customer's active unbound token so an
+    // already-submitted pending order remains attached and visible to staff.
+    const pendingToken = token();
+    const [pendingSession] = await connection.query(
+      "INSERT INTO qr_sessions (session_id, table_id, token_hash, status, last_active_at) VALUES (NULL, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)",
+      [tableIds[0], hash(pendingToken)],
+    );
+    const pendingQrSessionId = Number(pendingSession.insertId);
+    extraQrSessionIds.push(pendingQrSessionId);
+    const [pendingQrOrder] = await connection.query(
+      "INSERT INTO qr_orders (qr_session_id, status) VALUES (?, 'PENDING')", [pendingQrSessionId],
+    );
+    const pendingInvite = await makeInvite(connection, sessionId, rootQrSessionId, "DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 1 HOUR)");
+    const pendingJoin = await request(`/tdkqrs/join/${pendingInvite.raw}`, {
+      headers: { cookie: `tdkon_qr_session=${pendingToken}` },
+    });
+    assert.equal(redirectPath(pendingJoin), "/qrorder");
+    assert.equal(pendingJoin.headers.get("set-cookie"), null, "same-table live customer token is reused");
+    const [[joinedPendingSession]] = await connection.query(
+      "SELECT session_id, status FROM qr_sessions WHERE qr_session_id = ?", [pendingQrSessionId],
+    );
+    assert.equal(Number(joinedPendingSession.session_id), sessionId);
+    assert.equal(joinedPendingSession.status, "ACTIVE");
+    const [[preservedPendingOrder]] = await connection.query(
+      "SELECT qr_session_id, status FROM qr_orders WHERE qr_order_id = ?", [pendingQrOrder.insertId],
+    );
+    assert.equal(Number(preservedPendingOrder.qr_session_id), pendingQrSessionId);
+    assert.equal(preservedPendingOrder.status, "PENDING");
+
     // The existing route permits a second customer to redeem the same unexpired invite.
     const secondGuest = await request(`/tdkqrs/join/${invite.raw}`);
     assert.equal(redirectPath(secondGuest), "/qrorder");
     assert.match(secondGuest.headers.get("set-cookie") ?? "", /tdkon_qr_session=/);
     const [afterSecond] = await connection.query("SELECT qr_session_id FROM qr_sessions WHERE session_id = ?", [sessionId]);
-    assert.equal(afterSecond.length, 3);
+    assert.equal(afterSecond.length, 4);
 
     const [[otherQr]] = await connection.query("SELECT identifier FROM qr_codes WHERE qr_code_id = ?", [qrCodeIds[1]]);
     const otherTable = await request(`/tdkqrs/${otherQr.identifier}`, { headers: { cookie } });
@@ -183,13 +231,66 @@ async function main() {
     await connection.query("UPDATE table_sessions SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE session_id = ?", [sessionId]);
     assert.equal(redirectPath(await request(`/tdkqrs/join/${invite.raw}`)), "/qrorder/invite-invalid");
     const [[afterInvalid]] = await connection.query("SELECT COUNT(*) AS count FROM qr_sessions WHERE session_id = ?", [sessionId]);
-    assert.equal(Number(afterInvalid.count), 3, "disabled or closed targets do not create guest sessions");
+    assert.equal(Number(afterInvalid.count), 4, "disabled or closed targets do not create guest sessions");
     const afterClose = await request("/api/qr/table-orders", { headers: { cookie, origin } });
     assert.ok([401, 409].includes(afterClose.status), "closed table session rejects guest access");
-    console.log("PASS: invite join, hashed tokens, HTTPS cookie, guest order, repeat policy, invalid/expired/revoked/disabled/closed/cross-table guards");
+
+    // A second table has an open session and an independent, uninvited pending order.
+    const [otherTableSession] = await connection.query(
+      "INSERT INTO table_sessions (table_id, status, session_kind) VALUES (?, 'OPEN', 'DINE_IN')", [tableIds[1]],
+    );
+    const otherTableSessionId = Number(otherTableSession.insertId);
+    extraTableSessionIds.push(otherTableSessionId);
+    const uninvitedToken = token();
+    const [uninvitedSession] = await connection.query(
+      "INSERT INTO qr_sessions (session_id, table_id, token_hash, status) VALUES (NULL, ?, ?, 'ACTIVE')",
+      [tableIds[1], hash(uninvitedToken)],
+    );
+    const uninvitedQrSessionId = Number(uninvitedSession.insertId);
+    extraQrSessionIds.push(uninvitedQrSessionId);
+    const [uninvitedOrder] = await connection.query(
+      "INSERT INTO qr_orders (qr_session_id, status) VALUES (?, 'PENDING')", [uninvitedQrSessionId],
+    );
+    const staffResponse = await request("/api/pos/qr-table-orders", { headers: { cookie: staffCookie, "x-tdk-local-dev": "1" } });
+    const staffPayload = await staffResponse.json();
+    assert.equal(staffResponse.status, 200, JSON.stringify(staffPayload));
+    const shownUninvited = staffPayload.orders.find(order => order.qrOrderId === Number(uninvitedOrder.insertId));
+    assert.equal(shownUninvited?.canAccept, false);
+    assert.equal(shownUninvited?.blockedReason, "INVITE_REQUIRED");
+    const blockedAcceptance = await request("/api/pos/qr-table-orders", {
+      method: "PATCH", headers: { cookie: staffCookie, "x-tdk-local-dev": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ qrOrderId: Number(uninvitedOrder.insertId), action: "ACCEPT" }),
+    });
+    assert.equal(blockedAcceptance.status, 409);
+    const [[stillPending]] = await connection.query("SELECT status FROM qr_orders WHERE qr_order_id = ?", [uninvitedOrder.insertId]);
+    assert.equal(stillPending.status, "PENDING", "uninvited order remains pending, not implicitly rejected");
+
+    const expiredToken = token();
+    const [expiredSession] = await connection.query(
+      "INSERT INTO qr_sessions (session_id, table_id, token_hash, status, created_at) VALUES (NULL, ?, ?, 'ACTIVE', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 7 HOUR))",
+      [tableIds[1], hash(expiredToken)],
+    );
+    const expiredQrSessionId = Number(expiredSession.insertId);
+    extraQrSessionIds.push(expiredQrSessionId);
+    const [expiredOrder] = await connection.query(
+      "INSERT INTO qr_orders (qr_session_id, status) VALUES (?, 'PENDING')", [expiredQrSessionId],
+    );
+    const refreshedQueue = await request("/api/pos/qr-table-orders", { headers: { cookie: staffCookie, "x-tdk-local-dev": "1" } });
+    const refreshedPayload = await refreshedQueue.json();
+    const shownExpired = refreshedPayload.orders.find(order => order.qrOrderId === Number(expiredOrder.insertId));
+    assert.equal(shownExpired?.canAccept, false);
+    assert.equal(shownExpired?.blockedReason, "EXPIRED");
+    const expiredAcceptance = await request("/api/pos/qr-table-orders", {
+      method: "PATCH", headers: { cookie: staffCookie, "x-tdk-local-dev": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ qrOrderId: Number(expiredOrder.insertId), action: "ACCEPT" }),
+    });
+    assert.equal(expiredAcceptance.status, 422);
+    const [[expiredStillPending]] = await connection.query("SELECT status FROM qr_orders WHERE qr_order_id = ?", [expiredOrder.insertId]);
+    assert.equal(expiredStillPending.status, "PENDING", "expired order remains pending");
+    console.log("PASS: invite join/token preservation, uninvited pending order stays blocked, six-hour expiry blocks acceptance, invite and session guards");
   } finally {
     await new Promise(resolve => setTimeout(resolve, 500));
-    if (tableIds.length || qrCodeIds.length) {
+    if (tableIds.length || qrCodeIds.length || staffSessionId || programTrustTokenId) {
       await connection.beginTransaction();
       try {
         if (qrCodeIds.length) await connection.query("DELETE FROM audit_logs WHERE entity_type = 'QR_CODE' AND entity_id IN (?)", [qrCodeIds]);
@@ -201,6 +302,15 @@ async function main() {
           await connection.query("DELETE FROM qr_sessions WHERE session_id = ?", [sessionId]);
           await connection.query("DELETE FROM table_sessions WHERE session_id = ?", [sessionId]);
         }
+        if (extraQrSessionIds.length) {
+          await connection.query("DELETE FROM qr_order_item_options WHERE qr_order_item_id IN (SELECT qr_order_item_id FROM qr_order_items WHERE qr_order_id IN (SELECT qr_order_id FROM qr_orders WHERE qr_session_id IN (?)))", [extraQrSessionIds]);
+          await connection.query("DELETE FROM qr_order_items WHERE qr_order_id IN (SELECT qr_order_id FROM qr_orders WHERE qr_session_id IN (?))", [extraQrSessionIds]);
+          await connection.query("DELETE FROM qr_orders WHERE qr_session_id IN (?)", [extraQrSessionIds]);
+          await connection.query("DELETE FROM qr_sessions WHERE qr_session_id IN (?)", [extraQrSessionIds]);
+        }
+        if (extraTableSessionIds.length) await connection.query("DELETE FROM table_sessions WHERE session_id IN (?)", [extraTableSessionIds]);
+        if (staffSessionId) await connection.query("DELETE FROM staff_sessions WHERE staff_session_id = ?", [staffSessionId]);
+        if (programTrustTokenId) await connection.query("DELETE FROM program_trust_tokens WHERE token_id = ?", [programTrustTokenId]);
         if (qrCodeIds.length) await connection.query("DELETE FROM qr_table_links WHERE qr_code_id IN (?)", [qrCodeIds]);
         if (qrCodeIds.length) await connection.query("DELETE FROM qr_codes WHERE qr_code_id IN (?)", [qrCodeIds]);
         if (tableIds.length) await connection.query("DELETE FROM dining_tables WHERE table_id IN (?)", [tableIds]);

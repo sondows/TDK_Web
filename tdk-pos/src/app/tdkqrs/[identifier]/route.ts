@@ -100,8 +100,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
         if (!link) return { failure: "QR_LINK_CHANGED" as const };
         const openSessions = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
           .where(and(eq(tableSessions.tableId, table.tableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
-        await tx.insert(qrSessions).values({ sessionId: null, tableId: table.tableId, tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
-        return { response: qrSessionRedirectResponse(request, openSessions.length > 0 ? "/qrorder/join-required" : "/qrorder/order", token) };
+        const openSessionId = openSessions[0]?.sessionId ?? null;
+        const existingSessionQr = openSessionId === null ? [] : await tx.select({ qrSessionId: qrSessions.qrSessionId })
+          .from(qrSessions).where(eq(qrSessions.sessionId, openSessionId)).for("update").limit(1);
+        // The table lock serializes first scans. Claim a POS-created session only
+        // when it has never had a QR member; even closed/cancelled QR rows keep
+        // ownership reserved so an expired owner cannot be silently replaced.
+        const canClaimOpenSession = openSessionId !== null && existingSessionQr.length === 0;
+        await tx.insert(qrSessions).values({ sessionId: canClaimOpenSession ? openSessionId : null, tableId: table.tableId,
+          tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
+        const destination = openSessionId !== null && !canClaimOpenSession
+          ? "/qrorder/join-required"
+          : canClaimOpenSession ? "/qrorder" : "/qrorder/order";
+        return { response: qrSessionRedirectResponse(request, destination, token) };
       });
     } catch (error) {
       logQrAccessError("SESSION_ISSUE", qrCodeId, error);

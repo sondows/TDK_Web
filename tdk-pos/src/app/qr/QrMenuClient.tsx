@@ -9,12 +9,13 @@ import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { qrOriginHasDisplayText, qrOriginTextRuns } from "@/lib/qr-menu-description-model";
 import { hasQrOrderHistory } from "@/lib/qr-order-history-model";
 import { addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartItemCount, qrCartTotal, qrImmediateAddLine, qrMenuAddonGroups, qrOtherOptionalGroups,
-  QR_CART_STORAGE_KEY, qrLineItemCount, qrLineTotal, qrLocaleFromPreferences,
+  QR_CART_STORAGE_KEY, qrLineItemCount, qrLineTotal,
   selectedQrOptions, splitQrCartAddonLines, validQrSelections, isQrSpiceGroupName, type QrCartLine, type QrCatalog, type QrLocale, type QrMenu } from "@/lib/qr-menu-cart";
 import { acknowledgeQrCartEvents, appendQrCartEvents, normalizeQrCartEventOutbox, QR_CART_EVENT_BATCH_SIZE, QR_CART_EVENT_OUTBOX_KEY,
   qrCartEventSourceFromSearch, type QrCartAnalyticsEvent, type QrCartEventSource, type QrCartEventType } from "@/lib/qr-cart-analytics";
 import QrStoreTitle from "./QrStoreTitle";
 import QrTitleCarousel from "./QrTitleCarousel";
+import { useQrCustomerLanguage } from "./QrCustomerLanguageProvider";
 import QrDoubleDivider from "./QrDoubleDivider";
 import QrMenuAddIcon from "@/components/QrMenuAddIcon";
 import { qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, type QrPublicTitleSettings } from "@/lib/qr-title-model";
@@ -60,8 +61,8 @@ function hosDefaultSelections(groups: QrMenu["groups"]) {
 
 export default function QrMenuClient({ waitingMode = false, tableOrderMode = false, initialTitleData, notices = [] }: { waitingMode?: boolean; tableOrderMode?: boolean; initialTitleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
   const router = useRouter();
+  const { locale, openLanguageSettings } = useQrCustomerLanguage();
   const [catalog, setCatalog] = useState<QrCatalog | null>(null);
-  const [locale, setLocale] = useState<QrLocale>("ko");
   const [catalogError, setCatalogError] = useState<CatalogError>(null);
   const [loading, setLoading] = useState(true);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
@@ -480,16 +481,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     }, 0);
     return () => window.clearTimeout(timer);
   }, [qrSource, flushAnalytics]);
-  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   useEffect(() => () => {
     if (quickAddFeedbackTimerRef.current !== null) window.clearTimeout(quickAddFeedbackTimerRef.current);
-  }, []);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const languages = navigator.languages?.length ? [...navigator.languages] : [navigator.language];
-      setLocale(qrLocaleFromPreferences(languages));
-    }, 0);
-    return () => window.clearTimeout(timer);
   }, []);
   useEffect(() => {
     if (!catalog) return;
@@ -1195,8 +1188,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     <p className="text-lg font-bold">메뉴 둘러보기를 종료했습니다.</p>
   </main>;
 
-  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
-    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 bottom-[69.6px] z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status">{quickAddFeedback}</div>}
+  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: tableOrderMode ? `calc(${cartPeekHeight}px + 40px + 4.5rem + env(safe-area-inset-bottom))` : `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
+    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status">{quickAddFeedback}</div>}
     {titleData.photos.length > 0 && <QrTitleCarousel exitDisabled={tableOrderMode && !cartReady} fixedHero onExitRequest={!waitingMode ? requestQrExit : undefined} photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>
     {titleData.photos.length > 0 && <span aria-hidden="true" className="absolute left-0 top-0 h-px w-px" data-qr-content-start />}
@@ -1264,7 +1257,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     </div>
 
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
-    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
+    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}
+      style={tableOrderMode ? { bottom: "calc(4.5rem + env(safe-area-inset-bottom))", height: "calc(82dvh - 4.5rem - env(safe-area-inset-bottom))", maxHeight: "calc(85dvh - 4.5rem - env(safe-area-inset-bottom))" } : undefined}>
       <div className="relative shrink-0">
         <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex w-full flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
           <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />
@@ -1309,6 +1303,23 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         </div></div>
       </div>
     </section>
+
+    {tableOrderMode && <nav aria-label="주문하기 하단 메뉴" className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl border-t border-[#D1D5DB] bg-[#F3F4F6] pb-[env(safe-area-inset-bottom)]">
+      <div className="flex min-h-[4.5rem] w-full">
+        <button aria-label="언어설정" className="flex min-h-[4.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 bg-[#F3F4F6] text-slate-600 transition-colors active:bg-[#E5E7EB] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500" onClick={openLanguageSettings} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>
+          <span className="text-[11px] leading-tight">언어설정</span>
+        </button>
+        <button aria-label="주문초대" className="flex min-h-[4.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 bg-[#F3F4F6] text-blue-700 transition-colors active:bg-[#E5E7EB] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500" onClick={() => router.push("/qrorder?openInvite=1")} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM19 14v2m2 2v3h-3m-4 0h2" /></svg>
+          <span className="text-[11px] leading-tight">주문초대</span>
+        </button>
+        <button aria-label="주문하기, 장바구니 열기" aria-expanded={cartSheetOpen} className="flex min-h-[4.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 bg-[#F3F4F6] font-bold text-blue-700 transition-colors active:bg-[#E5E7EB] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500" onClick={toggleCartSheet} type="button">
+          <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>
+          <span className="text-[11px] leading-tight">주문하기</span>
+        </button>
+      </div>
+    </nav>}
 
     {clearCartDialogOpen && <div className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4" onClick={() => setClearCartDialogOpen(false)}>
       <section aria-labelledby="qr-clear-cart-title" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="alertdialog">

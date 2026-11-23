@@ -37,3 +37,8 @@ export function qrPanelDocumentScrollTop(geometry: QrOrderPanelGeometry, index: 
   const panelTop = geometry.baseTop + geometry.offsets[index];
   return Math.max(0, bottomTop - panelTop);
 }
+
+/** Minimum backdrop length below the panel heading, ending above fixed navigation. */
+export function qrPanelBackdropMinHeight(viewportHeight: number, backgroundStart: number, bottomReserved: number) {
+  return Math.max(0, viewportHeight - backgroundStart - bottomReserved);
+}

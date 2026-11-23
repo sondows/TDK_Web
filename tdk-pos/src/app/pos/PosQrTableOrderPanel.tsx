@@ -4,7 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { readPosQrTableResponse } from "@/lib/pos-qr-table-response";
 
 type Order = { qrOrderId: number; tableNo: string; languageCode: string; totalAmount: string; orderedAt: string; note: string | null;
+  canAccept: boolean; blockedReason: "EXPIRED" | "SESSION_CLOSED" | "TABLE_MISMATCH" | "INVITE_REQUIRED" | "QR_INVALID" | null;
   items: Array<{ qrOrderItemId: number; itemName: string; qty: number; totalAmount: string; options: Array<{ optionName: string; qty: number }> }> };
+const blockedLabel = (reason: Order["blockedReason"]) => reason === "EXPIRED" ? "6시간 만료: 주문은 보존되며 승인할 수 없습니다."
+  : reason === "SESSION_CLOSED" ? "고객 세션이 종료되어 승인할 수 없습니다."
+    : reason === "INVITE_REQUIRED" ? "다른 고객이 테이블을 시작했습니다. 초대 합류 전에는 승인할 수 없습니다."
+      : reason === "QR_INVALID" ? "현재 QR 연결을 확인할 수 없어 승인할 수 없습니다."
+        : reason === "TABLE_MISMATCH" ? "주문 테이블 연결을 확인할 수 없어 승인할 수 없습니다." : null;
 const money = (value: string) => `${new Intl.NumberFormat("ko-KR").format(Math.round(Number(value)))}원`;
 
 export default function PosQrTableOrderPanel({ onChanged }: { onChanged: () => void }) {
@@ -47,8 +53,9 @@ export default function PosQrTableOrderPanel({ onChanged }: { onChanged: () => v
     {loaded && !error && !orders.length && <p className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-400">승인 대기 중인 테이블 QR 주문이 없습니다.</p>}
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">{orders.map(order => <article className="rounded-xl border border-blue-100 bg-blue-50/50 p-3" key={order.qrOrderId}>
       <div className="flex justify-between gap-2"><strong>테이블 {order.tableNo}</strong><span className="text-xs text-slate-500">{new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit" }).format(new Date(order.orderedAt))}</span></div>
+      {blockedLabel(order.blockedReason) && <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800" role="status">{blockedLabel(order.blockedReason)}</p>}
       <ul className="mt-2 space-y-1 text-sm">{order.items.map(item => <li key={item.qrOrderItemId}><div className="flex justify-between"><span>{item.itemName} × {item.qty}</span><span>{money(item.totalAmount)}</span></div>{item.options.length > 0 && <p className="text-xs text-slate-500">{item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`).join(" · ")}</p>}</li>)}</ul>
-      <div className="mt-2 flex items-center justify-between border-t border-blue-100 pt-2"><strong>{money(order.totalAmount)}</strong><div className="flex gap-2"><button className="rounded-lg bg-slate-200 px-3 py-2 text-xs font-bold" disabled={busyId === order.qrOrderId} onClick={() => void decide(order.qrOrderId, "REJECT")} type="button">반려</button><button className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white" disabled={busyId === order.qrOrderId} onClick={() => void decide(order.qrOrderId, "ACCEPT")} type="button">승인</button></div></div>
+      <div className="mt-2 flex items-center justify-between border-t border-blue-100 pt-2"><strong>{money(order.totalAmount)}</strong><div className="flex gap-2"><button className="rounded-lg bg-slate-200 px-3 py-2 text-xs font-bold" disabled={busyId === order.qrOrderId} onClick={() => void decide(order.qrOrderId, "REJECT")} type="button">반려</button><button className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" disabled={busyId === order.qrOrderId || !order.canAccept} onClick={() => void decide(order.qrOrderId, "ACCEPT")} type="button">승인</button></div></div>
     </article>)}</div>
   </div>;
 }

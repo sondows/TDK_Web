@@ -8,10 +8,11 @@ import QRCode from "qrcode";
 import QrStoreTitle from "@/app/qr/QrStoreTitle";
 import QrTitleCarousel from "@/app/qr/QrTitleCarousel";
 import { buildUnifiedQrOrderRounds } from "@/lib/qr-unified-order-rounds";
-import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelDocumentScrollTop, type QrPanelSnapIndex } from "@/lib/qr-order-panel-geometry";
+import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelBackdropMinHeight, qrPanelDocumentScrollTop, type QrPanelSnapIndex } from "@/lib/qr-order-panel-geometry";
 import { getQrCookingProgress, type QrCookingProgress } from "@/lib/qr-cooking-progress";
 import type { QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
+import { useQrCustomerLanguage } from "@/app/qr/QrCustomerLanguageProvider";
 
 type OrderItem = {
   qrOrderId: number;
@@ -79,17 +80,19 @@ const orderTime = (value: string) => new Intl.DateTimeFormat("ko-KR", {
 function readOrderPanelGeometry(hasHero: boolean, titleHeight: number) {
   const hero = document.querySelector<HTMLElement>("[data-qr-fixed-hero]");
   const navigation = document.querySelector<HTMLElement>('[aria-label="주문내역 하단 메뉴"]');
-  return getQrOrderPanelGeometry({
-    viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  const bottomReserved = navigation?.getBoundingClientRect().height ?? 72;
+  return { ...getQrOrderPanelGeometry({
+    viewportHeight,
     heroHeight: hasHero ? hero?.getBoundingClientRect().height ?? window.innerWidth * 0.75 : null,
     titleHeight,
-    bottomReserved: navigation?.getBoundingClientRect().height ?? 72,
-  });
+    bottomReserved,
+  }), viewportHeight, bottomReserved };
 }
 function QrCookingProgressLine({ progress }: { progress: QrCookingProgress }) {
   const labels = ["대기중", "조리중", "조리완료", progress.tableBoilLabel, "완료"];
-  const columns = "0.9fr 0.9fr 1.05fr 1.65fr 0.75fr";
-  return <div aria-label={`조리 진행 상태: ${labels[progress.currentStep - 1]}`} className="mt-2 grid min-w-0 gap-x-1" role="status" style={{ gridTemplateColumns: columns }}>
+  const columns = "0.85fr 0.85fr 1fr 2.25fr 0.65fr";
+  return <div aria-label={`조리 진행 상태: ${labels[progress.currentStep - 1]}`} className="mt-2 grid min-w-0 gap-x-[2px]" role="status" style={{ gridTemplateColumns: columns }}>
     {labels.map((label, index) => {
       const step = index + 1;
       const current = step === progress.currentStep;
@@ -97,11 +100,12 @@ function QrCookingProgressLine({ progress }: { progress: QrCookingProgress }) {
       const isWaiting = step === 1;
       const isBoil = step === 4;
       const colorClass = current ? "text-blue-700" : isWaiting && !past ? "text-slate-300" : past ? "text-slate-500" : "text-slate-300";
-      return <div className="min-w-0 text-center" key={step}>
+      return <div className="min-w-0 overflow-visible text-center" key={step}>
         {isBoil && progress.timerSegments > 0 ? <div aria-label={`테이블끓이기 ${progress.timerElapsedSegments}/10단계`} className="grid h-[3px] overflow-hidden rounded-full" style={{ gridTemplateColumns: "repeat(10, minmax(0, 1fr))" }}>
           {Array.from({ length: 10 }, (_, segment) => <span className={segment < progress.timerElapsedSegments ? "bg-red-500" : "bg-slate-200"} key={segment} />)}
         </div> : <span aria-hidden="true" className={`block h-[3px] rounded-full ${current ? "bg-blue-600" : isWaiting && !past ? "bg-slate-100" : past ? "bg-slate-400" : "bg-slate-200"}`} />}
-        <span className={`mt-1 block truncate whitespace-nowrap text-[9px] leading-tight sm:text-[10px] ${colorClass}`}>{label}</span>
+        <span aria-current={current ? "step" : undefined}
+          className={`mt-1 block whitespace-nowrap leading-tight transition-[font-size] duration-150 ease-out motion-reduce:transition-none ${current ? "text-[12px] font-semibold" : "text-[8px]"} ${colorClass}`}>{label}</span>
       </div>;
     })}
   </div>;
@@ -126,6 +130,7 @@ function QrSummaryDivider() {
 
 export default function QrOrderHistory({ titleData, notices = [] }: { titleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
   const router = useRouter();
+  const { openLanguageSettings } = useQrCustomerLanguage();
   const [payload, setPayload] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [accessState, setAccessState] = useState<"AUTH_EXPIRED" | "AUTH_REQUIRED" | "PAYMENT_COMPLETED" | null>(null);
@@ -138,6 +143,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   const [shareMessage, setShareMessage] = useState("");
   const [panelBaseTop, setPanelBaseTop] = useState<number | null>(null);
   const [panelBackgroundStart, setPanelBackgroundStart] = useState(34);
+  const [panelBackgroundMinHeight, setPanelBackgroundMinHeight] = useState(0);
   const panelSnapIndexRef = useRef<PanelSnapIndex>(1);
   const panelTitleHeightRef = useRef(68);
   const panelDragRef = useRef<PanelDrag | null>(null);
@@ -148,6 +154,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   const initialPanelScrollSetRef = useRef(false);
   const pointerFallbackRef = useRef<((event: PointerEvent) => void) | null>(null);
   const inviteRequestRef = useRef(false);
+  const openInviteParamHandledRef = useRef(false);
   const refreshSequenceRef = useRef(0);
 
   const setPanelSnap = (index: QrPanelSnapIndex) => {
@@ -233,7 +240,9 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
       setPanelBaseTop(flowTop);
       const panelTop = panelSectionRef.current?.getBoundingClientRect().top ?? flowTop;
       const titleTop = titleCard?.getBoundingClientRect().top ?? panelTop;
-      setPanelBackgroundStart(Math.max(0, titleTop - panelTop + panelTitleHeightRef.current / 2));
+      const backgroundStart = Math.max(0, titleTop - panelTop + panelTitleHeightRef.current / 2);
+      setPanelBackgroundStart(backgroundStart);
+      setPanelBackgroundMinHeight(qrPanelBackdropMinHeight(geometry.viewportHeight, backgroundStart, geometry.bottomReserved));
       if (panelGeometryFrameRef.current !== null) window.cancelAnimationFrame(panelGeometryFrameRef.current);
       panelGeometryFrameRef.current = window.requestAnimationFrame(() => {
         panelGeometryFrameRef.current = null;
@@ -364,7 +373,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   const serverNow = now ? now + serverOffset : payload?.serverNow ?? 0;
   const inviteIsValid = Boolean(invite && Date.parse(invite.expiresAt) > serverNow);
 
-  const createInvite = async () => {
+  const createInvite = useCallback(async () => {
     if (!payload?.canViewOrders || accessState !== null) return;
     if (inviteRequestRef.current) return;
     inviteRequestRef.current = true;
@@ -385,15 +394,23 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
       inviteRequestRef.current = false;
       setShareBusy(false);
     }
-  };
+  }, [accessState, payload?.canViewOrders]);
 
-  const openShare = () => {
+  const openShare = useCallback(() => {
     if (!payload?.canViewOrders || accessState !== null) return;
     setShareOpen(true);
     setShareError("");
     const reusableInvite = invite && Date.parse(invite.expiresAt) > serverNow;
     if (!reusableInvite) void createInvite();
-  };
+  }, [accessState, createInvite, invite, payload?.canViewOrders, serverNow]);
+
+  useEffect(() => {
+    if (openInviteParamHandledRef.current || !payload?.canViewOrders || accessState !== null) return;
+    if (new URLSearchParams(window.location.search).get("openInvite") !== "1") return;
+    openInviteParamHandledRef.current = true;
+    const timer = window.setTimeout(openShare, 0);
+    return () => window.clearTimeout(timer);
+  }, [accessState, openShare, payload?.canViewOrders]);
 
   const copyInvite = async () => {
     if (!invite) return;
@@ -440,6 +457,12 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
 
   const bottomActions = [
     {
+      id: "language",
+      label: "언어설정",
+      icon: "language",
+      disabled: false,
+    },
+    {
       id: "invite",
       label: "주문초대",
       icon: "qr",
@@ -453,7 +476,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     },
   ];
 
-  return <main className="isolate min-h-svh w-full overflow-x-clip bg-slate-50 text-slate-900" ref={mainRef} style={{ paddingBottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
+  return <main className="isolate min-h-svh w-full overflow-x-clip bg-white text-slate-900" ref={mainRef} style={{ paddingBottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
     {titleData.photos.length > 0 && <QrTitleCarousel fixedHero onTap={() => setPanelSnap(nextQrOrderPanelSnap(panelSnapIndexRef.current, "show-image"))} photos={titleData.photos} />}
     <div aria-hidden="true" ref={panelSpacerRef} style={{ height: panelBaseTop === null ? titleData.photos.length ? "75vw" : "62dvh" : `${panelBaseTop}px` }} />
     <section aria-label="주문내역 패널" className="relative z-20 mx-auto w-full max-w-2xl" ref={panelSectionRef} data-qr-content-start
@@ -461,7 +484,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
       onPointerDown={startPanelDrag} onPointerMove={movePanelDrag} onPointerUp={event => finishPanelDrag(event.nativeEvent)}
       style={{ touchAction: "pan-y pinch-zoom" }}>
         <div className="relative">
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-slate-50" style={{ top: `${panelBackgroundStart}px` }} />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-white" style={{ top: `${panelBackgroundStart}px`, minHeight: `${panelBackgroundMinHeight}px` }} />
           <div className="relative z-10">
             <QrStoreTitle fixedHero orderHistoryHeader notices={notices} onShareTableQr={payload?.canViewOrders && accessState === null ? openShare : undefined} screenSettings={titleData.screenSettings} settings={titleData} />
             <div className="mx-auto mt-4 max-w-lg px-4 pb-4">
@@ -572,10 +595,10 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
         </div>
     </section>
 
-    <nav aria-label="주문내역 하단 메뉴" className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl border-t border-[#D1D5DB] bg-white pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="주문내역 하단 메뉴" className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl border-t border-[#D1D5DB] bg-[#F3F4F6] pb-[env(safe-area-inset-bottom)]">
       <div className="flex min-h-[4.5rem] w-full">
-        {bottomActions.map(action => <button className={`flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 bg-white transition-colors active:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${action.disabled ? "text-slate-400" : "text-blue-700"}`} disabled={action.disabled} key={action.id} onClick={() => action.id === "invite" ? openShare() : router.push("/qrorder/order")} type="button">
-          {action.icon === "qr"
+        {bottomActions.map(action => <button aria-label={action.label} className={`flex min-h-[4.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 bg-[#F3F4F6] transition-colors active:bg-[#E5E7EB] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${action.id === "language" ? "text-slate-600" : action.disabled ? "text-slate-400" : "text-blue-700"} ${action.id === "order" ? "font-bold" : "font-normal"}`} disabled={action.disabled} key={action.id} onClick={() => action.id === "language" ? openLanguageSettings() : action.id === "invite" ? openShare() : router.push("/qrorder/order")} type="button">
+          {action.icon === "language" ? <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg> : action.icon === "qr"
             ? <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM19 14v2m2 2v3h-3m-4 0h2" /></svg>
             : <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>}
           <span className="text-[11px] font-normal leading-tight">{action.label}</span>

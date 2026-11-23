@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLogs, diningTables, qrCodeDailyCounters, qrCodes, qrSessions, qrTableLinks } from "@/db/schema";
+import { auditLogs, diningTables, qrCodeDailyCounters, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import { createQrIdentifier } from "@/lib/qr-order-auth";
 import { formatQrManagementNumber, qrIssueDateInSeoul } from "@/lib/qr-management-number";
 import { analyzeQrAccessAnomalies, QR_ACCESS_ACTIONS, failureTypeFromDescription } from "@/lib/qr-access-analysis";
 import { getBusinessHoursStatus } from "@/lib/qr-business-hours";
 import { getQrBusinessHoursSettings } from "@/lib/qr-title-settings";
+import { shouldBlockQrCodeChange } from "@/lib/qr-processing-policy";
 
 export const dynamic = "force-dynamic";
 const ACCESS_RECORD_LIMIT = 10_000;
@@ -122,12 +123,27 @@ export async function PATCH(request: Request) {
       if (!qr) throw new Error("NOT_FOUND");
       if (qr.status === "RETIRED") throw new Error("RETIRED");
       const now = new Date();
+      const assertNoPendingQrOrders = async (tableIds: number[]) => {
+        const ids = [...new Set(tableIds)].filter(id => Number.isSafeInteger(id) && id > 0).sort((a, b) => a - b);
+        for (const tableId of ids) {
+          await tx.select({ tableId: diningTables.tableId }).from(diningTables)
+            .where(eq(diningTables.tableId, tableId)).for("update").limit(1);
+        }
+        for (const tableId of ids) {
+          const [pending] = await tx.select({ count: sql<number>`COUNT(*)` }).from(qrOrders)
+            .innerJoin(qrSessions, eq(qrSessions.qrSessionId, qrOrders.qrSessionId))
+            .leftJoin(tableSessions, eq(tableSessions.sessionId, qrSessions.sessionId))
+            .where(and(eq(qrOrders.status, "PENDING"), sql`COALESCE(${tableSessions.tableId}, ${qrSessions.tableId}) = ${tableId}`));
+          if (shouldBlockQrCodeChange(Number(pending?.count ?? 0))) throw new Error("PENDING_QR_ORDERS");
+        }
+      };
       const closeUnboundCustomers = async (tableId: number) => {
         await tx.update(qrSessions).set({ status: "CLOSED", closedAt: now })
           .where(and(eq(qrSessions.tableId, tableId), isNull(qrSessions.sessionId), eq(qrSessions.status, "ACTIVE")));
       };
       if (body?.action === "RETIRE") {
         const [link] = await tx.select({ tableId: qrTableLinks.tableId }).from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
+        if (link) await assertNoPendingQrOrders([Number(link.tableId)]);
         if (link) await closeUnboundCustomers(Number(link.tableId));
         await tx.delete(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId));
         await tx.update(qrCodes).set({ targetType: "UNASSIGNED", status: "RETIRED", updatedByStaffId: auth.staff.staffId, updatedAt: now }).where(eq(qrCodes.qrCodeId, qrCodeId));
@@ -139,13 +155,15 @@ export async function PATCH(request: Request) {
         if (qr.status === "LOCKED") throw new Error("LEGACY_LOCKED");
         const tableId = Number(body?.tableId);
         if (!Number.isSafeInteger(tableId) || tableId <= 0) throw new Error("INVALID_TABLE");
-        await tx.select({ tableId: diningTables.tableId }).from(diningTables).where(eq(diningTables.tableId, tableId)).for("update").limit(1);
         const [table] = await tx.select({ tableId: diningTables.tableId }).from(diningTables)
           .where(and(eq(diningTables.tableId, tableId), eq(diningTables.isActive, 1))).limit(1);
         if (!table) throw new Error("NOT_FOUND_TABLE");
         const [oldLink] = await tx.select({ qrCodeId: qrTableLinks.qrCodeId }).from(qrTableLinks).where(eq(qrTableLinks.tableId, tableId)).for("update").limit(1);
         if (oldLink && Number(oldLink.qrCodeId) === qrCodeId) return;
+        const [currentLink] = await tx.select({ tableId: qrTableLinks.tableId }).from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
+        await assertNoPendingQrOrders([tableId, ...(currentLink ? [Number(currentLink.tableId)] : [])]);
         await closeUnboundCustomers(tableId);
+        if (currentLink && Number(currentLink.tableId) !== tableId) await closeUnboundCustomers(Number(currentLink.tableId));
         let retiredPreviousNumber: string | null = null;
         if (oldLink) {
           const [old] = await tx.select({ qrCodeId: qrCodes.qrCodeId, managementNumber: qrCodes.managementNumber }).from(qrCodes).where(eq(qrCodes.qrCodeId, oldLink.qrCodeId)).for("update").limit(1);
@@ -165,6 +183,7 @@ export async function PATCH(request: Request) {
       if (targetType === "GUEST_MENU" || targetType === "WAITING") {
         if (qr.status === "LOCKED") throw new Error("LEGACY_LOCKED");
         const [link] = await tx.select({ tableId: qrTableLinks.tableId }).from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
+        if (link) await assertNoPendingQrOrders([Number(link.tableId)]);
         if (link) await closeUnboundCustomers(Number(link.tableId));
         await tx.delete(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId));
         await tx.update(qrCodes).set({ targetType, status: "IN_USE", updatedByStaffId: auth.staff.staffId, updatedAt: now }).where(eq(qrCodes.qrCodeId, qrCodeId));
@@ -174,6 +193,7 @@ export async function PATCH(request: Request) {
       if (targetType === "UNASSIGNED") {
         if (qr.status === "LOCKED") throw new Error("LEGACY_LOCKED");
         const [link] = await tx.select({ tableId: qrTableLinks.tableId }).from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
+        if (link) await assertNoPendingQrOrders([Number(link.tableId)]);
         if (link) await closeUnboundCustomers(Number(link.tableId));
         await tx.delete(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId));
         const wasUsed = qr.status === "IN_USE" || qr.targetType !== "UNASSIGNED";
@@ -188,7 +208,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     const status = message === "NOT_FOUND" || message === "NOT_FOUND_TABLE" ? 404 : message === "INVALID_TABLE" || message === "INVALID_ACTION" ? 400 : 409;
-    const userMessage = message === "RETIRED" ? "폐기된 QR은 다시 연결할 수 없습니다." : message === "LEGACY_LOCKED" ? "기존 잠금 상태의 QR은 변경할 수 없습니다. 전체 목록에서 상태를 확인해 주세요." : status === 404 ? "QR 또는 테이블을 찾을 수 없습니다." : status === 400 ? "요청 값이 유효하지 않습니다." : "QR 연결에 실패했습니다. 새로고침 후 다시 시도해 주세요.";
+    const userMessage = message === "RETIRED" ? "폐기된 QR은 다시 연결할 수 없습니다." : message === "LEGACY_LOCKED" ? "기존 잠금 상태의 QR은 변경할 수 없습니다. 전체 목록에서 상태를 확인해 주세요." : message === "PENDING_QR_ORDERS" ? "처리 대기 중인 QR 주문이 있어 재발행·재할당할 수 없습니다. 대기 주문을 먼저 확인해 주세요." : status === 404 ? "QR 또는 테이블을 찾을 수 없습니다." : status === 400 ? "요청 값이 유효하지 않습니다." : "QR 연결에 실패했습니다. 새로고침 후 다시 시도해 주세요.";
     return Response.json({ success: false, message: userMessage }, { status });
   }
 }

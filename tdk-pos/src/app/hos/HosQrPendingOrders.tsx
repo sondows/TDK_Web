@@ -13,6 +13,8 @@ type PendingQrOrder = {
   orderedAt: string;
   totalAmount: string;
   note: string | null;
+  canAccept: boolean;
+  blockedReason: "EXPIRED" | "SESSION_CLOSED" | "TABLE_MISMATCH" | "INVITE_REQUIRED" | "QR_INVALID" | null;
   items: Array<{
     qrOrderItemId: number;
     itemName: string;
@@ -27,6 +29,11 @@ const orderTime = (value: string) => {
   const time = value.slice(11, 16);
   return /^\d{2}:\d{2}$/.test(time) ? time : "--:--";
 };
+const blockedLabel = (reason: PendingQrOrder["blockedReason"]) => reason === "EXPIRED" ? "6시간 만료 세션입니다. 주문은 보존되며 승인할 수 없습니다."
+  : reason === "SESSION_CLOSED" ? "고객 세션이 종료되어 승인할 수 없습니다."
+    : reason === "INVITE_REQUIRED" ? "초대 합류 전 고객 주문입니다. 초대 합류 전에는 승인할 수 없습니다."
+      : reason === "QR_INVALID" ? "현재 QR 연결을 확인할 수 없어 승인할 수 없습니다."
+        : reason === "TABLE_MISMATCH" ? "주문 테이블 연결을 확인할 수 없어 승인할 수 없습니다." : null;
 
 function QrReceiptDivider() {
   return <div aria-hidden="true" className="my-2 h-[2px]" style={{
@@ -147,10 +154,11 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
                 </div>
                 <div className="flex shrink-0 gap-1.5">
                   <button className="min-h-9 rounded-md bg-slate-200 px-2.5 text-xs font-bold text-slate-600 disabled:opacity-50" disabled={processingId !== null} onClick={() => { setDecisionError(""); setRejectPromptId(order.qrOrderId); }} type="button">거절</button>
-                  <button className="min-h-9 rounded-md bg-blue-700 px-2.5 text-xs font-bold text-white disabled:opacity-50" disabled={processingId !== null} onClick={() => void decideOrder(order.qrOrderId, "ACCEPT")} type="button">{processingId === order.qrOrderId ? "처리 중…" : "승인"}</button>
+                  <button className="min-h-9 rounded-md bg-blue-700 px-2.5 text-xs font-bold text-white disabled:opacity-50" disabled={processingId !== null || !order.canAccept} onClick={() => void decideOrder(order.qrOrderId, "ACCEPT")} type="button">{processingId === order.qrOrderId ? "처리 중…" : "승인"}</button>
                 </div>
               </div>
               {order.note && <p className="mt-1 text-xs leading-5 text-slate-500">{order.note}</p>}
+              {blockedLabel(order.blockedReason) && <p className="mt-1 rounded-md bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800" role="status">{blockedLabel(order.blockedReason)}</p>}
               <div className="mt-2 space-y-1.5">
                 {order.items.map(item => {
                   const optionText = item.options.map(option => `${option.optionName}${option.qty > 1 ? ` × ${option.qty}` : ""}`).join(", ");

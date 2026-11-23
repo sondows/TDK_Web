@@ -49,18 +49,28 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       if (Number(active?.count ?? 0) >= cap) return { kind: "FULL" as const };
       if (current?.isTest) {
         if (current.sessionId !== null && current.sessionId !== Number(session.sessionId)) return { kind: "INVALID" as const };
+        if (current.sessionId === null && current.tableId === Number(session.tableId)) {
+          const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now })
+            .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
+          if (updated[0].affectedRows !== 1) return { kind: "INVALID" as const };
+          if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
+          return { kind: "JOINED_TEST" as const };
+        }
+        return { kind: "INVALID" as const };
+      }
+      const accessToken = createQrAccessToken();
+      if (current?.sessionId === null && current.tableId === Number(session.tableId)) {
         const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now })
           .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
         if (updated[0].affectedRows !== 1) return { kind: "INVALID" as const };
-        if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
-        return { kind: "JOINED_TEST" as const };
+      } else {
+        await tx.insert(qrSessions).values({ sessionId: invite.sessionId, tableId: session.tableId, tokenHash: hashQrToken(accessToken), languageCode: "ko", status: "ACTIVE", lastActiveAt: now });
       }
-      const accessToken = createQrAccessToken();
-      if (current?.sessionId === null) await tx.update(qrSessions).set({ status: "CLOSED", closedAt: now })
-        .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE")));
-      await tx.insert(qrSessions).values({ sessionId: invite.sessionId, tableId: session.tableId, tokenHash: hashQrToken(accessToken), languageCode: "ko", status: "ACTIVE", lastActiveAt: now });
       if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
-      return { kind: "JOINED" as const, response: qrSessionRedirectResponse(request, "/qrorder", accessToken, cookieMaxAgeSeconds) };
+      const responseToken = current?.sessionId === null && current.tableId === Number(session.tableId) ? undefined : accessToken;
+      return { kind: "JOINED" as const, response: responseToken
+        ? qrSessionRedirectResponse(request, "/qrorder", responseToken, cookieMaxAgeSeconds)
+        : Response.redirect(qrCustomerRedirectUrl(request, "/qrorder")) };
     });
     if (result.kind === "JOINED_TEST") return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
     if (result.kind !== "JOINED") return Response.redirect(qrCustomerRedirectUrl(request, result.kind === "EXISTING" ? "/qrorder" : result.kind === "FULL" ? "/qrorder/invite-full" : "/qrorder/invite-invalid"));
