@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getHosQrOrderNetworkError, getHosQrOrderResponseError } from "@/lib/hos-qr-order-errors";
@@ -58,7 +59,7 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
     const requestSequence = ++requestSequenceRef.current;
     try {
       const response = await fetch("/api/pos/qr-table-orders", { cache: "no-store" });
-      const result = await response.json().catch(() => null) as { success?: boolean; orders?: PendingQrOrder[]; message?: string } | null;
+      const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { success?: boolean; orders?: PendingQrOrder[]; message?: string } | null;
       if (response.status === 401) window.dispatchEvent(new Event("tdk-hos-session-expired"));
       if (!response.ok) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "load"));
       if (!result?.success || !Array.isArray(result.orders)) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "load"));
@@ -104,7 +105,7 @@ export default function HosQrPendingOrders({ onChanged, onBlockingUiChange, onPe
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrOrderId, action }),
       });
-      const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+      const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { success?: boolean; message?: string } | null;
       if (response.status === 401) window.dispatchEvent(new Event("tdk-hos-session-expired"));
       if (!response.ok) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "decision"));
       if (!result?.success) throw new Error(getHosQrOrderResponseError(response.status, result?.message, "decision"));

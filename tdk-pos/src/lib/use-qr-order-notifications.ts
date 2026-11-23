@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { mergeQrOrderNotifications, type QrOrderNotification } from "@/lib/qr-order-notification-model";
 import type { QrOrderTableListItem } from "@/lib/qr-orders-list-model";
+import { parseJsonResponse } from "@/lib/api-response";
 
 type Snapshot = { events: QrOrderNotification[]; qrOrderTables: QrOrderTableListItem[] };
 
@@ -21,8 +22,10 @@ export function useQrOrderNotifications(initialCursor: number) {
         const response = await fetch(`/api/qr/staff-order-notifications?afterId=${cursorRef.current}`, {
           cache: "no-store", signal: controller.signal,
         });
-        const result = await response.json() as { success?: boolean; cursor?: number; events?: QrOrderNotification[];
-          qrOrderTables?: QrOrderTableListItem[]; message?: string };
+        const result = await parseJsonResponse<{ success?: boolean; cursor?: number; events?: QrOrderNotification[];
+          qrOrderTables?: QrOrderTableListItem[]; message?: string }>(
+          response, "/api/qr/staff-order-notifications", "QR order notification polling", "GET",
+        );
         if (!response.ok || !result.success || !Number.isSafeInteger(result.cursor) || !Array.isArray(result.events)
           || !Array.isArray(result.qrOrderTables)) throw new Error(result.message ?? "QR 주문 알림을 불러오지 못했습니다.");
         if (!active) return;

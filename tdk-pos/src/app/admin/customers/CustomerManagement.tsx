@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -34,7 +35,7 @@ export default function CustomerManagement() {
           cache: "no-store",
           signal: controller.signal,
         });
-        const result = await response.json() as { success?: boolean; customers?: CustomerSummary[]; hasInactiveCustomers?: boolean };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; customers?: CustomerSummary[]; hasInactiveCustomers?: boolean };
         if (!response.ok || !result.success || !Array.isArray(result.customers)) {
           throw new Error(response.status === 401 ? "login" : response.status === 403 ? "forbidden" : "load");
         }
@@ -82,7 +83,7 @@ export default function CustomerManagement() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customerIds }),
       });
-      const result = await response.json() as { success?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean };
       if (!response.ok || !result.success) return false;
       setCustomers(current => {
         const byId = new Map(current.map(customer => [customer.customerId, customer]));

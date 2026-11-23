@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -27,7 +28,7 @@ function fanErrorMessage(code: string | undefined, httpStatus?: number) {
 
 async function fetchFans(): Promise<FanResponse> {
   const response = await fetch("/api/pos/fans", { cache: "no-store" });
-  const result = await response.json() as FanResponse & { code?: string };
+  const result = await readJsonResponse(response, response.url, "API request") as FanResponse & { code?: string };
   if (!response.ok || !result.success) throw Object.assign(new Error("선풍기 상태 조회 실패"), { code: result.code });
   return result;
 }
@@ -99,7 +100,7 @@ export default function PosFanLayer() {
       const response = await fetch(`/api/pos/fans/${fan.fanId}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: desiredState }), cache: "no-store",
       });
-      const result = await response.json() as { success?: boolean; code?: string; httpStatus?: number; state?: Fan["state"] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string; httpStatus?: number; state?: Fan["state"] };
       if (!response.ok || !result.success || result.state !== desiredState) {
         throw Object.assign(new Error("선풍기 제어 실패"), { code: result.code, httpStatus: result.httpStatus });
       }

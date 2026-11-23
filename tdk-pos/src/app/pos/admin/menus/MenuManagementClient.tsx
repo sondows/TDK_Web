@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
+import { readJsonResponse } from "@/lib/api-response";
 import Cropper, { type Area } from "react-easy-crop";
 import { useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format-money";
@@ -35,7 +36,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     setMovingMenuId(menu.menuId); setMessage("");
     try {
       const response = await fetch("/api/admin/menus/order", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ menuId: menu.menuId, direction }) });
-      const result = await response.json() as { success?: boolean; message?: string; sortOrders?: { menuId: number; sortOrder: number }[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; sortOrders?: { menuId: number; sortOrder: number }[] };
       if (!response.ok || !result.success || !result.sortOrders) throw new Error(result.message ?? "메뉴 순서를 변경할 수 없습니다.");
       const orders = new Map(result.sortOrders.map(item => [item.menuId, item.sortOrder]));
       setMenuRows(current => sortMenus(current.map(item => orders.has(item.menuId) ? { ...item, sortOrder: orders.get(item.menuId)! } : item)));
@@ -43,13 +44,13 @@ export default function MenuManagementClient({ categories, initialMenus, compone
   };
   const addMenu = async (payload: MenuPayload) => {
     const response = await fetch("/api/admin/menus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json() as { success?: boolean; message?: string; menu?: Menu };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; menu?: Menu };
     if (!response.ok || !result.success || !result.menu) throw new Error(result.message ?? "메뉴를 등록할 수 없습니다.");
     setMenuRows(current => sortMenus([...current, result.menu!])); setActiveCategoryId(payload.categoryId); setIsCreateOpen(false); setMessage("새 메뉴를 등록했습니다.");
   };
   const updateMenu = async (menuId: number, form: FormData, categoryId: number) => {
     const response = await fetch("/api/admin/menus/" + menuId, { method: "PATCH", body: form });
-    const result = await response.json() as { success?: boolean; message?: string; menu?: Menu };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; menu?: Menu };
     if (!response.ok || !result.success || !result.menu) throw new Error(result.message ?? "메뉴를 수정할 수 없습니다.");
     setMenuRows(current => sortMenus(current.map(item => item.menuId === menuId ? result.menu! : item))); setActiveCategoryId(categoryId); setEditingMenu(null); setMessage("메뉴를 수정했습니다.");
   };
@@ -59,7 +60,7 @@ export default function MenuManagementClient({ categories, initialMenus, compone
     setUpdatingQrMenuId(menu.menuId); setMessage("");
     try {
       const response = await fetch(`/api/admin/menus/${menu.menuId}/qr-visibility`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isQrVisible }) });
-      const result = await response.json() as { success?: boolean; message?: string; isQrVisible?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; isQrVisible?: boolean };
       if (!response.ok || !result.success || typeof result.isQrVisible !== "boolean") throw new Error(result.message ?? "QR 표시 설정을 저장하지 못했습니다.");
       setMenuRows(current => current.map(item => item.menuId === menu.menuId ? { ...item, isQrVisible: result.isQrVisible ? 1 : 0 } : item));
     } catch (error) { setMessage(error instanceof Error ? error.message : "QR 표시 설정을 저장하지 못했습니다."); }

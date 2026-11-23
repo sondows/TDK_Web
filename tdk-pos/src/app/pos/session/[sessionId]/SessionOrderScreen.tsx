@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -106,7 +107,7 @@ export default function SessionOrderScreen({
           }),
         }
       );
-      const result = (await response.json()) as { success: boolean; message?: string };
+      const result = (await readJsonResponse(response, response.url, "API request")) as { success: boolean; message?: string };
 
       if (!response.ok || !result.success) {
         setErrorMessage(result.message ?? "주문 저장에 실패했습니다.");
@@ -129,7 +130,7 @@ export default function SessionOrderScreen({
       const response = await fetch(`/api/table-sessions/${session.sessionId}`, {
         method: "PATCH",
       });
-      const result = (await response.json()) as { success: boolean; message?: string };
+      const result = (await readJsonResponse(response, response.url, "API request")) as { success: boolean; message?: string };
 
       if (!response.ok || !result.success) {
         setErrorMessage(result.message ?? "테이블 종료에 실패했습니다.");
@@ -159,7 +160,7 @@ export default function SessionOrderScreen({
       const response = await fetch(`/api/order-items/${cancelTarget.orderItemId}`, {
         method: "PATCH",
       });
-      const result = (await response.json()) as { success: boolean; message?: string };
+      const result = (await readJsonResponse(response, response.url, "API request")) as { success: boolean; message?: string };
 
       if (!response.ok || !result.success) {
         setCancelErrorMessage(result.message ?? "주문 항목 취소에 실패했습니다.");

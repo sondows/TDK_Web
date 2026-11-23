@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { createContext, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { resolveAdmIdStatus, transitionAuthPhase, type AuthEvent, type AuthPhase } from "@/lib/program-auth-flow";
@@ -119,7 +120,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
           method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
           body: JSON.stringify({ token: suppliedToken }),
         });
-        const result = await response.json() as RecoveryStatus;
+        const result = await readJsonResponse(response, response.url, "API request") as RecoveryStatus;
         if (serial !== checkSerial.current) return;
         if (!response.ok || !result.available || !result.loginId) {
           setMessage(response.status === 429 ? "복구 상태 확인 요청이 많습니다. 잠시 후 다시 시도해 주세요." :
@@ -153,7 +154,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
     }
     try {
       const trustResponse = await fetch(endpoint, { cache: "no-store" });
-      const trust = await trustResponse.json() as TrustStatus;
+      const trust = await readJsonResponse(trustResponse, trustResponse.url, "API request") as TrustStatus;
       if (serial !== checkSerial.current) return;
       if (!trustResponse.ok) throw new Error("Trust status unavailable");
       setRecoveryToken(""); setVerifiedToken(Boolean(trust.trusted));
@@ -245,11 +246,11 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         body: JSON.stringify({ loginId: normalizedId }),
         }),
       ]);
-      const trust = await trustResponse.json() as TrustStatus;
+      const trust = await readJsonResponse(trustResponse, trustResponse.url, "API request") as TrustStatus;
       const bootstrap = bootstrapResponse.ok ?
-        await bootstrapResponse.json() as { available?: boolean } : null;
+        await readJsonResponse(bootstrapResponse, bootstrapResponse.url, "API request") as { available?: boolean } : null;
       const setup = setupResponse.ok ?
-        await setupResponse.json() as { state?: string; available?: boolean; accountFound?: boolean;
+        await readJsonResponse(setupResponse, setupResponse.url, "API request") as { state?: string; available?: boolean; accountFound?: boolean;
           passwordConfigured?: boolean | null; resetPasswordRequired?: boolean } : null;
       if (serial !== admIdRequestSerial.current ||
         idInput.current?.value.trim().toLowerCase() !== normalizedId) return;
@@ -326,7 +327,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       const url = new URL(endpoint, window.location.origin);
       url.searchParams.set("loginId", normalizedId);
       const response = await fetch(url, { cache: "no-store" });
-      const result = await response.json() as TrustStatus & { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as TrustStatus & { success?: boolean; message?: string };
       if (serial !== admIdRequestSerial.current || idInput.current?.value.trim().toLowerCase() !== normalizedId) return;
       if (!response.ok || result.success === false) {
         setMessage(response.status === 429 || response.status === 503 ? result.message ?? "KDS 로그인 요청을 확인할 수 없습니다." :
@@ -353,14 +354,14 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
           body: JSON.stringify({ loginId: normalizedId }),
         });
         if (!setupResponse.ok && (setupResponse.status === 429 || setupResponse.status === 503)) {
-          const setupFailure = await setupResponse.json() as { code?: string; message?: string };
+          const setupFailure = await readJsonResponse(setupResponse, setupResponse.url, "API request") as { code?: string; message?: string };
           if (setupFailure.code?.startsWith("KDS_") || setupFailure.code === "CLIENT_IP_UNAVAILABLE") {
             setMessage(setupFailure.message ?? "KDS 로그인 요청을 확인할 수 없습니다.");
             return;
           }
         }
         if (setupResponse.ok) {
-          const setup = await setupResponse.json() as { state?: string; available?: boolean };
+          const setup = await readJsonResponse(setupResponse, setupResponse.url, "API request") as { state?: string; available?: boolean };
           if (setup.available && setup.state === "MASTER_PASSWORD_REQUIRED") {
             setInitialPasswordRegistration(true);
             setRecoveryPassword(""); setRecoveryConfirm(""); setRecoveryError("");
@@ -396,7 +397,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       const trustUrl = new URL(endpoint, window.location.origin);
       trustUrl.searchParams.set("loginId", normalizedId);
       const response = await fetch(trustUrl, { cache: "no-store" });
-      const trust = await response.json() as TrustStatus & { success?: boolean; message?: string };
+      const trust = await readJsonResponse(response, response.url, "API request") as TrustStatus & { success?: boolean; message?: string };
       if (serial !== admIdRequestSerial.current ||
         idInput.current?.value.trim().toLowerCase() !== normalizedId) return;
       if (!response.ok || trust.success === false) {
@@ -431,7 +432,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       const setupResponse = await fetch(setupUrl, { method: "POST",
         headers: { "Content-Type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ loginId: normalizedId }) });
-      const setup = setupResponse.ok ? await setupResponse.json() as {
+      const setup = setupResponse.ok ? await readJsonResponse(setupResponse, setupResponse.url, "API request") as {
         state?: string; available?: boolean; resetPasswordRequired?: boolean;
       } : null;
       if (serial !== admIdRequestSerial.current) return;
@@ -531,7 +532,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
       }
       const response = await fetch(url, { method: "POST",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json() as ApiResult;
+      const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
       if (!response.ok || !result.success) {
         if (result.code === "PIN_SETUP_REAUTH_REQUIRED") {
           setActiveKeyboard(null);
@@ -599,7 +600,7 @@ export default function ProgramTrustGate({ program, children }: { program: Progr
         body: JSON.stringify({ loginId: loginId.trim().toLowerCase(), token: recoveryToken,
           password: recoveryPassword, confirmPassword: recoveryConfirm }),
       });
-      const result = await response.json() as ApiResult;
+      const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
       if (!response.ok || !result.success) {
         setRecoveryError(result.message ?? "마스터 비밀번호를 등록하지 못했습니다."); return;
       }

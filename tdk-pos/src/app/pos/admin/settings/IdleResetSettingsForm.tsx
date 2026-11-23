@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { playPosSoundTest } from "@/lib/pos-sound";
@@ -31,7 +32,7 @@ export default function IdleResetSettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seconds: value }),
       });
-      const result = (await response.json()) as { success?: boolean; message?: string };
+      const result = (await readJsonResponse(response, response.url, "API request")) as { success?: boolean; message?: string };
       setMessage(result.success ? "저장했습니다." : result.message ?? "설정 저장에 실패했습니다.");
     } catch {
       setMessage("네트워크 오류가 발생했습니다.");
@@ -54,7 +55,7 @@ export default function IdleResetSettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seconds: value }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       setPaymentAutoCompleteMessage(response.ok && result.success ? "저장했습니다." : result.message ?? "설정 저장에 실패했습니다.");
     } catch {
       setPaymentAutoCompleteMessage("네트워크 오류가 발생했습니다.");

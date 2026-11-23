@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/api-response";
 type QrResponse = { success?: boolean; orders?: unknown[]; message?: string };
 
 export async function readPosQrTableResponse<T extends QrResponse>(response: Response, action: string): Promise<T> {
@@ -7,7 +8,7 @@ export async function readPosQrTableResponse<T extends QrResponse>(response: Res
     throw new Error(`${action} 응답 형식이 올바르지 않습니다. (HTTP ${response.status})`);
   }
   let payload: T;
-  try { payload = await response.json() as T; }
+  try { payload = await readJsonResponse(response, response.url, "API request") as T; }
   catch { throw new Error(`${action} 응답을 읽지 못했습니다. (HTTP ${response.status})`); }
   if (!response.ok || !payload.success) throw new Error(payload.message ?? `${action}에 실패했습니다. (HTTP ${response.status})`);
   return payload;

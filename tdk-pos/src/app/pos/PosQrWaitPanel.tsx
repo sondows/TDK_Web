@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import PosQrTableOrderPanel from "./PosQrTableOrderPanel";
@@ -34,7 +35,7 @@ function PosQrWalkInPanel({ tables, onChanged, onCountChange }: PosQrWaitPanelPr
     refreshInFlight.current = true;
     try {
       const response = await fetch("/api/pos/qr-wait-orders", { cache: "no-store" });
-      const payload = await response.json() as { success?: boolean; orders?: PosWaitOrder[]; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; orders?: PosWaitOrder[]; message?: string };
       if (!response.ok || !payload.success || !Array.isArray(payload.orders)) throw new Error(payload.message ?? "대기 주문을 불러오지 못했습니다.");
       setOrders(payload.orders);
       onCountChange(payload.orders.length);
@@ -60,7 +61,7 @@ function PosQrWalkInPanel({ tables, onChanged, onCountChange }: PosQrWaitPanelPr
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableId, version: order.version }),
       });
-      const payload = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; openingRequired?: boolean };
       if (!response.ok || !payload.success) throw new Error(payload.message ?? "테이블 배정에 실패했습니다.");
       await refresh();
       onChanged();
@@ -77,7 +78,7 @@ function PosQrWalkInPanel({ tables, onChanged, onCountChange }: PosQrWaitPanelPr
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ version: order.version, ...(acknowledgement?.version === order.version ? { acknowledgedTotal: acknowledgement.total } : {}) }),
       });
-      const payload = await response.json() as { success?: boolean; message?: string; priceChanged?: boolean; currentTotal?: string; version?: number };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; priceChanged?: boolean; currentTotal?: string; version?: number };
       if (payload.priceChanged && payload.currentTotal && Number.isSafeInteger(payload.version)) {
         setPriceAcknowledgements(current => ({ ...current, [order.waitOrderId]: { version: payload.version!, total: payload.currentTotal! } }));
         await refresh();
@@ -96,7 +97,7 @@ function PosQrWalkInPanel({ tables, onChanged, onCountChange }: PosQrWaitPanelPr
     setBusyId(order.waitOrderId); setError("");
     try {
       const response = await fetch(`/api/pos/qr-wait-orders/${order.waitOrderId}/cancel`, { method: "POST" });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message ?? "대기 주문을 취소하지 못했습니다.");
       await refresh();
       onChanged();

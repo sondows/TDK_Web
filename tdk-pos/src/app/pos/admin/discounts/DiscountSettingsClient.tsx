@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 
@@ -19,7 +20,7 @@ export default function DiscountSettingsClient({ initialPresets }: { initialPres
     setSaving(true); setMessage("");
     try {
       const response = await fetch("/api/admin/discount-rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ presets: presets.map(preset => ({ ...preset, value: Number(preset.value) })) }) });
-      const result = await response.json() as { success?: boolean; message?: string; presets?: PersistedPreset[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; presets?: PersistedPreset[] };
       if (!response.ok || !result.success || !result.presets) throw new Error(result.message ?? "할인 설정을 저장할 수 없습니다.");
       setPresets(emptyPresets(result.presets)); setMessage("할인 설정을 저장했습니다.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "할인 설정을 저장할 수 없습니다."); } finally { setSaving(false); }

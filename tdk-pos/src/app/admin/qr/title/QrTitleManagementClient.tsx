@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import Cropper from "react-easy-crop";
 import Image from "next/image";
@@ -72,7 +73,7 @@ export default function QrTitleManagementClient({ screenId, screenLabel, initial
       const response = await fetch(`/api/admin/qr-title/screens/${screenId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings }),
       });
-      const payload = await response.json() as { success?: boolean; settings?: QrTitleScreenSettings; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; settings?: QrTitleScreenSettings; message?: string };
       if (!response.ok || !payload.success || !payload.settings) throw new Error(payload.message || "타이틀 설정을 저장하지 못했습니다.");
       setSettings(payload.settings); setSettingsSaved(true);
     } catch (reason) { setSettingsMessage(reason instanceof Error ? reason.message : "타이틀 설정을 저장하지 못했습니다."); }
@@ -81,7 +82,7 @@ export default function QrTitleManagementClient({ screenId, screenLabel, initial
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/admin/qr-title?screen=${screenId}`, { cache: "no-store" });
-    const payload = await response.json() as { success?: boolean; photos?: QrTitleAdminPhoto[]; message?: string };
+    const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; photos?: QrTitleAdminPhoto[]; message?: string };
     if (!response.ok || !payload.success || !payload.photos) throw new Error(payload.message || "사진 목록을 불러오지 못했습니다.");
     setPhotos(payload.photos);
   }, [screenId]);
@@ -126,7 +127,7 @@ export default function QrTitleManagementClient({ screenId, screenLabel, initial
       form.set("cropped", cropped, "qr-title.webp");
       form.set("crop", JSON.stringify(cropInfo));
       const response = await fetch("/api/admin/qr-title", { method: "POST", body: form });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "사진을 저장하지 못했습니다.");
       await refresh();
       const nextFile = pendingFiles[0];
@@ -142,7 +143,7 @@ export default function QrTitleManagementClient({ screenId, screenLabel, initial
     setPhotos(normalized);
     try {
       const response = await fetch("/api/admin/qr-title", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ screen: screenId, items: normalized.map(({ photoId, sortOrder, isActive }) => ({ photoId, sortOrder, isActive })) }) });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "사진 설정을 저장하지 못했습니다.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "사진 설정을 저장하지 못했습니다."); await refresh().catch(() => undefined); }
   };
@@ -152,7 +153,7 @@ export default function QrTitleManagementClient({ screenId, screenLabel, initial
     setBusy(true); setError("");
     try {
       const response = await fetch(`/api/admin/qr-title/photos/${photo.photoId}?screen=${screenId}`, { method: "DELETE" });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "사진을 삭제하지 못했습니다.");
       const rest = photos.filter(item => item.photoId !== photo.photoId);
       await saveOrder(rest);

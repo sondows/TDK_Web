@@ -52,6 +52,7 @@ export function isQrDevelopmentPathAllowed(pathname: string, method: string): bo
     pathname.startsWith("/_next/") || pathname.startsWith("/icons/") ||
     pathname === "/favicon.ico" || pathname === "/images/menu/no-image.png" ||
     /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname)
+      || /^\/api\/qr\/(?:title-images|notices\/images)\/[0-9a-f-]{36}$/i.test(pathname)
   )) return true;
   if (isCustomerQrApiPathAllowed(pathname, verb)) return true;
   return false;
@@ -62,13 +63,15 @@ function isPublicAsset(pathname: string, method: string): boolean {
   if (!isReadOnly(method)) return false;
   if (isPathOrChild(pathname, "/_next") || isPathOrChild(pathname, "/icons")) return true;
   if (["/favicon.ico", "/manifest.webmanifest", "/kds.webmanifest"].includes(pathname)) return true;
-  return /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname) || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname);
+  return /^\/api\/menu-images\/\d+\/[A-Za-z0-9._-]+$/.test(pathname)
+    || /^\/api\/qr\/(?:title-images|notices\/images)\/[0-9a-f-]{36}$/i.test(pathname);
 }
 function isAdminPageOrApi(pathname: string): boolean {
   return isPathOrChild(pathname, "/admin") || isPathOrChild(pathname, "/api/admin") || isPathOrChild(pathname, "/api/admin-center");
 }
 function isCustomerQrApiPathAllowed(pathname: string, method: string): boolean {
   if (method === "GET" || method === "HEAD") return pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title"
+    || pathname === "/api/qr/notices" || pathname === "/api/qr/table-order-link"
     || pathname === "/api/qr/table-orders" || pathname === "/api/qr/visit"
     || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname)
     || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)
@@ -86,6 +89,7 @@ export function isExternalPosPath(pathname: string): boolean {
     || isPathOrChild(pathname, "/api/auth") || pathname === "/api/staff/active"
     || pathname === "/api/table-cancellations" || pathname === "/api/tables" || pathname === "/api/kds/table-order"
     || pathname === "/api/qr/staff-order-history" || pathname === "/api/qr/staff-order-notifications"
+    || pathname === "/api/qr/staff-table-token"
     || isPathOrChild(pathname, "/api/pos") || isPathOrChild(pathname, "/api/table-sessions")
     || isPathOrChild(pathname, "/api/table-session-merges") || isPathOrChild(pathname, "/api/table-layout")
     || (isPathOrChild(pathname, "/api/pos-settings") && !["/api/pos-settings/business-day", "/api/pos-settings/takeout-preparation"].includes(pathname))

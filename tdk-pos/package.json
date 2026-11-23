@@ -6,7 +6,8 @@
     "dev": "node server.cjs",
     "build": "next build",
     "start": "node server.cjs",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:api-access": "node --experimental-strip-types --test src/lib/api-route-manifest.test.mjs src/lib/host-access.test.mjs src/lib/api-response.test.mjs src/lib/qr-processing-policy.test.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

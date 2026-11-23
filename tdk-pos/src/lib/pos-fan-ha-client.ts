@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/api-response";
 export type HomeAssistantFanState = "on" | "off" | "unknown";
 export type HomeAssistantConfig = { baseUrl: string; token: string };
 
@@ -34,7 +35,7 @@ export async function readHomeAssistantState(config: HomeAssistantConfig, entity
     throw new HomeAssistantApiError(code, response.status);
   }
   try {
-    const result = await response.json() as { state?: unknown };
+    const result = await readJsonResponse(response, response.url, "API request") as { state?: unknown };
     return result.state === "on" ? "on" : result.state === "off" ? "off" : "unknown";
   } catch {
     throw new HomeAssistantApiError("HA_INVALID_RESPONSE", response.status);

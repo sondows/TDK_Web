@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { qrMenuDescriptionStatus, type QrMenuDescriptionDraft } from "@/lib/qr-menu-description-model";
@@ -89,7 +90,7 @@ export default function MenuDescriptionManagementClient({ initialMenus, initialR
           originDescription: draft.originDescription,
         }),
       });
-      const payload = await response.json() as { success?: boolean; record?: MenuDescriptionAdminRecord; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; record?: MenuDescriptionAdminRecord; message?: string };
       if (!response.ok || !payload.success || !payload.record) throw new Error(payload.message ?? "메뉴 설명을 저장하지 못했습니다.");
       const next = toDraft(payload.record);
       setRecords(current => new Map(current).set(selectedMenu.menuId, next));

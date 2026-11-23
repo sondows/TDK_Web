@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 
@@ -9,7 +10,7 @@ export default function BusinessSessionNotice() {
     const load = async () => {
       try {
         const response = await fetch("/api/pos/business-session", { cache: "no-store" });
-        const result = await response.json() as { session?: { businessDate: string; isCarriedOver: boolean } | null };
+        const result = await readJsonResponse(response, response.url, "API request") as { session?: { businessDate: string; isCarriedOver: boolean } | null };
         if (live) setBusinessDate(response.ok && result.session?.isCarriedOver ? result.session.businessDate : null);
       } catch { /* The POS's normal requests still surface connection errors. */ }
     };

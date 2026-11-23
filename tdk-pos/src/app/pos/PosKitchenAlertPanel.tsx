@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { KdsViewTask } from "@/lib/kds-server";
@@ -51,7 +52,7 @@ export default function PosKitchenAlertPanel() {
     const version = ++requestVersion.current;
     try {
       const response = await fetch("/api/pos/kitchen", { cache: "no-store" });
-      const result = await response.json() as ApiResult;
+      const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
       if (version !== requestVersion.current) return;
       if (!response.ok || !result.success || !result.tasks) throw new Error(result.message ?? "주방 작업을 불러오지 못했습니다.");
       setTasks(result.tasks);
@@ -107,7 +108,7 @@ export default function PosKitchenAlertPanel() {
       const response = await fetch("/api/kds/table-order", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionIds: nextIds }),
       });
-      const result = await response.json() as ApiResult;
+      const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
       if (!response.ok || !result.success) throw new Error(result.message ?? "조리 순서를 저장하지 못했습니다.");
       if (result.tableOrder) setTableOrder(result.tableOrder);
       saveError.current = null;
@@ -136,7 +137,7 @@ export default function PosKitchenAlertPanel() {
         const response = await fetch("/api/kds/table-order", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partyGroupId: partyId, sessionIds: nextIds }),
         });
-        const result = await response.json() as ApiResult;
+        const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
         if (!response.ok || !result.success) throw new Error(result.message ?? "일행 내부 순서를 저장하지 못했습니다.");
         if (result.partyOrder) setPartyOrder(current => ({ ...current, ...result.partyOrder }));
         saveError.current = null;

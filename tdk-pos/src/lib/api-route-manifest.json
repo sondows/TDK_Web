@@ -1,0 +1,1087 @@
+[
+    {
+        "path":  "/api/account-transfer-notice",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/business-closings",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/cash-history",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/dashboard",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/dashboard/sales/:checkoutId",
+        "methods":  [
+                        "DELETE"
+                    ]
+    },
+    {
+        "path":  "/api/admin/dashboard/sales/:checkoutId/payments/:paymentId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/discount-rules",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/grant",
+        "methods":  [
+                        "DELETE"
+                    ]
+    },
+    {
+        "path":  "/api/admin/item-sales",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-accounts",
+        "methods":  [
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-arrival-sound",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-completed-time-shrink",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-completion-countdown",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-cooking",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/kds-order-bundle",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/legacy-sales",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-addons",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-addons/:menuId/copy",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-categories",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-categories/:categoryId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-descriptions/:menuId",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-images",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menu-images/:menuId",
+        "methods":  [
+                        "DELETE",
+                        "PATCH",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menus",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menus/:menuId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menus/:menuId/qr-visibility",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/menus/order",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes",
+        "methods":  [
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes/:qrCodeId/history",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes/:qrCodeId/image",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes/:qrCodeId/png",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes/export",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-codes/test-session",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-notices",
+        "methods":  [
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-notices/:noticeId",
+        "methods":  [
+                        "DELETE",
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-notices/images",
+        "methods":  [
+                        "DELETE",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title",
+        "methods":  [
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/business-hours",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/holidays",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/holidays/status",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/photos/:photoId",
+        "methods":  [
+                        "DELETE",
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/screens/:screenId",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/store-name",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/subtitle",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/qr-title/today-override",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/sales-report",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/sales-report/details",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/sales-report/range",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/staff",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/staff/:staffId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin/staff/:staffId/admin-credentials",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin/verify",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/verify-pin",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/hos/table-layout",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/login",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/login/staff",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/logout",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/pos/fans/layout",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/security/owner-password",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/security/owners",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/security/trust-tokens",
+        "methods":  [
+                        "DELETE",
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/staff",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/staff/:staffId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/staff/:staffId/security-password",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/staff/:staffId/terminate",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/trust",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/trust/initialize",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin-center/trust/initial-master/status",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/auth/login",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/auth/logout",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/auth/trust",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/checkouts",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/customers",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/customers/:customerId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/customers/:customerId/ledger",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/customers/:customerId/ledger/:ledgerId",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/customers/order",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/db-test",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/auth/login",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/hos/auth/logout",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/hos/auth/session",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/auth/trust",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/hos/customers",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/menu-catalog",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/tables",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/tables/:tableId",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/hos/tables/:tableId/customer",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kds/table-order",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/auth/change-pin",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/auth/login",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/auth/logout",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/auth/staff",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/auth/trust",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/tables/:sessionId/complete",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/tables/:sessionId/start",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/kitchen/tasks/:taskId",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/menu-images/:menuId/:fileName",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/order-items/:orderItemId",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/order-items/:orderItemId/cancellations",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/order-items/cancellations/batch",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/business-session",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/business-session/close",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/cash-check",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/customers",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos/fans",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos/fans/:fanId",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/kitchen",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos/menu-catalog",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos/opening-fund",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/qr-table-orders",
+        "methods":  [
+                        "GET",
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/pos/qr-wait-orders",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos/qr-wait-orders/:waitOrderId/assign",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/qr-wait-orders/:waitOrderId/cancel",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/qr-wait-orders/:waitOrderId/confirm",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/rice-stock",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/table-customer",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos/takeouts",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/business-day",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/idle-reset",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/login-mode",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/other-payments",
+        "methods":  [
+                        "GET",
+                        "POST",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/payment-auto-complete",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/receipt-auto-print",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/receipt-logo",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/receipt-print-header",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/store-info",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/pos-settings/takeout-preparation",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/program-trust/change-temporary-password",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/program-trust/master-recovery/register",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/program-trust/master-recovery/register-initial",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/program-trust/master-recovery/status",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/program-trust/pin",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/cart-events",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/dev-test-session",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/menu-catalog",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/notices",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/notices/images/:assetId",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/order-invites",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/staff-order-history",
+        "methods":  [
+                        "DELETE",
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/staff-order-notifications",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/staff-table-token",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/table-order-link",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/table-orders",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/title",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/title-images/:assetId",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/qr/visit",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/wait-orders",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/wait-orders/:waitOrderId",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/sales",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/sales/print-history",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/sales/summary",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/sales/summary/managers",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/staff/active",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/table-cancellations",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-layout",
+        "methods":  [
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/table-layout/tables",
+        "methods":  [
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/tables",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/table-session-merges/:mergeId/separate",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId",
+        "methods":  [
+                        "PATCH",
+                        "PUT"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/copy-orders",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/discounts",
+        "methods":  [
+                        "DELETE",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/merge",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/move",
+        "methods":  [
+                        "PATCH"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/orders",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/:sessionId/spiciness",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/party-groups",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/table-sessions/party-groups/:groupId",
+        "methods":  [
+                        "DELETE"
+                    ]
+    }
+]

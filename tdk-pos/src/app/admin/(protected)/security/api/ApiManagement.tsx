@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import type { KasiHoliday, KasiHolidaySyncState } from "@/lib/kasi-holiday-model";
@@ -38,7 +39,7 @@ export default function ApiManagement() {
 
   const load = async () => {
     const response = await fetch("/api/admin/qr-title/holidays", { cache: "no-store" });
-    const payload = await response.json() as Payload;
+    const payload = await readJsonResponse(response, response.url, "API request") as Payload;
     if (!response.ok || !payload.success) throw new Error(payload.message || "API 정보를 불러오지 못했습니다.");
     applyState(payload);
   };
@@ -46,7 +47,7 @@ export default function ApiManagement() {
   useEffect(() => {
     let mounted = true;
     void fetch("/api/admin/qr-title/holidays", { cache: "no-store" }).then(async response => {
-      const payload = await response.json() as Payload;
+      const payload = await readJsonResponse(response, response.url, "API request") as Payload;
       if (!response.ok || !payload.success) throw new Error(payload.message || "API 정보를 불러오지 못했습니다.");
       if (mounted) applyState(payload);
     }).catch(reason => { if (mounted) setError(reason instanceof Error ? reason.message : "API 정보를 불러오지 못했습니다."); });
@@ -60,7 +61,7 @@ export default function ApiManagement() {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serviceKey, api: { name, provider, purpose, active } }),
       });
-      const payload = await response.json() as Payload;
+      const payload = await readJsonResponse(response, response.url, "API request") as Payload;
       if (payload.configured !== undefined) applyState(payload);
       if (!response.ok || !payload.success) throw new Error(payload.message || "API 정보를 저장하지 못했습니다.");
       setServiceKey(""); setShowKey(false); setEditing(false); setMessage(payload.message || "API 정보를 저장했습니다.");
@@ -75,7 +76,7 @@ export default function ApiManagement() {
       const response = action === "test"
         ? await fetch("/api/admin/qr-title/holidays", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test" }) })
         : await fetch("/api/admin/qr-title/holidays", { method: "DELETE" });
-      const payload = await response.json() as Payload;
+      const payload = await readJsonResponse(response, response.url, "API request") as Payload;
       if (payload.configured !== undefined) applyState(payload);
       if (!response.ok || !payload.success) throw new Error(payload.message || "요청을 처리하지 못했습니다.");
       setMessage(payload.message || (action === "test" ? "API 연결에 성공했습니다." : "API를 삭제했습니다."));

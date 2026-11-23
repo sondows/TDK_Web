@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import Image from "next/image";
@@ -41,7 +42,7 @@ export default function QrNoticeManagementClient({ initialNotices, initialError 
       for (const file of Array.from(files)) {
         const form = new FormData(); form.set("file", file);
         const response = await fetch("/api/admin/qr-notices/images", { method: "POST", body: form, credentials: "same-origin" });
-        const payload = await response.json() as { success?: boolean; assetId?: string; message?: string };
+        const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; assetId?: string; message?: string };
         if (!response.ok || !payload.success || !payload.assetId) throw new Error(payload.message ?? "이미지를 업로드하지 못했습니다.");
         uploaded.push({ id: crypto.randomUUID(), type: "image", assetId: payload.assetId });
       }
@@ -65,7 +66,7 @@ export default function QrNoticeManagementClient({ initialNotices, initialError 
         method: draft.id ? "PATCH" : "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, blocks: draft.blocks }),
       });
-      const payload = await response.json() as { success?: boolean; notice?: QrNoticeAdminItem | null; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; notice?: QrNoticeAdminItem | null; message?: string };
       if (!response.ok || !payload.success || !payload.notice) throw new Error(payload.message ?? "안내문을 저장하지 못했습니다.");
       setNotices(current => {
         const found = current.some(item => item.id === payload.notice!.id);
@@ -81,7 +82,7 @@ export default function QrNoticeManagementClient({ initialNotices, initialError 
     setBusy(true); setMessage("");
     try {
       const response = await fetch(`/api/admin/qr-notices/${notice.id}`, { method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !notice.isActive }) });
-      const payload = await response.json() as { success?: boolean; notice?: QrNoticeAdminItem; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; notice?: QrNoticeAdminItem; message?: string };
       if (!response.ok || !payload.success || !payload.notice) throw new Error(payload.message ?? "표시 상태를 변경하지 못했습니다.");
       setNotices(current => current.map(item => item.id === payload.notice!.id ? payload.notice! : item));
     } catch (error) { setMessage(error instanceof Error ? error.message : "표시 상태를 변경하지 못했습니다."); }
@@ -93,7 +94,7 @@ export default function QrNoticeManagementClient({ initialNotices, initialError 
     setBusy(true); setMessage("");
     try {
       const response = await fetch(`/api/admin/qr-notices/${notice.id}`, { method: "DELETE", credentials: "same-origin" });
-      const payload = await response.json() as { success?: boolean; notices?: QrNoticeAdminItem[]; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; notices?: QrNoticeAdminItem[]; message?: string };
       if (!response.ok || !payload.success || !payload.notices) throw new Error(payload.message ?? "안내문을 삭제하지 못했습니다.");
       setNotices(payload.notices);
       if (draft?.id === notice.id) setDraft(null);
@@ -109,7 +110,7 @@ export default function QrNoticeManagementClient({ initialNotices, initialError 
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/admin/qr-notices", { method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: next.map(item => item.id) }) });
-      const payload = await response.json() as { success?: boolean; notices?: QrNoticeAdminItem[]; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; notices?: QrNoticeAdminItem[]; message?: string };
       if (!response.ok || !payload.success || !payload.notices) throw new Error(payload.message ?? "순서를 저장하지 못했습니다.");
       setNotices(payload.notices);
     } catch (error) { setMessage(error instanceof Error ? error.message : "순서를 저장하지 못했습니다."); }

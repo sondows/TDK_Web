@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 import { useEffect, useRef, useState } from "react";
 import PinAuthPanel from "@/components/PinAuthPanel";
 import PinKeypad from "@/components/PinKeypad";
@@ -383,7 +384,7 @@ export default function OrderSummaryPanel({
     setSpicyBusy(true);
     try {
       const response = await fetch(`/api/table-sessions/${sessionId}/spiciness?sourceOrderItemId=${source.item.orderItemId}`, { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "매운맛 변경 가능 여부를 확인하지 못했습니다.");
       setSpicyEdit({ sourceOrderItemId: source.item.orderItemId, sessionId, selectionKey: requestKey,
         title: choice.title.trim() || "옵션 변경", choices: choice.options, selectedId: current.modifierOptionId! });
@@ -420,7 +421,7 @@ export default function OrderSummaryPanel({
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceOrderItemId: edit.sourceOrderItemId, modifierOptionId: selectedOption.modifierOptionId }),
       });
-      const result = await response.json() as { success?: boolean; message?: string;
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string;
         changes?: Array<{ itemId: number; optionId: number; optionName: string }> };
       if (!response.ok || !result.success) throw new Error(result.message ?? "매운맛을 변경하지 못했습니다.");
       const confirmed = { ...previous };
@@ -497,7 +498,7 @@ export default function OrderSummaryPanel({
           ...credentials,
         }),
       });
-      const v = (await r.json()) as {
+      const v = (await readJsonResponse(r, r.url, "API request")) as {
         success?: boolean;
         reauth?: boolean;
         message?: string;
@@ -1175,7 +1176,7 @@ function Reauth({
     void fetch("/api/staff/active")
       .then(
         (r) =>
-          r.json() as Promise<{
+          readJsonResponse(r, r.url, "API request") as Promise<{
             staff?: Array<{
               loginId: string;
               role: string;

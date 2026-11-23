@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
@@ -51,7 +52,7 @@ export default function CustomerSelectDialog({ selected, onSelect, onClose, sele
     setError("");
     try {
       const response = await fetch("/api/pos/customers?includeAll=1&includeRecent=1&includeBalance=1", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; customers?: Customer[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; customers?: Customer[]; message?: string };
       if (!response.ok || !result.success || !Array.isArray(result.customers)) throw new Error(result.message ?? "고객 목록을 불러오지 못했습니다.");
       return result.customers;
     } catch (reason) {

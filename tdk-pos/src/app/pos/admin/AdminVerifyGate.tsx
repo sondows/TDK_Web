@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -35,7 +36,7 @@ export default function AdminVerifyGate() {
   useEffect(() => {
     let mounted = true;
     void fetch("/api/staff/active")
-      .then(response => response.json() as Promise<{ success?: boolean; staff?: Owner[]; message?: string }>)
+      .then(response => readJsonResponse(response, response.url, "API request") as Promise<{ success?: boolean; staff?: Owner[]; message?: string }>)
       .then(result => {
         if (!mounted) return;
         if (!result.success) {
@@ -76,7 +77,7 @@ export default function AdminVerifyGate() {
           requiredRole: "OWNER",
         }),
       });
-      const result = await response.json() as { success?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean };
       if (!response.ok || !result.success) {
         resetPinVerification();
         setShowPinError(true);
@@ -102,7 +103,7 @@ export default function AdminVerifyGate() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ loginId: owner.loginId, pin: pinValue }),
     })
-      .then(response => response.json() as Promise<{ success?: boolean }>)
+      .then(response => readJsonResponse(response, response.url, "API request") as Promise<{ success?: boolean }>)
       .then(result => {
         if (requestId !== verificationRequestId.current) return;
         if (result.success) {

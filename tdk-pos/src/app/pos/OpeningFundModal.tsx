@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
@@ -59,7 +60,7 @@ export default function OpeningFundModal({ close, mode = "openingCash", onSaved,
     let active = true;
     void fetch(mode === "cashCheck" ? "/api/pos/cash-check" : "/api/pos/opening-fund", { cache: "no-store" })
       .then(async response => {
-        const result = await response.json() as Snapshot & CashCheckPreview;
+        const result = await readJsonResponse(response, response.url, "API request") as Snapshot & CashCheckPreview;
         if (!response.ok || !result.success) throw new Error(result.message ?? (mode === "cashCheck" ? "예상 시재를 불러오지 못했습니다." : "준비금을 불러오지 못했습니다."));
         return result;
       })
@@ -172,13 +173,13 @@ export default function OpeningFundModal({ close, mode = "openingCash", onSaved,
           ? { ...draft, businessDate: cashCheckPreview!.businessDate, expectedCash: cashCheckPreview!.expectedCash, requestKey: checkRequestKey.current }
           : { ...draft, createOnly: context !== "manual" }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; alreadyRegistered?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; alreadyRegistered?: boolean };
       if (!response.ok || !result.success) {
         if (cashCheck && response.status === 409) {
           checkRequestKey.current = null;
           const latestResponse = await fetch("/api/pos/cash-check", { cache: "no-store" });
           if (latestResponse.ok) {
-            const latest = await latestResponse.json() as CashCheckPreview;
+            const latest = await readJsonResponse(latestResponse, latestResponse.url, "API request") as CashCheckPreview;
             if (latest.success) setCashCheckPreview(latest);
           }
         }

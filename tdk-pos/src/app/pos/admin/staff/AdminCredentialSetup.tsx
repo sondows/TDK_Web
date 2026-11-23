@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState, type FormEvent } from "react";
 
@@ -21,7 +22,7 @@ export default function AdminCredentialSetup({ staffId }: { staffId: number }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId, pin }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         setMessage(result.message ?? "관리센터 로그인 정보를 설정하지 못했습니다.");
         return;

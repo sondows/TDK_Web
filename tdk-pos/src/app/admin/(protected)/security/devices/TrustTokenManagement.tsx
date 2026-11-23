@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -31,7 +32,7 @@ export default function TrustTokenManagement() {
     setLoading(true); setMessage("");
     try {
       const response = await fetch("/api/admin-center/security/trust-tokens", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; tokens?: TokenRow[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; tokens?: TokenRow[]; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "토큰 목록을 불러오지 못했습니다.");
       setRows(result.tokens ?? []);
     } catch (error) {

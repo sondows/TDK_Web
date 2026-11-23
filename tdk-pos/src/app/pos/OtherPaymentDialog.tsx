@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import VerticalScrollIndicators from "@/components/VerticalScrollIndicators";
@@ -36,7 +37,7 @@ export default function OtherPaymentDialog({ remaining, customerRemaining, selec
   useEffect(() => {
     let active = true;
     fetch("/api/pos-settings/other-payments?pos=1", { cache: "no-store" })
-      .then(async response => { const result = await response.json() as { success?: boolean; methods?: OtherPaymentMethod[]; message?: string }; if (!response.ok || !result.success) throw new Error(result.message ?? "기타결제 수단을 불러오지 못했습니다."); return result.methods ?? []; })
+      .then(async response => { const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; methods?: OtherPaymentMethod[]; message?: string }; if (!response.ok || !result.success) throw new Error(result.message ?? "기타결제 수단을 불러오지 못했습니다."); return result.methods ?? []; })
       .then(rows => { if (active) setMethods(rows); })
       .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "기타결제 수단을 불러오지 못했습니다."); })
       .finally(() => { if (active) setLoading(false); });

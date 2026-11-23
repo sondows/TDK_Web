@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 
@@ -27,7 +28,7 @@ export default function QrUsageHistoryPage({ params }: { params: Promise<{ qrCod
     let active = true;
     void params.then(({ qrCodeId }) => fetch(`/api/admin/qr-codes/${encodeURIComponent(qrCodeId)}/history`, { cache: "no-store", credentials: "same-origin" }))
       .then(async response => {
-        const data = await response.json() as HistoryResult;
+        const data = await readJsonResponse(response, response.url, "API request") as HistoryResult;
         if (!response.ok || !data.success) throw new Error(data.message ?? (response.status === 401 || response.status === 403 ? "QR 사용기록 조회 권한이 없습니다." : "사용기록을 불러오지 못했습니다."));
         if (active) setResult(data);
       })

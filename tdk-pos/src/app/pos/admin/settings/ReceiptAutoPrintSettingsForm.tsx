@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 
@@ -18,7 +19,7 @@ export default function ReceiptAutoPrintSettingsForm({ initialEnabled }: { initi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: next }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "설정 저장에 실패했습니다.");
       setEnabled(next);
     } catch (error) {

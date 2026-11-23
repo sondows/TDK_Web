@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
@@ -265,7 +266,7 @@ export default function QrStoreTitle({ settings, screenSettings, previewMode = f
     if (previewMode || !(tableOrderMode || screenSettings?.rightMode === "TABLE_NO")) return;
     const controller = new AbortController();
     void fetch("/api/qr/table-orders", { cache: "no-store", credentials: "same-origin", signal: controller.signal })
-      .then(async response => response.ok ? await response.json() as { success?: boolean; tableNo?: string } : null)
+      .then(async response => response.ok ? await readJsonResponse(response, response.url, "API request") as { success?: boolean; tableNo?: string } : null)
       .then(payload => { if (payload?.success && payload.tableNo) setTableNo(payload.tableNo); })
       .catch(() => undefined);
     return () => controller.abort();

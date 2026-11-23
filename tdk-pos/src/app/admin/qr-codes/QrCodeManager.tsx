@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
@@ -55,7 +56,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 
 async function readDownload(response: Response, fallback: string) {
   if (response.ok) return response.blob();
-  const result = await response.json().catch(() => null) as { message?: string } | null;
+  const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { message?: string } | null;
   throw new Error(result?.message ?? fallback);
 }
 
@@ -90,7 +91,7 @@ export default function QrCodeManager() {
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/admin/qr-codes", { cache: "no-store" });
-    const result = await response.json() as { success?: boolean; codes?: QrCode[]; tables?: Table[]; accessEventsTruncated?: boolean; message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; codes?: QrCode[]; tables?: Table[]; accessEventsTruncated?: boolean; message?: string };
     if (!response.ok || !result.success) throw new Error(result.message ?? "QR 목록을 불러오지 못했습니다.");
     setCodes(result.codes ?? []);
     setAccessEventsTruncated(result.accessEventsTruncated === true);
@@ -105,7 +106,7 @@ export default function QrCodeManager() {
   useEffect(() => {
     let active = true;
     void fetch("/api/admin/qr-codes/test-session", { cache: "no-store", credentials: "same-origin" })
-      .then(response => response.json() as Promise<{ enabled?: boolean }>)
+      .then(response => readJsonResponse(response, response.url, "API request") as Promise<{ enabled?: boolean }>)
       .then(result => { if (active) setDevTestEnabled(result.enabled === true); })
       .catch(() => { if (active) setDevTestEnabled(false); });
     return () => { active = false; };
@@ -116,7 +117,7 @@ export default function QrCodeManager() {
     setError("");
     try {
       const response = await fetch("/api/admin/qr-codes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ count }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "발행에 실패했습니다.");
       await refresh();
     } catch (reason) {
@@ -153,7 +154,7 @@ export default function QrCodeManager() {
       const body: Record<string, unknown> = { qrCodeId: code.qrCodeId, targetType: choice.startsWith("TABLE:") ? "TABLE_ORDER" : choice };
       if (choice.startsWith("TABLE:")) body.tableId = Number(choice.slice(6));
       const response = await fetch("/api/admin/qr-codes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "QR 연결 변경에 실패했습니다.");
       setChoiceByQr(current => { const next = { ...current }; delete next[code.qrCodeId]; return next; });
       await refresh();
@@ -173,7 +174,7 @@ export default function QrCodeManager() {
     setError("");
     try {
       const response = await fetch("/api/admin/qr-codes", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ qrCodeId: code.qrCodeId, action: "RETIRE" }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "QR 폐기에 실패했습니다.");
       setSelected(current => current.filter(id => id !== code.qrCodeId));
       await refresh();
@@ -209,7 +210,7 @@ export default function QrCodeManager() {
         credentials: "same-origin",
         body: JSON.stringify({ qrCodeId: code.qrCodeId }),
       });
-      const result = await response.json() as { success?: boolean; tableNo?: string; redirectTo?: string; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; tableNo?: string; redirectTo?: string; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "고객 화면 테스트를 시작하지 못했습니다.");
       const redirectTo = result.redirectTo === "/qrorder" || result.redirectTo === "/qrorder/join-required" ? result.redirectTo : "/qrorder/order";
       testWindow.location.replace(redirectTo);

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -73,7 +74,7 @@ export default function StoreInfoForm({ initialStoreInfo, initialLogoFileName }:
         method: "PUT",
         body: form,
       });
-      const result = await response.json() as { success?: boolean; message?: string; storeInfo?: StoreInfo; logoFileName?: string | null };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; storeInfo?: StoreInfo; logoFileName?: string | null };
       if (!response.ok || !result.success) {
         setIsError(true);
         setMessage(result.message ?? "매장정보 저장에 실패했습니다. 다시 시도해 주세요.");

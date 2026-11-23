@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useContext, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -53,7 +54,7 @@ function PosPinLogin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId: auth.loginId.trim().toLowerCase(), pin }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; code?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; code?: string };
       if (!response.ok || !result.success) {
         if (result.code === "TRUST_REQUIRED") {
           setKeyboardOpen(false);

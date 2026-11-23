@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useRef, useState } from "react";
 
@@ -21,7 +22,7 @@ export default function BusinessSettingsForm({ initialOpeningCashEnabled = false
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ openingCashEnabled }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       const succeeded = response.ok && result.success;
       setSaveFailed(!succeeded);
       if (succeeded) savedOpeningCashEnabled.current = openingCashEnabled;

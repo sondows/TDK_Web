@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import reportStyles from "../sales-report/sales-report.module.css";
@@ -20,7 +21,7 @@ export default function BusinessClosingsClient() {
     try {
       const params = new URLSearchParams(); if (from) params.set("from", from); if (to) params.set("to", to);
       const response = await fetch(`/api/admin/business-closings?${params}`, { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; days?: Day[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; days?: Day[]; message?: string };
       if (!response.ok || !result.success) { setError(result.message ?? "마감 내역을 불러오지 못했습니다."); return; }
       setDays(result.days ?? []);
     } catch { setError("마감 내역을 불러오지 못했습니다."); }

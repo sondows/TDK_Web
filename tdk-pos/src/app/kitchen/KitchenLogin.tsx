@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useContext, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -45,7 +46,7 @@ function KitchenPinLogin() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId: normalizedLoginId, pin }),
       });
-      const result = await response.json() as { success?: boolean; code?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string };
       if (result.code === "TRUST_REQUIRED") {
         window.dispatchEvent(new Event("tdk-program-trust-required"));
         return;

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import StaffToggle from "@/app/admin/staff/StaffToggle";
@@ -54,7 +55,7 @@ export default function KdsArrivalSoundForm({ initial }: { initial: KdsArrivalSo
       const response = await fetch("/api/admin/kds-arrival-sound", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings),
       });
-      const result = await response.json() as { success?: boolean; message?: string; settings?: KdsArrivalSoundSettings };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; settings?: KdsArrivalSoundSettings };
       if (!response.ok || !result.success || !result.settings) throw new Error(result.message ?? "설정 저장에 실패했습니다.");
       setSettings(result.settings);
       setMessage("KDS 도착음 설정을 저장했습니다. 열려 있는 KDS에는 다음 polling부터 반영됩니다.");

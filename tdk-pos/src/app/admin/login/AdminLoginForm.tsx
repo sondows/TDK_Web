@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useContext, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -27,7 +28,7 @@ function AdminPinLogin() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId: loginId.trim().toLowerCase(), pin }),
       });
-      const result = await response.json() as { success?: boolean; code?: string; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string; message?: string };
       if (result.code === "TRUST_REQUIRED") { window.dispatchEvent(new Event("tdk-program-trust-required")); return; }
       if (!response.ok || !result.success) {
         setMessage(response.status === 429 ? "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요."

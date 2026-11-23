@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import type { CustomerTradeResponse, CustomerTradeRow } from "@/lib/customer-trade";
@@ -67,7 +68,7 @@ export default function CustomerBalanceDialog({ customer, onClose }: {
     }
     fetch(`/api/customers/${customer.customerId}/ledger?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as CustomerTradeResponse;
+        const result = await readJsonResponse(response, response.url, "API request") as CustomerTradeResponse;
         if (!response.ok || !result.success) throw new Error(result.message ?? "고객 잔액 내역을 불러오지 못했습니다.");
         return result;
       })
@@ -98,7 +99,7 @@ export default function CustomerBalanceDialog({ customer, onClose }: {
     setPrintError("");
     try {
       const headerResponse = await fetch("/api/pos-settings/receipt-print-header", { cache: "no-store" });
-      const headerResult = await headerResponse.json() as {
+      const headerResult = await readJsonResponse(headerResponse, headerResponse.url, "API request") as {
         success: boolean;
         message?: string;
         storeInfo?: { storeName: string; businessNumber: string; representative: string; phone: string; address: string };

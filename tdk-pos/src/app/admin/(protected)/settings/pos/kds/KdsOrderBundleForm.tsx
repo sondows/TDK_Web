@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { DEFAULT_KDS_ORDER_BUNDLE_SETTINGS, isKdsOrderBundleSettings, type KdsOrderBundleSettings } from "@/lib/kds-model";
@@ -23,7 +24,7 @@ export default function KdsOrderBundleForm({ initial }: { initial: KdsOrderBundl
       const response = await fetch("/api/admin/kds-order-bundle", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings),
       });
-      const result = await response.json() as { success?: boolean; message?: string; settings?: KdsOrderBundleSettings };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; settings?: KdsOrderBundleSettings };
       if (!response.ok || !result.success || !isKdsOrderBundleSettings(result.settings)) {
         throw new Error(result.message ?? "설정을 저장하지 못했습니다.");
       }

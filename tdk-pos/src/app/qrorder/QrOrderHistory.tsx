@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -412,7 +413,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const requestSequence = ++refreshSequenceRef.current;
     const response = await fetch("/api/qr/table-orders", { cache: "no-store", credentials: "same-origin", signal });
-    const data = await response.json() as Payload;
+    const data = await readJsonResponse(response, response.url, "API request") as Payload;
     if (signal?.aborted || requestSequence !== refreshSequenceRef.current) return;
     if (response.ok && data.success && data.accessState === "PAYMENT_COMPLETED") {
       setPayload({ ...data, orders: [], items: [] });
@@ -502,7 +503,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     setShareMessage("");
     try {
       const response = await fetch("/api/qr/order-invites", { method: "POST", credentials: "same-origin" });
-      const result = await response.json() as { success?: boolean; url?: string; expiresAt?: string; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; url?: string; expiresAt?: string; message?: string };
       if (!response.ok || !result.success || !result.url || !result.expiresAt) {
         throw new Error(result.message ?? "함께 주문할 QR을 만들지 못했습니다.");
       }

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { validateCustomerCreate, type CustomerCreateDraft, type CustomerFieldErrors, type CustomerSummary } from "@/lib/customer";
@@ -57,7 +58,7 @@ export default function CustomerCreateModal({ customer, onClose, onSaved }: { cu
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...draft, isActive }),
       });
-      const result = await response.json() as { success?: boolean; errors?: CustomerFieldErrors; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; errors?: CustomerFieldErrors; message?: string };
       if (!response.ok || !result.success) {
         if (response.status === 401) {
           setNotice("관리센터 로그인이 만료되었습니다. 다시 로그인해 주세요.");

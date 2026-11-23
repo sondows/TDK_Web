@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -64,7 +65,7 @@ export default function TableCard({
           babyCount: selectedBabyCount,
         }),
       });
-      const result = (await response.json()) as {
+      const result = (await readJsonResponse(response, response.url, "API request")) as {
         success: boolean;
         message?: string;
       };

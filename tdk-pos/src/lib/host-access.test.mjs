@@ -139,3 +139,20 @@ test("external Host keeps management and read-only assets while rejecting unknow
     assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
   }
 });
+
+test("public QRS APIs allow only required read and session-authenticated routes", () => {
+  const assetId = "d3519cb2-c301-451e-b3aa-888682bbb641";
+  for (const path of ["/api/qr/notices", "/api/qr/table-order-link"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+    assert.equal(isQrDevelopmentPathAllowed(path, "GET"), true, path);
+    assert.equal(isQrDevelopmentPathAllowed(path, "POST"), false, path);
+  }
+  for (const path of [`/api/qr/notices/images/${assetId}`, `/api/qr/title-images/${assetId}`]) {
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+    assert.equal(isQrDevelopmentPathAllowed(path, "GET"), true, path);
+    assert.equal(isQrDevelopmentPathAllowed(path, "POST"), false, path);
+  }
+  assert.equal(isExternalAdminPathAllowed(`/api/qr/notices/images/${"x".repeat(36)}`, "GET"), false);
+});

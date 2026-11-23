@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -38,7 +39,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
     let active = true;
     fetch("/api/admin-center/pos/fans/layout", { cache: "no-store" }).then(async response => {
       if (!response.ok) throw new Error("fan layout unavailable");
-      const result = await response.json() as { fans?: unknown };
+      const result = await readJsonResponse(response, response.url, "API request") as { fans?: unknown };
       if (!active || !isValidPosFanLayouts(result.fans)) throw new Error("invalid fan layout");
       setFans(result.fans);
       setFansLoaded(true);
@@ -171,7 +172,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
   const addTable = async () => {
     if (!newTable?.tableNo.trim()) return;
     const response = await fetch("/api/table-layout/tables", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...newTable, tableNo: newTable.tableNo.trim() }) });
-    const result = await response.json() as { table?: Omit<Table, keyof TableLayoutValues> & Partial<TableLayoutValues>; message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as { table?: Omit<Table, keyof TableLayoutValues> & Partial<TableLayoutValues>; message?: string };
     if (!response.ok || !result.table) { setMessage(result.message ?? "테이블을 추가할 수 없습니다."); return; }
     const raw = result.table;
     const item = { ...raw, positionX: Number(raw.positionX), positionY: Number(raw.positionY), layoutWidth: Number(raw.layoutWidth), layoutHeight: Number(raw.layoutHeight), rotation: Number(raw.rotation) } as Table;
@@ -181,7 +182,7 @@ export default function LayoutEditor({ tables: initial, returnPath = "/tdkadm", 
   const deactivate = async () => {
     if (!current || !window.confirm(`"${current.tableNo}" 테이블을 비활성화하시겠습니까?`)) return;
     const response = await fetch("/api/table-layout/tables", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tableId: current.tableId }) });
-    const result = await response.json() as { message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as { message?: string };
     if (!response.ok) { setMessage(result.message ?? "비활성화할 수 없습니다."); return; }
     setTables((items) => items.map((table) => table.tableId === current.tableId ? { ...table, isActive: 0 } : table));
     setSelected(null);

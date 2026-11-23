@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 /* eslint-disable @next/next/no-img-element */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -136,7 +137,7 @@ export default function PosShell({ staffName, tables, takeouts, qrOrderTables: i
   try {
    const query = menuVersionRef.current && !manual ? `?version=${menuVersionRef.current}` : "";
    const response = await fetch(`/api/pos/menu-catalog${query}`, { cache: "no-store" });
-   const result = await response.json() as MenuCatalogResponse;
+   const result = await readJsonResponse(response, response.url, "API request") as MenuCatalogResponse;
    if (!response.ok || !result.success || !result.version) throw new Error(result.message ?? "메뉴 정보를 불러오지 못했습니다.");
    if (result.changed) {
     if (!result.menus || !result.categories || !result.modifiers || !result.components)
@@ -262,7 +263,7 @@ export default function PosShell({ staffName, tables, takeouts, qrOrderTables: i
   if (isOpeningPromptDismissed()) return;
   let active = true;
   const request = openingStatusRequest.current ??= fetch("/api/pos/opening-fund", { cache: "no-store" }).then(async response => {
-   const result = await response.json() as { success?: boolean; openingStatus?: { enabled: boolean; registered: boolean }; message?: string };
+   const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; openingStatus?: { enabled: boolean; registered: boolean }; message?: string };
    if (!response.ok || !result.success || !result.openingStatus) throw new Error(result.message ?? "오늘 준비금 등록 여부를 확인하지 못했습니다.");
    return result;
   });
@@ -402,7 +403,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
  const saveCartToSession = async (sessionId: number) => {
   try {
    const response = await fetch(`/api/table-sessions/${sessionId}/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: cart.map(item => ({ menuId: item.menuId, qty: item.qty, isComplimentary: item.isComplimentary === true, options: (item.options ?? []).map(option => ({ modifierOptionId: option.modifierOptionId, qty: option.qty })), components: (item.components ?? []).map(component => ({ menuComponentId: component.menuComponentId, qty: component.qty })) })) }) });
-   const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean };
+   const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; openingRequired?: boolean };
    if (response.status === 428 && result.openingRequired) return "OPENING_REQUIRED";
    return response.ok && result.success ? null : result.message ?? "주문 저장에 실패했습니다.";
   } catch { return "주문 저장 중 네트워크 오류가 발생했습니다."; }
@@ -758,7 +759,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   setFirstOrderBusy(true); setFirstOrderError("");
   try {
    const response = await fetch("/api/table-sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tableId: selected.tableId, personCount, babyCount }) });
-   const result = await response.json() as { success?: boolean; sessionId?: number; message?: string; openingRequired?: boolean };
+   const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; sessionId?: number; message?: string; openingRequired?: boolean };
    if (response.status === 428 && result.openingRequired) {
     const promptShown = requireBusinessOpening(() => void confirmFirstOrder(personCount, babyCount));
     if (promptShown === false) setFirstOrderError("오늘 준비금 등록을 취소했습니다. 준비금이 필요한 주문은 로그아웃 후 다시 로그인해 등록해 주세요.");
@@ -775,7 +776,7 @@ const takeoutPanelSessions: TakeoutSession[] = displayTakeouts.flatMap(session =
   } catch { setFirstOrderError("네트워크 오류가 발생했습니다."); }
   finally { setFirstOrderBusy(false); }
  }
- async function savePersonCount(personCount: number, babyCount: number) { if (!selected?.sessionId || personBusy) return; setPersonBusy(true); setPersonError(""); try { const response = await fetch(`/api/table-sessions/${selected.sessionId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personCount, babyCount }) }); const result = await response.json() as { success?: boolean; message?: string; personCount?: number; babyCount?: number }; if (!response.ok || !result.success || result.personCount === undefined || result.babyCount === undefined) { setPersonError(result.message ?? "인원 정보를 저장할 수 없습니다."); return; } setTableOverrides(current => ({ ...current, [selected.tableId]: { personCount: result.personCount, babyCount: result.babyCount } })); setPersonModal(false); } catch { setPersonError("네트워크 오류가 발생했습니다."); } finally { setPersonBusy(false); } }
+ async function savePersonCount(personCount: number, babyCount: number) { if (!selected?.sessionId || personBusy) return; setPersonBusy(true); setPersonError(""); try { const response = await fetch(`/api/table-sessions/${selected.sessionId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ personCount, babyCount }) }); const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; personCount?: number; babyCount?: number }; if (!response.ok || !result.success || result.personCount === undefined || result.babyCount === undefined) { setPersonError(result.message ?? "인원 정보를 저장할 수 없습니다."); return; } setTableOverrides(current => ({ ...current, [selected.tableId]: { personCount: result.personCount, babyCount: result.babyCount } })); setPersonModal(false); } catch { setPersonError("네트워크 오류가 발생했습니다."); } finally { setPersonBusy(false); } }
   function openQrOrdersForTable(tableId: number) {
    if (submittingOrder || firstOrderBusy) return;
    if (view !== "qrOrders") changeWorkTab("qrOrders");

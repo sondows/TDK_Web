@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
@@ -172,7 +173,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       const response = await fetch("/api/kitchen", { cache: "no-store" });
       if (requestId !== refreshRequestId.current) return false;
       if (response.status === 401) { router.refresh(); return false; }
-      const result = await response.json() as ApiResult;
+      const result = await readJsonResponse(response, response.url, "API request") as ApiResult;
       if (requestId !== refreshRequestId.current) return false;
       if (!response.ok || !result.success || !result.tasks) throw new Error(result.message ?? "주문을 불러오지 못했습니다.");
       const nextIds = new Set(result.tasks.map(task => task.taskId));
@@ -271,7 +272,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       });
       doneTiming(response);
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string; changedAtMs?: number; startedAtMs?: number | null; startUndoWindowMs?: number | null };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; changedAtMs?: number; startedAtMs?: number | null; startUndoWindowMs?: number | null };
       if (!response.ok || !result.success || typeof result.changedAtMs !== "number") throw new Error(result.message ?? "조리를 시작하지 못했습니다.");
       if (operation.cancelRequested) {
         const undo = await fetch(`/api/kitchen/tasks/${task.taskId}`, {
@@ -280,7 +281,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
             queuedUndoDelayMs: operation.queuedUndoDelayMs }),
         });
         if (undo.status === 401) { router.refresh(); return; }
-        const undone = await undo.json() as { success?: boolean; message?: string };
+        const undone = await readJsonResponse(undo, undo.url, "API request") as { success?: boolean; message?: string };
         if (!undo.ok || !undone.success) throw new Error(undone.message ?? "조리 시작을 취소하지 못했습니다.");
       } else {
         projectTasks([task.taskId], () => ({ status: "COOKING", previousStatus: "WAITING",
@@ -304,7 +305,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
             body: JSON.stringify({ action, expectedStatus: "COOKING", expectedChangedAtMs: result.changedAtMs,
               queuedUndoDelayMs: operation.queuedUndoDelayMs }),
           });
-          const undone = await undo.json() as { success?: boolean; message?: string };
+          const undone = await readJsonResponse(undo, undo.url, "API request") as { success?: boolean; message?: string };
           if (!undo.ok || !undone.success) throw new Error(undone.message ?? "조리 시작을 취소하지 못했습니다.");
         }
       }
@@ -367,7 +368,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         body: JSON.stringify({ action: "SIMPLE_COMPLETE", expectedStatus: task.status, expectedChangedAtMs: task.changedAtMs }),
       });
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "단순조리 상태를 변경하지 못했습니다.");
       await refresh();
     } catch (reason) {
@@ -400,7 +401,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         body: JSON.stringify({ action, expectedStatus: task.status, expectedChangedAtMs: task.changedAtMs }),
       });
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         if (action === "MENU" && task.status === "COOKING" && response.status === 409) {
           await refresh();
@@ -465,7 +466,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       });
       doneTiming(response);
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string; requestedAtMs?: number; completionCountdownSeconds?: number; cancelled?: boolean; expired?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; requestedAtMs?: number; completionCountdownSeconds?: number; cancelled?: boolean; expired?: boolean };
       if (!response.ok || !result.success) throw new Error(result.message ?? "조리 상태를 변경하지 못했습니다.");
       if (action === "REQUEST_COMPLETION" && typeof result.requestedAtMs === "number") {
         if (completionRequestOperations.current.get(task.taskId)?.cancelRequested) {
@@ -474,7 +475,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
             body: JSON.stringify({ action: "CANCEL_COMPLETION", expectedStatus: task.status,
               expectedChangedAtMs: task.changedAtMs, expectedRequestAtMs: result.requestedAtMs }),
           });
-          const cancelled = await cancel.json() as { success?: boolean; message?: string; cancelled?: boolean };
+          const cancelled = await readJsonResponse(cancel, cancel.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean };
           if (!cancel.ok || !cancelled.success || !cancelled.cancelled) throw new Error(cancelled.message ?? "완료 요청을 취소하지 못했습니다.");
           await refresh();
           return;
@@ -716,7 +717,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           expectedChangedAtMs: task.changedAtMs, expectedRequestAtMs: task.completionRequestedAtMs, immediate }),
       });
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string; completed?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; completed?: boolean };
       if (!response.ok || !result.success || result.completed === false) throw new Error(result.message ?? "조리 완료를 확정하지 못했습니다.");
       setRefreshKey(key => key + 1);
     } catch (reason) {
@@ -859,7 +860,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         body: JSON.stringify({ action: "FINALIZE", requestId, requestedAtMs, immediate }),
       });
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string; completed?: number;
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; completed?: number;
         outcome?: "COMPLETED" | "ALREADY_COMPLETED" | "COUNTDOWN_PENDING" | "REQUEST_NOT_FOUND" | "TASK_SET_CHANGED" | "TASK_STATE_CHANGED" | "SESSION_NOT_OPEN";
         expectedTaskIds?: number[]; actualTaskIds?: number[]; finalizeAtMs?: number; serverNowMs?: number };
       if (!response.ok || !result.success) throw new Error(result.message ?? "조리 완료를 확정하지 못했습니다.");
@@ -978,7 +979,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         })) }),
       });
       if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
-      const result = await response.json() as { success?: boolean; message?: string; requestId?: string; requestedAtMs?: number;
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; requestId?: string; requestedAtMs?: number;
         completionCountdownSeconds?: number; serverNowMs?: number; expectedTaskIds?: number[]; actualTaskIds?: number[] };
       if (!response.ok || !result.success || !result.requestId || typeof result.requestedAtMs !== "number") {
         const details = Array.isArray(result.expectedTaskIds) && Array.isArray(result.actualTaskIds)
@@ -994,7 +995,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         body: JSON.stringify({ action: "CANCEL", requestId: result.requestId, requestedAtMs: result.requestedAtMs }),
       });
       if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
-      const cancelled = await response.json() as { success?: boolean; message?: string; cancelled?: boolean };
+      const cancelled = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean };
       if (!response.ok || !cancelled.success || cancelled.cancelled !== true) {
         tableCompletionCancelIntents.current.delete(key);
         throw new Error(cancelled.message ?? "조리완료 요청을 취소하지 못했습니다.");
@@ -1034,7 +1035,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
       body: JSON.stringify({ action: "START", taskIds: selectedTaskIds, startSource }),
     });
     if (response.status === 401) { router.refresh(); return; }
-    const result = await response.json() as { success?: boolean; message?: string; batchStartId?: string | null; taskIds?: number[]; startedAtMs?: number | null; startUndoWindowMs?: number };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; batchStartId?: string | null; taskIds?: number[]; startedAtMs?: number | null; startUndoWindowMs?: number };
     if (!response.ok || !result.success) throw new Error(result.message ?? "테이블 조리 상태를 변경하지 못했습니다.");
     if (result.batchStartId && result.taskIds?.length && typeof result.startedAtMs === "number") {
       const receivedAtMs = Date.now();
@@ -1124,7 +1125,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           body: JSON.stringify({ action: "UNDO", batchStartId, taskIds: undoTaskIds }),
         });
         if (response.status === 401) { router.refresh(); return; }
-        const result = await response.json() as { success?: boolean; message?: string };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
         if (!response.ok || !result.success) throw new Error(result.message ?? "조리 시작을 취소하지 못했습니다.");
         tableStartBatches.current.delete(actionKey);
         await refresh();
@@ -1137,7 +1138,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
         });
         doneTiming(response);
         if (response.status === 401) { router.refresh(); return; }
-        const result = await response.json() as { success?: boolean; message?: string; batchStartId?: string | null; taskIds?: number[]; startedAtMs?: number | null; startUndoWindowMs?: number };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; batchStartId?: string | null; taskIds?: number[]; startedAtMs?: number | null; startUndoWindowMs?: number };
         if (!response.ok || !result.success) throw new Error(result.message ?? "테이블 조리 상태를 변경하지 못했습니다.");
         const startOperation = tableStartOperations.current.get(actionKey);
         if (decision.action === "START" && result.batchStartId && result.taskIds?.length && typeof result.startedAtMs === "number") {
@@ -1162,7 +1163,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
               taskIds: result.taskIds, queuedUndoDelayMs: startOperation.queuedUndoDelayMs }),
           });
           if (undo.status === 401) { router.refresh(); return; }
-          const undoResult = await undo.json() as { success?: boolean; message?: string };
+          const undoResult = await readJsonResponse(undo, undo.url, "API request") as { success?: boolean; message?: string };
           if (!undo.ok || !undoResult.success) throw new Error(undoResult.message ?? "조리 시작을 취소하지 못했습니다.");
           tableStartBatches.current.delete(actionKey);
           await refresh();
@@ -1213,7 +1214,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
               expectedChangedAtMs: task.changedAtMs, expectedRequestAtMs: task.completionRequestedAtMs }),
           });
           if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
-          const result = await response.json() as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean };
+          const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean };
           if (!response.ok || !result.success || result.cancelled !== true) {
             throw new Error(result.message ?? (result.expired
               ? "완료 카운트다운이 끝나 조리 완료가 진행 중입니다."
@@ -1252,7 +1253,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
             requestedAtMs: requestTask.completionRequestedAtMs }),
         });
         if (response.status === 401) { router.refresh(); return; }
-        const result = await response.json() as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean };
         if (!response.ok || !result.success) throw new Error(result.message ?? "조리완료 요청을 취소하지 못했습니다.");
         if (result.cancelled === true) {
           clearLocalTableCompletion(table.sessionId, requestTask.completionRequestId, requestTaskIds);
@@ -1311,7 +1312,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           body: JSON.stringify({ action: "CANCEL", requestId: request.requestId, requestedAtMs: request.requestedAtMs }),
         });
         if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
-        const result = await response.json() as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean; alreadyCompleted?: boolean };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean; expired?: boolean; alreadyCompleted?: boolean };
         if (!response.ok || !result.success) throw new Error(result.message ?? "테이블 전체완료 취소에 실패했습니다.");
         if (result.cancelled === true) {
           clearLocalTableCompletion(sessionId, request.requestId, request.taskIds);
@@ -1396,7 +1397,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           })) }),
         });
         if (response.status === 401) { router.refresh(); throw new Error("세션이 만료되었습니다."); }
-        const result = await response.json() as { success?: boolean; message?: string; requestId?: string;
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; requestId?: string;
           requestedAtMs?: number; taskIds?: number[]; startedAtMs?: number; completionCountdownSeconds?: number;
           serverNowMs?: number; expectedTaskIds?: number[]; actualTaskIds?: number[] };
         if (!response.ok || !result.success || !result.requestId || typeof result.requestedAtMs !== "number" ||
@@ -1494,7 +1495,7 @@ export default function KitchenClient({ staffName }: { staffName: string }) {
           requestedAtMs: task.completionRequestedAtMs }),
       });
       if (response.status === 401) { router.refresh(); return; }
-      const result = await response.json() as { success?: boolean; message?: string; cancelled?: boolean; alreadyCompleted?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; cancelled?: boolean; alreadyCompleted?: boolean };
       if (!response.ok || !result.success) throw new Error(result.message ?? "조리완료 요청을 취소하지 못했습니다.");
       if (result.alreadyCompleted) {
         tableCompletionCancelIntents.current.delete(key);

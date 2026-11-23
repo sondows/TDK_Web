@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -33,7 +34,7 @@ type SizeDraft = { tableId: number; width: string; height: string };
 
 async function fetchLayout(): Promise<{ tables: EditorTable[]; gridSettings: GridSettings; dividerPositions: number[] }> {
   const response = await fetch("/api/admin-center/hos/table-layout", { cache: "no-store" });
-  const result = await response.json().catch(() => null) as LayoutResponse | null;
+  const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as LayoutResponse | null;
   if (!response.ok || !result?.success || !Array.isArray(result.tables)) {
     throw new Error(result?.message || `HOS layout load failed (HTTP ${response.status}).`);
   }
@@ -184,7 +185,7 @@ export default function HosTableLayoutEditor() {
           dividerPositions,
         }),
       });
-      const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+      const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { success?: boolean; message?: string } | null;
       if (!response.ok || !result?.success) throw new Error(result?.message || `Save failed (HTTP ${response.status}).`);
       setInitial(layouts);
       setInitialGridSettings(gridSettings);

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useMemo, useState } from "react";
 import { SaleDetailDialog } from "@/app/pos/sales/SalesHistoryClient";
@@ -107,7 +108,7 @@ export default function SalesReportClient() {
     const controller = new AbortController();
     fetch("/api/admin/sales-report/range", { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const body = await response.json() as { success?: boolean; firstAvailableDate?: string | null; message?: string };
+        const body = await readJsonResponse(response, response.url, "API request") as { success?: boolean; firstAvailableDate?: string | null; message?: string };
         if (!response.ok || !body.success) throw new Error(body.message ?? "최초 매출일을 불러오지 못했습니다.");
         setFirstAvailableDate(body.firstAvailableDate ?? null); setRangeError("");
       })
@@ -121,7 +122,7 @@ export default function SalesReportClient() {
     const query = new URLSearchParams({ view, startDate, endDate });
     fetch(`/api/admin/sales-report?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const body = await response.json() as Report;
+        const body = await readJsonResponse(response, response.url, "API request") as Report;
         if (!response.ok || !body.success) throw new Error(body.message ?? "매출조회를 불러오지 못했습니다.");
         setReport(body); setError("");
       })
@@ -136,7 +137,7 @@ export default function SalesReportClient() {
     const query = new URLSearchParams({ startDate, endDate, page: String(page), sortBy: detailSort.key, sortDirection: detailSort.direction });
     fetch(`/api/admin/sales-report/details?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const body = await response.json() as Details;
+        const body = await readJsonResponse(response, response.url, "API request") as Details;
         if (!response.ok || !body.success) throw new Error(body.message ?? "판매건 목록을 불러오지 못했습니다.");
         setDetails(body); setDetailError("");
       })
@@ -162,7 +163,7 @@ export default function SalesReportClient() {
     setDetailError("");
     try {
       const response = await fetch(`/api/admin/dashboard?checkoutId=${checkoutId}`, { cache: "no-store" });
-      const body = await response.json() as SaleDetailResponse;
+      const body = await readJsonResponse(response, response.url, "API request") as SaleDetailResponse;
       if (!response.ok || !body.success || !body.sale) throw new Error(body.message ?? "판매 상세를 불러오지 못했습니다.");
       setSale(body.sale);
     } catch (cause) { setDetailError(cause instanceof Error ? cause.message : "판매 상세를 불러오지 못했습니다."); }

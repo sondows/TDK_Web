@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState, type FormEvent } from "react";
 
@@ -38,7 +39,7 @@ export default function TakeoutPreparationSettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ minutes }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; minutes?: number };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; minutes?: number };
       if (!response.ok || !result.success) {
         setError(true);
         setMessage(result.message ?? "설정 저장에 실패했습니다.");

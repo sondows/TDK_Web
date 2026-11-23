@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import SortableHeader from "@/app/admin/SortableHeader";
@@ -49,7 +50,7 @@ export default function ItemSalesClient() {
     const query = new URLSearchParams({ startDate, endDate });
     fetch(`/api/admin/item-sales?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const body = await response.json() as Report;
+        const body = await readJsonResponse(response, response.url, "API request") as Report;
         if (!response.ok || !body.success) throw new Error(body.message ?? "품목별 매출을 불러오지 못했습니다.");
         setReport(body); setError("");
       })
@@ -66,7 +67,7 @@ export default function ItemSalesClient() {
     const query = new URLSearchParams({ startDate, endDate, menuId: String(selected.menuId), itemName: selected.itemName });
     fetch(`/api/admin/item-sales?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const body = await response.json() as Detail;
+        const body = await readJsonResponse(response, response.url, "API request") as Detail;
         if (!response.ok || !body.success) throw new Error(body.message ?? "날짜별 판매내역을 불러오지 못했습니다.");
         setDetail(body); setDetailError("");
       })

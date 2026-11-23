@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
@@ -21,14 +22,14 @@ export default function RiceStockModal({ close, onAdjusted }: { close: () => voi
 
   const load = useCallback(async (before?: number) => {
     const response = await fetch(`/api/pos/rice-stock${before ? `?before=${before}` : ""}`, { cache: "no-store" });
-    const result = await response.json() as Snapshot & { success?: boolean; message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as Snapshot & { success?: boolean; message?: string };
     if (!response.ok || !result.success) throw new Error(result.message ?? "공기밥 수량을 불러오지 못했습니다.");
     return result;
   }, []);
 
   const loadHistory = useCallback(async () => {
     const response = await fetch("/api/pos/rice-stock?historyOnly=1", { cache: "no-store" });
-    const result = await response.json() as { success?: boolean; message?: string; history?: Movement[]; nextBefore?: number | null };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; history?: Movement[]; nextBefore?: number | null };
     if (!response.ok || !result.success || !result.history) throw new Error(result.message ?? "오늘 재고 조정 내역을 불러오지 못했습니다.");
     return { history: result.history, nextBefore: result.nextBefore ?? null };
   }, []);
@@ -90,7 +91,7 @@ export default function RiceStockModal({ close, onAdjusted }: { close: () => voi
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/pos/rice-stock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, input: value }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "공기밥 수량을 변경하지 못했습니다.");
       if (action !== "ADD_ONE" && action !== "SUBTRACT_ONE") setInput("");
       onAdjusted?.();

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -21,7 +22,7 @@ export default function OwnerSecurityPrompt({ state }: { state: OwnerSecuritySta
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "verify", password }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) { setMessage(result.message ?? "인증을 완료하지 못했습니다."); setPassword(""); return; }
       setPassword(""); router.refresh();
     } catch { setMessage("인증 서비스를 이용할 수 없습니다."); }

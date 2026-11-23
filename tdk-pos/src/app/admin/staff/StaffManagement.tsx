@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,7 +29,7 @@ export default function StaffManagement() {
     try {
       const response = await fetch("/api/admin-center/staff", { cache: "no-store", signal });
       if (response.status === 401) { router.replace("/tdkadm/login"); return; }
-      const result = await response.json() as { success?: boolean; staff?: StaffSummary[]; hosPermissionAvailable?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; staff?: StaffSummary[]; hosPermissionAvailable?: boolean };
       if (!response.ok || !result.success || !Array.isArray(result.staff)) throw new Error("load");
       setRows(result.staff);
       setHosPermissionAvailable(result.hosPermissionAvailable === true);

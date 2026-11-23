@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import type { KasiHolidaySyncState } from "@/lib/kasi-holiday-model";
@@ -24,7 +25,7 @@ export default function KasiHolidayIntegration({ ownerSecurityState }: Props) {
 
   const load = async () => {
     const response = await fetch("/api/admin/qr-title/holidays/status", { cache: "no-store" });
-    const data = await response.json() as { success?: boolean; message?: string } & Partial<ApiStatus>;
+    const data = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string } & Partial<ApiStatus>;
     if (!response.ok || !data.success) throw new Error(data.message || "공휴일 연동 상태를 불러오지 못했습니다.");
     setStatus({ ...emptyStatus, ...data, api: { ...emptyStatus.api, ...data.api } });
   };
@@ -32,7 +33,7 @@ export default function KasiHolidayIntegration({ ownerSecurityState }: Props) {
   useEffect(() => {
     let active = true;
     void fetch("/api/admin/qr-title/holidays/status", { cache: "no-store" }).then(async response => {
-      const data = await response.json() as { success?: boolean; message?: string } & Partial<ApiStatus>;
+      const data = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string } & Partial<ApiStatus>;
       if (!response.ok || !data.success) throw new Error(data.message || "공휴일 연동 상태를 불러오지 못했습니다.");
       if (active) setStatus({ ...emptyStatus, ...data, api: { ...emptyStatus.api, ...data.api } });
     }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "공휴일 연동 상태를 불러오지 못했습니다."); });
@@ -43,7 +44,7 @@ export default function KasiHolidayIntegration({ ownerSecurityState }: Props) {
     setBusy(true); setMessage(""); setError("");
     try {
       const response = await fetch("/api/admin/qr-title/holidays", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sync" }) });
-      const data = await response.json() as { success?: boolean; message?: string } & Partial<ApiStatus>;
+      const data = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string } & Partial<ApiStatus>;
       if (!response.ok || !data.success) throw new Error(data.message || "공휴일 정보를 가져오지 못했습니다.");
       setMessage(data.message || "공휴일 정보를 가져왔습니다.");
       await load();

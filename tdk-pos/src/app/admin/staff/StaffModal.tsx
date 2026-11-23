@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -39,7 +40,7 @@ export default function StaffModal({ original, onClose, onSaved, hosPermissionAv
       const response = await fetch(original ? `/api/admin-center/staff/${original.staffId}` : "/api/admin-center/staff", {
         method: original ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft),
       });
-      const result = await response.json() as { success?: boolean; message?: string; errors?: StaffErrors;
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; errors?: StaffErrors;
         reauthRequired?: boolean; temporaryPassword?: string };
       if (!response.ok || !result.success) { if (result.errors) setErrors(result.errors); setNotice(result.message ?? "직원 정보를 저장하지 못했습니다."); return; }
       if (result.reauthRequired) { router.replace("/tdkadm/login"); return; }

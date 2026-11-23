@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import { CASH_DENOMINATIONS, type CashOpeningFund } from "@/lib/cash-opening-fund";
@@ -44,7 +45,7 @@ export default function CashHistoryClient() {
       try {
         const params = new URLSearchParams({ from: query.from, to: query.to, page: String(query.page), sortBy: sort.key, sortDirection: sort.direction });
         const response = await fetch(`/api/admin/cash-history?${params}`, { cache: "no-store", signal: controller.signal });
-        const result = await response.json() as HistoryResult;
+        const result = await readJsonResponse(response, response.url, "API request") as HistoryResult;
         if (!response.ok || !result.success) throw new Error(result.message ?? "시재 내역을 불러오지 못했습니다.");
         setRows(result.rows ?? []); setTotal(result.total ?? 0); setPageSize(result.pageSize ?? 20);
       } catch (cause) {

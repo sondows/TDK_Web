@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import adminStyles from "@/app/admin/admin.module.css";
@@ -53,7 +54,7 @@ export default function OtherPaymentSettingsClient({ storeName, logoDataUrl, log
   const load = useCallback(async () => {
     try {
       const response = await fetch("/api/pos-settings/other-payments", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; methods?: OtherPaymentMethod[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; methods?: OtherPaymentMethod[]; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "설정을 불러오지 못했습니다.");
       methodsRef.current = result.methods ?? [];
       setMethods(methodsRef.current);
@@ -102,7 +103,7 @@ export default function OtherPaymentSettingsClient({ storeName, logoDataUrl, log
     setBusy(true);
     try {
       const response = await fetch("/api/pos-settings/other-payments", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "순서를 저장하지 못했습니다.");
       await load();
       setError(false); setMessage("표시순서를 저장했습니다.");
@@ -117,7 +118,7 @@ export default function OtherPaymentSettingsClient({ storeName, logoDataUrl, log
     try {
       if (form.cashChangeEnabled && (form.cashChangeMinPercent.trim() === "" || !Number.isInteger(Number(form.cashChangeMinPercent)) || Number(form.cashChangeMinPercent) < 0 || Number(form.cashChangeMinPercent) > 100)) throw new Error("현금 거스름 가능 기준을 0~100 사이의 숫자로 입력해 주세요.");
       const response = await fetch("/api/pos-settings/other-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, unitAmount: form.inputType === "QUANTITY" ? Number(form.unitAmount) : null, cashChangeMinPercent: form.cashChangeEnabled ? Number(form.cashChangeMinPercent) : null }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "저장하지 못했습니다.");
       await load(); setForm(blank()); setError(false); setMessage("기타결제 설정을 저장했습니다.");
     } catch (reason) { setError(true); setMessage(reason instanceof Error ? reason.message : "저장하지 못했습니다."); }

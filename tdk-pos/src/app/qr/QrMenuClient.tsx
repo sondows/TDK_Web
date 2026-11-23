@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import Image from "next/image";
@@ -373,7 +374,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         analyticsRetryAt.current = Date.now() + Math.min(5 * 60_000, 1_000 * (2 ** analyticsRetryCount.current));
         return;
       }
-      const result = await response.json() as { success?: boolean; acceptedEventIds?: unknown };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; acceptedEventIds?: unknown };
       if (!result.success || !Array.isArray(result.acceptedEventIds)) {
         analyticsRetryCount.current = Math.min(analyticsRetryCount.current + 1, 8);
         analyticsRetryAt.current = Date.now() + Math.min(5 * 60_000, 1_000 * (2 ** analyticsRetryCount.current));
@@ -419,7 +420,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         if (!silent) setCatalogError({ kind: "http", status: response.status });
         return;
       }
-      const data = await response.json().catch(() => null) as (ApiCatalog & { success?: boolean }) | null;
+      const data = await readJsonResponse(response, response.url, "API request").catch(() => null) as (ApiCatalog & { success?: boolean }) | null;
       if (!data?.success || !Array.isArray(data.menus) || !Array.isArray(data.categories)) {
         if (!silent) setCatalogError({ kind: "invalid" });
         return;
@@ -973,7 +974,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const loadWaitOrder = useCallback(async (id: number) => {
     const response = await fetch(`/api/qr/wait-orders/${id}`, { cache: "no-store", credentials: "same-origin" });
     if (!response.ok) throw new Error("wait order unavailable");
-    const payload = await response.json() as { success?: boolean; order?: Omit<WaitOrder, "items">; items?: Array<WaitOrder["items"][number]> };
+    const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; order?: Omit<WaitOrder, "items">; items?: Array<WaitOrder["items"][number]> };
     if (!payload.success || !payload.order || !Array.isArray(payload.items)) throw new Error("invalid wait order");
     const next = { ...payload.order, items: payload.items } as WaitOrder;
     setWaitOrder(next);
@@ -1010,7 +1011,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
         body: JSON.stringify(editing ? { version: editing.version, cart } : { requestId, source: qrSource, cart }),
       });
-      const payload = await response.json() as { success?: boolean; waitOrderId?: number; publicReference?: string; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; waitOrderId?: number; publicReference?: string; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message ?? "대기 주문을 저장하지 못했습니다.");
       const id = editing?.id ?? payload.waitOrderId;
       if (!id) throw new Error("대기 주문 번호를 확인하지 못했습니다.");
@@ -1035,7 +1036,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
       const requestId = crypto.randomUUID();
       const response = await fetch("/api/qr/table-orders", { method: "POST", headers: { "Content-Type": "application/json" },
         credentials: "same-origin", body: JSON.stringify({ requestId, cart }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "주문을 전송하지 못했습니다.");
       setCart([]);
       setCartSheetOpen(false);
@@ -1059,7 +1060,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     setWaitError("");
     try {
       const response = await fetch(`/api/qr/wait-orders/${waitOrder.waitOrderId}`, { method: "DELETE", credentials: "same-origin" });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message ?? "대기 주문을 취소하지 못했습니다.");
       setWaitOrder({ ...waitOrder, status: "CANCELLED" });
       try { localStorage.removeItem(QR_WAIT_ORDER_ID_KEY); } catch { /* current page state is sufficient */ }
@@ -1083,7 +1084,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     setExitError("");
     try {
       const response = await fetch("/api/qr/table-orders", { cache: "no-store", credentials: "same-origin" });
-      const payload = await response.json() as { success?: boolean; tableNo?: string; orders?: unknown[] };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; tableNo?: string; orders?: unknown[] };
       if (!response.ok || !payload.success || !payload.tableNo) {
         throw new Error("유효한 테이블 주문 인증을 확인할 수 없습니다. 테이블 QR을 다시 스캔해 주세요.");
       }
@@ -1118,7 +1119,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     setTableQrNo(null);
     try {
       const response = await fetch("/api/qr/table-order-link", { cache: "no-store", credentials: "same-origin" });
-      const payload = await response.json().catch(() => null) as { success?: boolean; url?: unknown; tableNo?: unknown } | null;
+      const payload = await readJsonResponse(response, response.url, "API request").catch(() => null) as { success?: boolean; url?: unknown; tableNo?: unknown } | null;
       if (!response.ok || !payload?.success || typeof payload.url !== "string" || typeof payload.tableNo !== "string") {
         setTableQrError(response.status === 401
           ? "테이블 QR 인증이 만료되었습니다. 테이블 QR을 다시 스캔해 주세요."

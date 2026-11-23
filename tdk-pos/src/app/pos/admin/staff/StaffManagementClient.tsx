@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 import ManagementPageHeader from "../ManagementPageHeader";
@@ -75,7 +76,7 @@ export default function StaffManagementClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         setMessage(result.message ?? "저장에 실패했습니다.");
         return;

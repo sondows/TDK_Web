@@ -6,6 +6,7 @@ import { GET as getSales } from "@/app/api/sales/route";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import { loadCurrentPendingSales } from "@/lib/current-pending-sales";
 import type { SaleDetailResponse, SalesListResponse } from "@/lib/sales-types";
+import { readJsonResponse } from "@/lib/api-response";
 
 const todayInKorea = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     const checkoutId = Number(params.get("checkoutId"));
     if (Number.isSafeInteger(checkoutId) && checkoutId > 0) {
       const response = await getSales(new Request(`http://localhost/api/sales?checkoutId=${checkoutId}`));
-      const result = await response.json() as SaleDetailResponse;
+      const result = await readJsonResponse<SaleDetailResponse>(response, "/api/sales", "Admin dashboard sale detail", "GET");
       return Response.json(result, { status: response.status });
     }
 
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
 
     const today = todayInKorea();
     const response = await getSales(new Request(`http://localhost/api/sales?date=${today}`));
-    const result = await response.json() as SalesListResponse;
+    const result = await readJsonResponse<SalesListResponse>(response, "/api/sales", "Admin dashboard sales list", "GET");
     if (!response.ok || !result.success) return Response.json(result, { status: response.status });
     const sales = result.sales;
     const availableMethods = await db.select({

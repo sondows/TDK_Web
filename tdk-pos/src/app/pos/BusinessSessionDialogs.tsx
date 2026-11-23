@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import { cashOpeningFundTotal, type CashOpeningFund } from "@/lib/cash-opening-fund";
@@ -63,7 +64,7 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
     if (clearError) setError("");
     try {
       const response = await fetch("/api/pos/business-session/close", { cache: "no-store" });
-      const data = await response.json() as { success?: boolean; preview?: Preview | null; message?: string };
+      const data = await readJsonResponse(response, response.url, "API request") as { success?: boolean; preview?: Preview | null; message?: string };
       if (!response.ok || !data.success) { if (clearError) setError(data.message ?? "마감 정보를 불러오지 못했습니다."); return; }
       setPreview(data.preview ?? null);
     } catch { if (clearError) setError("마감 정보를 불러오지 못했습니다."); }
@@ -97,7 +98,7 @@ export function BusinessClosingDialog({ onClose, onClosed }: { onClose: () => vo
         if (confirmed) { showCompleted(confirmed); return; }
       }
       const response = await fetch("/api/pos/business-session/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ businessDate: preview.businessDate, previousClosingCount: preview.previousClosingCount, requestKey: requestKey.current, actualCash: preview.openingCashEnabled ? actualCash : null, actualCashFund: preview.openingCashEnabled ? actualFund : null }) });
-      const result = await response.json() as { success?: boolean; message?: string; closing?: Pick<Preview, "businessDate" | "totalSales" | "saleCount"> };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; closing?: Pick<Preview, "businessDate" | "totalSales" | "saleCount"> };
       if (response.ok && result.success && validClosing(result.closing)) { showCompleted(result.closing); return; }
       const confirmed = await confirmedClosing(key);
       if (confirmed) { showCompleted(confirmed); return; }

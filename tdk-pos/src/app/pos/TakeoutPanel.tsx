@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import NumericInputKeypad from "@/components/NumericInputKeypad";
@@ -102,7 +103,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "TAKEOUT_WALK_IN", requestKey: createRequest.current.key }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; openingRequired?: boolean; session?: { sessionId: number; kind: TakeoutSession["sessionKind"]; displayName: string; openedAt: string; pickupAt: string | null; pickupPhone: string | null; pickupCustomerId: number | null; pickupCustomerName: string | null } };
       if (response.status === 428 && result.openingRequired) {
         const promptShown = onBusinessOpeningRequired(() => void createTakeout());
         if (promptShown === false) setError(result.message ?? "오늘 준비금이 등록되지 않아 포장 주문을 만들 수 없습니다.");
@@ -148,7 +149,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: editTarget.sessionId, pickupAt, pickupPhone: phoneDigits || null, pickupCustomerId: phoneCustomer?.customerId ?? null }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; session?: Pick<TakeoutSession, "pickupAt" | "pickupPhone" | "pickupCustomerId" | "pickupCustomerName"> };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; session?: Pick<TakeoutSession, "pickupAt" | "pickupPhone" | "pickupCustomerId" | "pickupCustomerName"> };
       if (!response.ok || !result.success || !result.session) throw new Error(result.message ?? "포장 정보를 저장하지 못했습니다.");
       setEditedSessions(current => ({ ...current, [editTarget.sessionId]: result.session! }));
       setPhoneOrderOpen(false);
@@ -192,7 +193,7 @@ export default function TakeoutPanel({ sessions, selectedId, onSelect, onCreated
     setError("");
     try {
       const response = await fetch("/api/pos/takeouts", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: cancelTarget.sessionId }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "포장 주문을 취소하지 못했습니다.");
       onCancelled(cancelTarget.sessionId);
       setCancelTarget(null);

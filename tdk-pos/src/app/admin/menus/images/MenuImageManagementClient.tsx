@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -141,7 +142,7 @@ export default function MenuImageManagementClient() {
   const refresh = async (preferredMenuId?: number | null) => {
     try {
       const response = await fetch("/api/admin/menu-images", { cache: "no-store" });
-      const payload = await response.json() as { success?: boolean; message?: string; menus?: ManagedMenu[] };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; menus?: ManagedMenu[] };
       if (!response.ok || !payload.success || !payload.menus) throw new Error(payload.message || "메뉴 이미지 목록을 불러오지 못했습니다.");
       setError("");
       setMenus(payload.menus);
@@ -155,7 +156,7 @@ export default function MenuImageManagementClient() {
 
   useEffect(() => {
     fetch("/api/admin/menu-images", { cache: "no-store" })
-      .then(async response => ({ response, payload: await response.json() as { success?: boolean; message?: string; menus?: ManagedMenu[] } }))
+      .then(async response => ({ response, payload: await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; menus?: ManagedMenu[] } }))
       .then(({ response, payload }) => {
         if (!response.ok || !payload.success || !payload.menus) throw new Error(payload.message || "메뉴 이미지 목록을 불러오지 못했습니다.");
         setMenus(payload.menus);
@@ -222,7 +223,7 @@ export default function MenuImageManagementClient() {
       const form = new FormData(); form.set("imageType", cropType); form.set("image", new File([cropped], "menu-crop.webp", { type: "image/webp" }));
       if (cropReplaceImageUrl) form.set("replaceImageUrl", cropReplaceImageUrl);
       const response = await fetch(`/api/admin/menu-images/${cropMenuId}`, { method: "PUT", body: form });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "이미지를 저장하지 못했습니다.");
       const savedMenuId = cropMenuId;
       setNotice(cropType === "QR_THUMBNAIL" ? "QR 메인 이미지를 저장했습니다." : "QR 상세 이미지를 저장했습니다.");
@@ -238,7 +239,7 @@ export default function MenuImageManagementClient() {
     setBusyType(imageType); setError(""); setNotice("");
     try {
       const response = await fetch(`/api/admin/menu-images/${selected.menuId}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageType, ...(imageUrl ? { imageUrl } : {}) }) });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "이미지를 삭제하지 못했습니다.");
       setNotice(imageType === "QR_THUMBNAIL" ? "QR 메인 이미지를 삭제했습니다." : "QR 상세 이미지를 삭제했습니다.");
       await refresh(selected.menuId);
@@ -256,7 +257,7 @@ export default function MenuImageManagementClient() {
     setBusyType("QR_LARGE"); setError(""); setNotice("");
     try {
       const response = await fetch(`/api/admin/menu-images/${selected.menuId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ detailImageUrls: detailImages.map(image => image.imageUrl) }) });
-      const payload = await response.json() as { success?: boolean; message?: string };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !payload.success) throw new Error(payload.message || "상세 이미지 순서를 저장하지 못했습니다.");
       await refresh(selected.menuId);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "상세 이미지 순서를 저장하지 못했습니다."); }

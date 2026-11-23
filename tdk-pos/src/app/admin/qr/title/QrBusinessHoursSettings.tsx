@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useMemo, useState } from "react";
 import KasiHolidayIntegration from "../business-hours/KasiHolidayIntegration";
@@ -184,7 +185,7 @@ export default function QrBusinessHoursSettings({ initialWeekly, initialSpecialH
         earlyBreak: earlyBreakEnabled ? earlyBreakMode === "NOW" ? { mode: "NOW", endTime: earlyBreakEnd } : { mode: "AT", startTime: earlyBreakStart, endTime: earlyBreakEnd } : null,
       };
       const response = await fetch("/api/admin/qr-title/today-override", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const payload = await response.json() as { success?: boolean; message?: string; todayOverride?: TodayBusinessOverride | null };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; todayOverride?: TodayBusinessOverride | null };
       if (!response.ok || !payload.success) throw new Error(payload.message || "오늘 영업 특별 설정을 저장하지 못했습니다.");
       if (payload.todayOverride) {
         setEarlyCloseEnabled(Boolean(payload.todayOverride.earlyClose)); setEarlyBreakEnabled(Boolean(payload.todayOverride.earlyBreak));
@@ -217,7 +218,7 @@ export default function QrBusinessHoursSettings({ initialWeekly, initialSpecialH
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ weekly, specialHours, businessHoursMode: mode, closedDates, holidayRules }),
       });
-      const payload = await response.json() as { success?: boolean; message?: string; weekly?: BusinessHours[]; specialHours?: SpecialBusinessHours[]; businessHoursMode?: BusinessHoursMode; closedDates?: BusinessDateClosure[]; holidayRules?: BusinessHolidayRule[] };
+      const payload = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; weekly?: BusinessHours[]; specialHours?: SpecialBusinessHours[]; businessHoursMode?: BusinessHoursMode; closedDates?: BusinessDateClosure[]; holidayRules?: BusinessHolidayRule[] };
       if (!response.ok || !payload.success || !payload.weekly || !payload.specialHours || !payload.closedDates || !payload.holidayRules) throw new Error(payload.message || "영업시간을 저장하지 못했습니다.");
       setWeekly(payload.weekly); setSpecialHours(payload.specialHours.filter(item => !item.hours.closed)); setMode(payload.businessHoursMode ?? mode);
       setClosedDates(payload.closedDates); setHolidayRules(payload.holidayRules); setSaved(true);

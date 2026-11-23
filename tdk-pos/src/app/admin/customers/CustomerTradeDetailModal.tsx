@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import type { CustomerTradeDetail, CustomerTradeDetailResponse } from "@/lib/customer-trade";
@@ -67,7 +68,7 @@ export default function CustomerTradeDetailModal({ customerId, ledgerId, onClose
     const controller = new AbortController();
     fetch(`/api/customers/${customerId}/ledger/${ledgerId}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as CustomerTradeDetailResponse;
+        const result = await readJsonResponse(response, response.url, "API request") as CustomerTradeDetailResponse;
         if (!response.ok || !result.success || !result.detail) throw new Error(result.message ?? "거래 상세를 불러오지 못했습니다.");
         return result.detail;
       })

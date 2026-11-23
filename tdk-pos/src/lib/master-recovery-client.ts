@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/api-response";
 type RecoveryStatus = { available?: boolean; loginId?: string; passwordConfigured?: boolean };
 
 export function masterRecoveryActionLabel(passwordConfigured: boolean) {
@@ -13,7 +14,7 @@ export async function checkMasterRecoveryId(loginId: string, token: string,
     method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
     body: JSON.stringify({ loginId: normalizedId, token }),
   });
-  const result = await response.json() as RecoveryStatus;
+  const result = await readJsonResponse(response, response.url, "API request") as RecoveryStatus;
   return { confirmed: response.ok && result.available === true &&
       result.loginId?.toLowerCase() === normalizedId,
     rateLimited: response.status === 429,

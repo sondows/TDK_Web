@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useContext, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -20,7 +21,7 @@ function HosSessionGate() {
     checkInFlight.current = true;
     try {
       const response = await fetch("/api/hos/auth/session", { cache: "no-store", credentials: "same-origin" });
-      const result = await response.json().catch(() => null) as { authenticated?: boolean; message?: string } | null;
+      const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { authenticated?: boolean; message?: string } | null;
       const decision = decideHosSessionRestore(response.status, result?.authenticated);
       if (decision === "LOGIN_REQUIRED") {
         setState("login");
@@ -111,7 +112,7 @@ function HosPinLogin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ loginId: auth.loginId.trim().toLowerCase(), pin }),
       });
-      const result = await response.json() as { success?: boolean; code?: string; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string; message?: string };
       if (result.code === "TRUST_REQUIRED") {
         window.dispatchEvent(new Event("tdk-program-trust-required"));
         return;

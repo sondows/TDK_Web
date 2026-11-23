@@ -176,7 +176,7 @@ export default function PaymentModal({
     let active = true;
     fetch("/api/pos-settings/payment-auto-complete", { cache: "no-store" })
       .then(async response => {
-        const result = await response.json() as { success?: boolean; seconds?: number };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; seconds?: number };
         if (!response.ok || !result.success || !Number.isSafeInteger(result.seconds) || (result.seconds ?? -1) < 0) {
           throw new Error("결제창 자동 완료 설정을 불러오지 못했습니다.");
         }
@@ -419,7 +419,7 @@ export default function PaymentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "COMPLETE", expectedBillVersion: state.billVersion }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; openingRequired?: boolean };
       if (response.status === 428 && result.openingRequired) {
         closingRef.current = false;
         setBusy(false);
@@ -486,7 +486,7 @@ export default function PaymentModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "CANCEL_PAYMENT", paymentId: deletionTarget.payment.paymentId }),
       });
-      const result = (await response.json()) as { success?: boolean; message?: string; state?: State };
+      const result = (await readJsonResponse(response, response.url, "API request")) as { success?: boolean; message?: string; state?: State };
       if (!response.ok || !result.success || !result.state) {
         setCancelError(result.message ?? "결제를 취소할 수 없습니다.");
         return;
@@ -522,7 +522,7 @@ export default function PaymentModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...(sessionId ? { sessionId } : { tableId }), action: "CANCEL_PAYMENT", paymentId }),
         });
-        const result = await response.json() as { success?: boolean; message?: string; state?: State };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; state?: State };
         if (!response.ok || !result.success || !result.state) throw new Error(result.message ?? "결제를 초기화할 수 없습니다.");
         refreshedState = result.state;
         billVersionRef.current = result.state.billVersion;
@@ -542,7 +542,7 @@ export default function PaymentModal({
       if (showDialogOnError) setResetPaymentsConfirm(true);
       try {
         const response = await fetch(sessionId ? `/api/checkouts?sessionId=${sessionId}` : `/api/checkouts?tableId=${tableId}`);
-        const refreshed = await response.json() as { success?: boolean } & State;
+        const refreshed = await readJsonResponse(response, response.url, "API request") as { success?: boolean } & State;
         if (response.ok && refreshed.success) {
           billVersionRef.current = refreshed.billVersion;
           setState(refreshed);

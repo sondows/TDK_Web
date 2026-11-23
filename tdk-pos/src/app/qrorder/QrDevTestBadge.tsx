@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useState } from "react";
 
@@ -9,7 +10,7 @@ export default function QrDevTestBadge() {
   useEffect(() => {
     let active = true;
     void fetch("/api/qr/dev-test-session", { cache: "no-store", credentials: "same-origin" })
-      .then(response => response.json() as Promise<{ isTest?: boolean; tableNo?: string | null }>)
+      .then(response => readJsonResponse(response, response.url, "API request") as Promise<{ isTest?: boolean; tableNo?: string | null }>)
       .then(result => { if (active && result.isTest && result.tableNo) setTableNo(result.tableNo); })
       .catch(() => undefined);
     return () => { active = false; };

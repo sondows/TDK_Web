@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { DEFAULT_KDS_COOKING_SETTINGS, type KdsCookingSettings } from "@/lib/kds-model";
@@ -23,7 +24,7 @@ export default function KdsCookingForm({ initial }: { initial: KdsCookingSetting
       const response = await fetch("/api/admin/kds-cooking", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings),
       });
-      const result = await response.json() as { success?: boolean; message?: string; settings?: KdsCookingSettings };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; settings?: KdsCookingSettings };
       if (!response.ok || !result.success || !result.settings) throw new Error(result.message ?? "설정을 저장하지 못했습니다.");
       setSettings(result.settings);
       setMessage("외부 끓임 시간 설정을 저장했습니다.");

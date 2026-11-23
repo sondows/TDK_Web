@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -49,7 +50,7 @@ export default function MenuAddonManagementClient() {
 
   const fetchData = async (menuId?: number) => {
     const response = await fetch(`/api/admin/menu-addons${menuId ? `?menuId=${menuId}` : ""}`, { credentials: "same-origin", cache: "no-store" });
-    const payload = await response.json() as Payload;
+    const payload = await readJsonResponse(response, response.url, "API request") as Payload;
     if (!response.ok || !payload.success || !payload.menus) throw new Error(payload.message ?? "메뉴 추가 설정을 불러오지 못했습니다.");
     return payload;
   };
@@ -100,7 +101,7 @@ export default function MenuAddonManagementClient() {
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/admin/menu-addons", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ menuId: selectedMenuId, entries: serializeDraftEntries(draftEntries) }) });
-      const payload = await response.json() as Payload;
+      const payload = await readJsonResponse(response, response.url, "API request") as Payload;
       if (!response.ok || !payload.success || !payload.menus) throw new Error(payload.message ?? "추가메뉴를 저장하지 못했습니다.");
       const entries = draftEntriesFromPayload(payload.entries);
       setMenus(payload.menus); setSavedEntries(entries); setDraftEntries(entries); setMessage("추가메뉴를 저장했습니다.");
@@ -115,7 +116,7 @@ export default function MenuAddonManagementClient() {
     setBusy(true); setMessage("");
     try {
       const response = await fetch(`/api/admin/menu-addons/${selectedMenuId}/copy`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceMenuId: Number(copySourceId) }) });
-      const payload = await response.json() as Payload;
+      const payload = await readJsonResponse(response, response.url, "API request") as Payload;
       if (!response.ok || !payload.success) throw new Error(payload.message ?? "구성을 복사하지 못했습니다.");
       const entries = draftEntriesFromPayload(payload.entries);
       setSavedEntries(entries); setDraftEntries(entries); setMessage("추가메뉴 구성을 복사했습니다.");

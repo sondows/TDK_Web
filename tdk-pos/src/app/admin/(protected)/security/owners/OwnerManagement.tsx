@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -29,7 +30,7 @@ export default function OwnerManagement() {
   const load = useCallback(async () => {
     try {
       const response = await fetch("/api/admin-center/security/owners", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; owners?: Owner[]; employees?: Member[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; owners?: Owner[]; employees?: Member[]; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "최고관리자 목록을 불러오지 못했습니다.");
       setOwners(result.owners ?? []); setEmployees(result.employees ?? []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "최고관리자 목록을 불러오지 못했습니다."); }
@@ -40,7 +41,7 @@ export default function OwnerManagement() {
     const controller = new AbortController();
     void fetch("/api/admin-center/security/owners", { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as { success?: boolean; owners?: Owner[]; employees?: Member[]; message?: string };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; owners?: Owner[]; employees?: Member[]; message?: string };
         if (!response.ok || !result.success) throw new Error(result.message ?? "최고관리자 목록을 불러오지 못했습니다.");
         if (!controller.signal.aborted) { setOwners(result.owners ?? []); setEmployees(result.employees ?? []); }
       })
@@ -63,7 +64,7 @@ export default function OwnerManagement() {
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/admin-center/security/owners", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, staffId }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "처리하지 못했습니다.");
       setMessage(action === "add" ? "최고관리자로 지정했습니다. 대상 직원은 본인의 마스터 비밀번호를 사용합니다." : "최고관리자 권한을 해제했습니다.");
       setSelected(""); setDialog(null); await load(); router.refresh();
@@ -78,7 +79,7 @@ export default function OwnerManagement() {
     setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/admin-center/security/owner-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "change", oldPassword, newPassword, confirm }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "비밀번호를 변경하지 못했습니다.");
       setOldPassword(""); setNewPassword(""); setConfirm(""); setDialog(null);
       setMessage("마스터 비밀번호를 변경했습니다. 다시 로그인해 주세요."); router.replace("/tdkadm/login"); router.refresh();

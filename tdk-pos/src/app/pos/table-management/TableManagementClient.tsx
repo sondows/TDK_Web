@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
@@ -192,7 +193,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setPartyBusy(true);
     try {
       const response = await fetch("/api/table-sessions/party-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tableIds: partySelectedIds }) });
-      const result = await response.json() as { success?: boolean; message?: string; tableNos?: string[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; tableNos?: string[] };
       if (!response.ok || !result.success) {
         showStatus(result.message ?? "일행을 지정하지 못했습니다.");
         return;
@@ -217,7 +218,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setPartyBusy(true);
     try {
       const response = await fetch(`/api/table-sessions/party-groups/${partyCancelGroupId}`, { method: "DELETE" });
-      const result = await response.json() as { success?: boolean; message?: string; tableNos?: string[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; tableNos?: string[] };
       if (!response.ok || !result.success) {
         resetTemporarySelections();
         showStatus(result.message ?? "일행을 취소하지 못했습니다.", response.status === 409);
@@ -240,7 +241,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setMoveBusy(true);
     try {
       const response = await fetch(`/api/table-sessions/${sourceSessionId}/move`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationTableId }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         showStatus(result.message ?? "테이블을 이동하지 못했습니다.");
         return;
@@ -264,7 +265,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setMergeBusy(true);
     try {
       const response = await fetch(`/api/table-sessions/${sourceSessionId}/merge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationTableId }) });
-      const result = await response.json() as { success?: boolean; message?: string; sourceTableNo?: string; destinationTableNo?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; sourceTableNo?: string; destinationTableNo?: string };
       if (!response.ok || !result.success) {
         showStatus(result.message ?? "합석을 처리하지 못했습니다.");
         return;
@@ -284,7 +285,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setSplitBusy(true);
     try {
       const response = await fetch(`/api/table-session-merges/${mergeId}/separate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ destinationTableId }) });
-      const result = await response.json() as { success?: boolean; message?: string; mergedTableNo?: string; sourceTableNo?: string; destinationTableNo?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; mergedTableNo?: string; sourceTableNo?: string; destinationTableNo?: string };
       if (!response.ok || !result.success) {
         showStatus(result.message ?? "합석 분리를 처리하지 못했습니다.");
         if (response.status === 409) router.refresh();
@@ -320,7 +321,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ destinationTableIds: copyDestinationIds }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; openingRequired?: boolean; sourceTableNo?: string; destinationTableNos?: string[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; openingRequired?: boolean; sourceTableNo?: string; destinationTableNos?: string[] };
       if (response.status === 428 && result.openingRequired) { setOpeningForCopy(true); return; }
       if (!response.ok || !result.success || !result.destinationTableNos) {
         showStatus(result.message ?? "주문 복사에 실패했습니다.");
@@ -342,7 +343,7 @@ export default function TableManagementClient({ tables, modal = false, closeToPo
     setTableCancelBusy(true);
     try {
       const response = await fetch("/api/table-cancellations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tableId }) });
-      const result = await response.json() as { success?: boolean; message?: string; tableNos?: string[]; total?: number };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; tableNos?: string[]; total?: number };
       if (!response.ok || !result.success || !result.tableNos || result.total === undefined) {
         showStatus(result.message ?? "테이블 취소 정보를 준비하지 못했습니다.");
         return;
@@ -557,7 +558,7 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
   useEffect(() => {
     let active = true;
     void fetch("/api/staff/active")
-      .then(response => response.json() as Promise<{ staff?: Array<{ loginId: string; pinLength: 6 }> }>)
+      .then(response => readJsonResponse(response, response.url, "API request") as Promise<{ staff?: Array<{ loginId: string; pinLength: 6 }> }>)
       .then(data => {
         if (active) setEmployees(data.staff ?? []);
       })
@@ -595,7 +596,7 @@ function TableCancellationModal({ preview, busy, setBusy, close, complete }: { p
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableId: preview.tableId, loginId: staffCode, pin: pinValue, reason, detail }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; tableNos?: string[] };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; tableNos?: string[] };
       if (!response.ok || !result.success || !result.tableNos) {
         const pinFailure = response.status === 409 && /PIN|직원|번호/.test(result.message ?? "");
         if (pinFailure) {

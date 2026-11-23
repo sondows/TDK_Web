@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { hasDuplicateMenuCategoryName, normalizeMenuCategoryName } from "@/lib/menu-category-policy";
@@ -17,7 +18,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
 
   const refreshCategories = async () => {
     const response = await fetch("/api/admin/menu-categories", { cache: "no-store" });
-    const result = await response.json() as { success?: boolean; categories?: Category[]; message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; categories?: Category[]; message?: string };
     if (!response.ok || !result.success || !Array.isArray(result.categories)) throw new Error(result.message ?? "분류를 새로고침하지 못했습니다.");
     setCategories(result.categories);
     setDraftNames(Object.fromEntries(result.categories.map(item => [item.categoryId, item.name])));
@@ -31,7 +32,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
     setBusyKey("new"); setError(""); setMessage("");
     try {
       const response = await fetch("/api/admin/menu-categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-      const result = await response.json() as { success?: boolean; category?: Category; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; category?: Category; message?: string };
       if (!response.ok || !result.success || !result.category) throw new Error(result.message ?? "분류를 추가하지 못했습니다.");
       const next = [...categories, result.category].sort((a, b) => a.sortOrder - b.sortOrder || a.categoryId - b.categoryId);
       setCategories(next); setDraftNames(Object.fromEntries(next.map(item => [item.categoryId, item.name])));
@@ -50,7 +51,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
       const response = await fetch(`/api/admin/menu-categories/${category.categoryId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
       });
-      const result = await response.json() as { success?: boolean; category?: Category; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; category?: Category; message?: string };
       if (!response.ok || !result.success || !result.category) throw new Error(result.message ?? "분류를 저장하지 못했습니다.");
       setCategories(current => current.map(item => item.categoryId === category.categoryId ? result.category! : item));
       setDraftNames(current => ({ ...current, [category.categoryId]: result.category!.name }));
@@ -66,7 +67,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
       const response = await fetch(`/api/admin/menu-categories/${category.categoryId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tabColor }),
       });
-      const result = await response.json() as { success?: boolean; category?: Category; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; category?: Category; message?: string };
       if (!response.ok || !result.success || !result.category) throw new Error(result.message ?? "탭 색상을 저장하지 못했습니다.");
       setCategories(current => current.map(item => item.categoryId === category.categoryId ? result.category! : item));
       setDraftColors(current => ({ ...current, [category.categoryId]: result.category!.tabColor ?? null }));
@@ -84,7 +85,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: nextActive, confirmDisable: !nextActive && category.menuCount > 0 }),
       });
-      const result = await response.json() as { success?: boolean; category?: Category; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; category?: Category; message?: string };
       if (!response.ok || !result.success || !result.category) throw new Error(result.message ?? "사용 상태를 변경하지 못했습니다.");
       setCategories(current => current.map(item => item.categoryId === category.categoryId ? result.category! : item));
       setMessage(nextActive ? "분류를 다시 사용하도록 설정했습니다." : "분류를 미사용으로 설정했습니다.");
@@ -98,7 +99,7 @@ export default function MenuCategoryManagementClient({ initialCategories }: { in
       const response = await fetch(`/api/admin/menu-categories/${category.categoryId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ direction }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "분류 순서를 변경하지 못했습니다.");
       await refreshCategories();
       setMessage("분류 표시 순서를 변경했습니다.");

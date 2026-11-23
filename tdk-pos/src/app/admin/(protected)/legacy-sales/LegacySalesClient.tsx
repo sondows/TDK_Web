@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useMemo, useState } from "react";
 import SortableHeader from "@/app/admin/SortableHeader";
@@ -28,7 +29,7 @@ export default function LegacySalesClient() {
     try {
       const query = start && end ? `?startDate=${encodeURIComponent(start)}&endDate=${encodeURIComponent(end)}` : "";
       const response = await fetch(`/api/admin/legacy-sales${query}`, { cache: "no-store" });
-      const data = await response.json() as Result;
+      const data = await readJsonResponse(response, response.url, "API request") as Result;
       if (!response.ok || !data.success) throw new Error(data.message ?? "구 POS 집계자료를 불러오지 못했습니다.");
       setResult(data);
       setStartDate(data.startDate ?? "");
@@ -40,7 +41,7 @@ export default function LegacySalesClient() {
     let active = true;
     fetch("/api/admin/legacy-sales", { cache: "no-store" })
       .then(async response => {
-        const data = await response.json() as Result;
+        const data = await readJsonResponse(response, response.url, "API request") as Result;
         if (!response.ok || !data.success) throw new Error(data.message ?? "구 POS 집계자료를 불러오지 못했습니다.");
         if (active) { setResult(data); setStartDate(data.startDate ?? ""); setEndDate(data.endDate ?? ""); }
       })

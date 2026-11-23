@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -85,7 +86,7 @@ function shiftDate(date: string, days: number) {
   return result.toISOString().slice(0, 10);
 }
 async function readJson<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => null) as T | null;
+  const body = await readJsonResponse(response, response.url, "API request").catch(() => null) as T | null;
   if (!response.ok || !body) {
     const message = (body as { message?: string } | null)?.message;
     throw new Error(message || `요청에 실패했습니다. (HTTP ${response.status})`);
@@ -526,7 +527,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
     const controller = new AbortController();
     void fetchHos(`/api/hos/customers${balanceView ? "?includeBalance=1" : ""}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as { success?: boolean; customers?: HosCustomer[]; message?: string };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; customers?: HosCustomer[]; message?: string };
         if (!response.ok || !result.success || !Array.isArray(result.customers)) throw new Error(result.message || "고객 목록을 불러오지 못했습니다.");
         if (!controller.signal.aborted) { customerDataLoadedKeysRef.current.add(key); setHosCustomers(result.customers); setCustomersLoadedKey(key); setCustomerError(""); }
       })
@@ -546,7 +547,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
     if (range) { query.set("startDate", range.startDate); query.set("endDate", range.endDate); }
     void fetchHos(`/api/customers/${balanceCustomerId}/ledger?${query}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as CustomerTradeResponse;
+        const result = await readJsonResponse(response, response.url, "API request") as CustomerTradeResponse;
         if (!response.ok || !result.success) throw new Error((result as CustomerTradeResponse & { message?: string }).message || "잔액 내역을 불러오지 못했습니다.");
         if (!controller.signal.aborted) { setTradeDataState({ key: `${balanceCustomerId}:${tradePeriod}`, data: result }); setCustomerError(""); }
       })
@@ -560,7 +561,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
     const controller = new AbortController();
     void fetchHos(`/api/customers/${balanceCustomerId}/ledger/${selectedTrade.ledgerId}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
-        const result = await response.json() as CustomerTradeDetailResponse;
+        const result = await readJsonResponse(response, response.url, "API request") as CustomerTradeDetailResponse;
         if (!response.ok || !result.success || !result.detail) throw new Error(result.message || "거래 상세를 불러오지 못했습니다.");
         if (!controller.signal.aborted) { setTradeDetailState({ key: `${balanceCustomerId}:${selectedTrade.ledgerId}`, detail: result.detail }); setCustomerError(""); }
       })
@@ -795,7 +796,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
             reason: cancellationReason, detail: cancellationDetail.trim(),
             cancellations: cancellationRequests }),
         });
-        const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+        const result = await readJsonResponse(response, response.url, "API request").catch(() => null) as { success?: boolean; message?: string } | null;
         if (!response.ok || !result?.success) throw new Error(result?.message || `취소 전송에 실패했습니다. (HTTP ${response.status})`);
       } else {
         let sessionId = detail.session?.sessionId;
@@ -1197,7 +1198,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ customerId: customer?.customerId ?? null }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message || "고객 연결을 저장하지 못했습니다.");
       if (screen === "detail" && detailSheet === "customer") closeDetailSheet();
       else setScreen("detail");
@@ -1222,7 +1223,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(peopleDraft),
       });
-      const result = await response.json() as { success?: boolean; personCount?: number; babyCount?: number; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; personCount?: number; babyCount?: number; message?: string };
       if (!response.ok || !result.success || result.personCount === undefined || result.babyCount === undefined) {
         throw new Error(result.message || "인원 정보를 저장하지 못했습니다.");
       }

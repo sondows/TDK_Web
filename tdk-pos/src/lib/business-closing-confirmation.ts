@@ -1,3 +1,4 @@
+import { readJsonResponse } from "@/lib/api-response";
 export type ClosingSummary = { businessDate: string; totalSales: number; saleCount: number };
 
 export function validClosing(value: unknown): value is ClosingSummary {
@@ -11,7 +12,7 @@ export function validClosing(value: unknown): value is ClosingSummary {
 export async function confirmedClosing(key: string, request: typeof fetch = fetch): Promise<ClosingSummary | null> {
   try {
     const response = await request(`/api/pos/business-session/close?requestKey=${encodeURIComponent(key)}`, { cache: "no-store" });
-    const result = await response.json() as { success?: boolean; closing?: unknown };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; closing?: unknown };
     return response.ok && result.success && validClosing(result.closing) ? result.closing : null;
   } catch { return null; }
 }

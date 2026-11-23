@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { qrOrderIssuedTimeLabel, qrOrderPeopleLabel, sortQrOrderTables, type QrOrderTableListItem } from "@/lib/qr-orders-list-model";
 import { qrOrderRoundNumber, sortQrOrdersNewestFirst } from "@/lib/qr-order-history-model";
 import { qrOrderApprovalTarget } from "@/lib/qr-order-approval-navigation";
+import { parseJsonResponse } from "@/lib/api-response";
 
 type OrderHistory = { qrOrderId: number; status: "PENDING" | "ACCEPTED" | "REJECTED" | "CANCELLED"; totalAmount: string;
   orderedAt: string; note: string | null; items: Array<{ qrOrderItemId: number; itemName: string; qty: number;
@@ -57,7 +58,9 @@ export default function QrOrdersWorkspace({ tables, onChanged, selectionRequest 
         const response = await fetch(`/api/qr/staff-order-history?tableId=${encodeURIComponent(selectedTableId)}`, {
           cache: "no-store", signal: controller.signal,
         });
-        const result = await response.json() as { success?: boolean; orders?: OrderHistory[]; orderCount?: number; totalAmount?: number; message?: string };
+        const result = await parseJsonResponse<{ success?: boolean; orders?: OrderHistory[]; orderCount?: number; totalAmount?: number; message?: string }>(
+          response, `/api/qr/staff-order-history?tableId=${encodeURIComponent(selectedTableId)}`, "QR order history lookup", "GET",
+        );
         if (!response.ok || !result.success || !Array.isArray(result.orders)) throw new Error(result.message || "QR 주문내역을 불러오지 못했습니다.");
         if (!controller.signal.aborted) setHistoryState({ key, data: {
           orders: result.orders, orderCount: Number(result.orderCount ?? result.orders.length), totalAmount: Number(result.totalAmount ?? 0),
@@ -82,7 +85,7 @@ export default function QrOrdersWorkspace({ tables, onChanged, selectionRequest 
     try {
       const response = await fetch("/api/pos/qr-table-orders", { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrOrderId, action }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await parseJsonResponse<{ success?: boolean; message?: string }>(response, "/api/pos/qr-table-orders", "QR order processing", "PATCH");
       if (!response.ok || !result.success) throw new Error(result.message || "QR 주문을 처리하지 못했습니다.");
       setRejectPromptId(null);
       const approvedTableId = qrOrderApprovalTarget(action, response.ok && result.success === true, selectedTable?.tableId);
@@ -105,7 +108,7 @@ export default function QrOrdersWorkspace({ tables, onChanged, selectionRequest 
     try {
       const response = await fetch("/api/qr/staff-order-history", { method: "DELETE", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ qrOrderId }) });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await parseJsonResponse<{ success?: boolean; message?: string }>(response, "/api/qr/staff-order-history", "Hide rejected QR order", "DELETE");
       if (!response.ok || !result.success) throw new Error(result.message || "거절된 QR 주문을 목록에서 숨기지 못했습니다.");
       onChanged?.();
     } catch (cause) {
@@ -124,7 +127,9 @@ export default function QrOrdersWorkspace({ tables, onChanged, selectionRequest 
     try {
       const response = await fetch("/api/qr/staff-table-token", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tableId: selectedTable.tableId }) });
-      const result = await response.json() as { success?: boolean; fixedStickerPreserved?: boolean; message?: string };
+      const result = await parseJsonResponse<{ success?: boolean; fixedStickerPreserved?: boolean; message?: string }>(
+        response, "/api/qr/staff-table-token", "QR token cancellation", "POST",
+      );
       if (!response.ok || !result.success) throw new Error(result.message || "QR 토큰을 취소하지 못했습니다.");
       setTokenCancelOpen(false);
       setTokenNotice({ key: selectedKey, message: "QR 토큰을 취소했습니다. 고정 QR 스티커는 계속 사용할 수 있습니다." });

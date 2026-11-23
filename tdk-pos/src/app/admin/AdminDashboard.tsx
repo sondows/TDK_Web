@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaleDetail, SaleDetailResponse, SaleDisplayStatus, SaleListItem } from "@/lib/sales-types";
@@ -43,7 +44,7 @@ export default function AdminDashboard() {
     setError("");
     try {
       const response = await fetch("/api/admin/dashboard", { cache: "no-store" });
-      const result = await response.json() as DashboardResponse;
+      const result = await readJsonResponse(response, response.url, "API request") as DashboardResponse;
       if (!response.ok || !result.success) throw new Error(result.message ?? "오늘 판매내역을 불러올 수 없습니다.");
       setData(result);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "오늘 판매내역을 불러올 수 없습니다."); }
@@ -73,7 +74,7 @@ export default function AdminDashboard() {
     setError("");
     try {
       const response = await fetch(`/api/admin/dashboard?checkoutId=${checkoutId}`, { cache: "no-store" });
-      const result = await response.json() as SaleDetailResponse;
+      const result = await readJsonResponse(response, response.url, "API request") as SaleDetailResponse;
       if (!response.ok || !result.success || !result.sale) throw new Error(result.message ?? "거래 상세를 불러올 수 없습니다.");
       setDetail(result.sale);
       detailDialog.current?.showModal();
@@ -86,7 +87,7 @@ export default function AdminDashboard() {
     setDeleteError("");
     try {
       const response = await fetch(`/api/admin/dashboard/sales/${detail.checkoutId}`, { method: "DELETE" });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "판매내역을 삭제할 수 없습니다.");
       confirmDialog.current?.close();
       detailDialog.current?.close();
@@ -108,7 +109,7 @@ export default function AdminDashboard() {
     setError("");
     try {
       const response = await fetch("/api/admin/dashboard?paymentOptions=1", { cache: "no-store" });
-      const options = await response.json() as PaymentOptionsResponse;
+      const options = await readJsonResponse(response, response.url, "API request") as PaymentOptionsResponse;
       if (!response.ok || !options.success) throw new Error(options.message ?? "결제수단과 고객 목록을 불러오지 못했습니다.");
       setData(current => current ? { ...current, availableMethods: options.availableMethods, customerPaymentMethodId: options.customerPaymentMethodId, correctionCustomers: options.correctionCustomers } : current);
     } catch (cause) {
@@ -132,10 +133,10 @@ export default function AdminDashboard() {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentMethodId: selectedMethodId, ...(customerPaymentSelected && selectedCustomer ? { customerId: selectedCustomer.customerId } : {}) }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) throw new Error(result.message ?? "결제수단을 변경하지 못했습니다.");
       const detailResponse = await fetch(`/api/admin/dashboard?checkoutId=${detail.checkoutId}`, { cache: "no-store" });
-      const detailResult = await detailResponse.json() as SaleDetailResponse;
+      const detailResult = await readJsonResponse(detailResponse, detailResponse.url, "API request") as SaleDetailResponse;
       if (!detailResponse.ok || !detailResult.success || !detailResult.sale) throw new Error("판매 상세를 다시 불러오지 못했습니다.");
       setDetail(detailResult.sale);
       methodConfirmDialog.current?.close();

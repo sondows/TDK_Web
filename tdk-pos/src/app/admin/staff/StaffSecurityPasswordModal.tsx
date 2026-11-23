@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import styles from "../admin.module.css";
@@ -21,7 +22,7 @@ export default function StaffSecurityPasswordModal({ staff, onClose, onSaved }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmed: true }),
       });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         setMessage(result.message ?? "직원 인증정보를 초기화하지 못했습니다.");
         return;

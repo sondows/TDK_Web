@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { DEFAULT_KDS_COMPLETED_TIME_SHRINK_START_MINUTES, isKdsCompletedTimeShrinkStartMinutes } from "@/lib/kds-model";
@@ -18,7 +19,7 @@ export default function KdsCompletedTimeShrinkForm({ initialMinutes }: { initial
       const response = await fetch("/api/admin/kds-completed-time-shrink", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes: numericMinutes }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; minutes?: number };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; minutes?: number };
       if (!response.ok || !result.success || !isKdsCompletedTimeShrinkStartMinutes(result.minutes)) {
         throw new Error(result.message ?? "설정을 저장하지 못했습니다.");
       }

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CustomerSummary } from "@/lib/customer";
@@ -80,7 +81,7 @@ export default function CustomerTradeModal({ customer, onChanged, onClose }: {
       if (appliedStart) query.set("startDate", appliedStart);
       if (appliedEnd) query.set("endDate", appliedEnd);
       const response = await fetch(`/api/customers/${customer.customerId}/ledger?${query}`, { cache: "no-store", signal });
-      const result = await response.json() as CustomerTradeResponse;
+      const result = await readJsonResponse(response, response.url, "API request") as CustomerTradeResponse;
       if (!response.ok || !result.success) throw new Error(result.message ?? "거래내역을 불러오지 못했습니다.");
       if (signal.aborted) return;
       setBalance(result.balance);

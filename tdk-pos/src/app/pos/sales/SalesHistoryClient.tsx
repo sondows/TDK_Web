@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -149,7 +150,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     setSummaryStaffLoading(true);
     try {
       const response = await fetch("/api/sales/summary/managers", { cache: "no-store" });
-      const result = await response.json() as { success?: boolean; staff?: Employee[]; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; staff?: Employee[]; message?: string };
       if (requestId !== summaryRequestId.current) return;
       if (!response.ok || !result.success) throw new Error(result.message ?? "직원 목록을 불러올 수 없습니다.");
       setEmployees(result.staff ?? []);
@@ -171,7 +172,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
         method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
         body: JSON.stringify({ loginId: selectedEmployee, pin, startDate: period.startDate, endDate: period.endDate }),
       });
-      const result = await response.json() as { success?: boolean; summary?: SalesSummary; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; summary?: SalesSummary; message?: string };
       if (requestId !== summaryRequestId.current) return;
       setSummaryPin("");
       if (!response.ok || !result.success || !result.summary) setSummaryError(result.message ?? "직원 인증에 실패했습니다.");
@@ -200,7 +201,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
   useEffect(() => {
     let active = true;
     fetch(`/api/sales?startDate=${encodeURIComponent(period.startDate)}&endDate=${encodeURIComponent(period.endDate)}`)
-      .then(async (response) => ({ response, result: await response.json() as SalesListResponse }))
+      .then(async (response) => ({ response, result: await readJsonResponse(response, response.url, "API request") as SalesListResponse }))
       .then(({ response, result }) => {
         if (!active) return;
         if (!response.ok || !result.success) setError(result.message ?? "판매내역을 불러올 수 없습니다.");
@@ -241,7 +242,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     setPrintSuccess("");
     try {
       const response = await fetch(`/api/sales?checkoutId=${checkoutId}`);
-      const result = await response.json() as SaleDetailResponse;
+      const result = await readJsonResponse(response, response.url, "API request") as SaleDetailResponse;
       if (!response.ok || !result.success || !result.sale) {
         setError(result.message ?? "판매 상세를 불러올 수 없습니다.");
         return;
@@ -290,7 +291,7 @@ export default function SalesHistoryClient({ date, closeToPos = false }: { date:
     setReceiptLookupError(false);
     try {
       const response = await fetch(`/api/sales?lookupCode=${encodeURIComponent(lookupCode)}`, { cache: "no-store" });
-      const result = await response.json() as SaleDetailResponse;
+      const result = await readJsonResponse(response, response.url, "API request") as SaleDetailResponse;
       if (!response.ok || !result.success || !result.sale) throw new Error("Receipt lookup failed");
       if (requestId !== receiptLookupRequestId.current) return;
       setDetail(result.sale);

@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useEffect, useRef, useState } from "react";
 import type { StaffSummary } from "@/lib/staff-management";
@@ -21,7 +22,7 @@ export default function StaffDeleteConfirm({ original, onClose, onSaved }: { ori
     setError("");
     try {
       const response = await fetch(`/api/admin-center/staff/${original.staffId}/terminate`, { method: "POST" });
-      const result = await response.json() as { success?: boolean; message?: string };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
       if (!response.ok || !result.success) {
         setError(result.message ?? "퇴사 처리하지 못했습니다.");
         return;

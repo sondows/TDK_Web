@@ -1,4 +1,5 @@
 "use client";
+import { readJsonResponse } from "@/lib/api-response";
 
 import { useState } from "react";
 import { DEFAULT_KDS_COMPLETION_COUNTDOWN_SECONDS, isKdsCompletionCountdownSeconds } from "@/lib/kds-model";
@@ -21,7 +22,7 @@ export default function KdsCompletionCountdownForm({ initialSeconds }: { initial
       const response = await fetch("/api/admin/kds-completion-countdown", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: numericSeconds }),
       });
-      const result = await response.json() as { success?: boolean; message?: string; seconds?: number };
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; seconds?: number };
       if (!response.ok || !result.success || !isKdsCompletionCountdownSeconds(result.seconds)) {
         throw new Error(result.message ?? "설정을 저장하지 못했습니다.");
       }
