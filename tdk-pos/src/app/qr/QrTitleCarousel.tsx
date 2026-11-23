@@ -2,12 +2,13 @@
 
 import { useEffect, useRef, useState, type TouchEvent } from "react";
 import Image from "next/image";
+import { getQrHeroTouchIntent } from "@/lib/qr-hero-touch-intent";
 import { QR_TITLE_AUTOPLAY_MS } from "@/lib/qr-title-model";
 import type { QrTitleSlide } from "@/lib/qr-title-model";
 
 export type { QrTitleSlide } from "@/lib/qr-title-model";
 
-export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightPx, fixedHero = false, onExitRequest, exitDisabled = false }: { photos: QrTitleSlide[]; photoHeightPx?: number; viewportHeightPx?: number; fixedHero?: boolean; onExitRequest?: () => void; exitDisabled?: boolean }) {
+export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightPx, fixedHero = false, onExitRequest, exitDisabled = false, onTap }: { photos: QrTitleSlide[]; photoHeightPx?: number; viewportHeightPx?: number; fixedHero?: boolean; onExitRequest?: () => void; exitDisabled?: boolean; onTap?: () => void }) {
   const [trackIndex, setTrackIndex] = useState(photos.length > 1 ? 1 : 0);
   const [visible, setVisible] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -53,6 +54,10 @@ export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightP
     }
   };
   const onTouchStart = (event: TouchEvent<HTMLElement>) => {
+    if (event.target instanceof Element && event.target.closest("button, a, input, select, textarea")) {
+      start.current = null;
+      return;
+    }
     const touch = event.touches[0];
     if (touch) start.current = { x: touch.clientX, y: touch.clientY };
   };
@@ -63,7 +68,10 @@ export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightP
     if (!initial || !touch) return;
     const dx = touch.clientX - initial.x;
     const dy = touch.clientY - initial.y;
-    if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(dy) * 1.2) go(dx < 0 ? 1 : -1);
+    const intent = getQrHeroTouchIntent(dx, dy);
+    if (intent === "left") go(1);
+    else if (intent === "right") go(-1);
+    else if (intent === "tap") onTap?.();
   };
   const onTransitionEnd = () => {
     if (count < 2) return;
@@ -73,7 +81,7 @@ export default function QrTitleCarousel({ photos, photoHeightPx, viewportHeightP
     }
   };
 
-  return <section aria-label="매장 사진" className={`${fixedHero ? "fixed inset-x-0 top-0 z-0 w-full aspect-[4/3]" : "relative w-full aspect-[4/3]"} touch-pan-y overflow-hidden bg-slate-100`} data-qr-fixed-hero={fixedHero ? "true" : undefined} data-qr-title-carousel onTouchEnd={onTouchEnd} onTouchStart={onTouchStart} ref={root} style={viewportHeightPx !== undefined ? { height: viewportHeightPx } : photoHeightPx !== undefined ? { height: photoHeightPx } : undefined}>
+  return <section aria-label="매장 사진" className={`${fixedHero ? "fixed inset-x-0 top-0 z-0 w-full aspect-[4/3]" : "relative w-full aspect-[4/3]"} touch-pan-y overflow-hidden bg-slate-100`} data-qr-fixed-hero={fixedHero ? "true" : undefined} data-qr-title-carousel onTouchCancel={() => { start.current = null; }} onTouchEnd={onTouchEnd} onTouchStart={onTouchStart} ref={root} style={viewportHeightPx !== undefined ? { height: viewportHeightPx } : photoHeightPx !== undefined ? { height: photoHeightPx } : undefined}>
     <div className="relative w-full overflow-hidden" style={photoHeightPx === undefined ? { height: "100%" } : { height: photoHeightPx }}>
       <div className={`flex h-full w-full ${transitioning && !reduceMotion ? "transition-transform duration-500 ease-out" : ""}`} onTransitionEnd={onTransitionEnd} style={{ transform: `translateX(-${trackIndex * 100}%)` }}>
         {slides.map((photo, slideIndex) => <div aria-hidden={slideIndex !== trackIndex} className="relative h-full w-full shrink-0" key={`${photo.id}-${slideIndex}`}>

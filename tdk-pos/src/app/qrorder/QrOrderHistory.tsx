@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import QrStoreTitle from "@/app/qr/QrStoreTitle";
 import QrTitleCarousel from "@/app/qr/QrTitleCarousel";
 import { buildUnifiedQrOrderRounds } from "@/lib/qr-unified-order-rounds";
-import { accumulateQrPanelWheelIntent, type QrPanelWheelIntent } from "@/lib/qr-order-panel-wheel";
+import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelDocumentScrollTop, type QrPanelSnapIndex } from "@/lib/qr-order-panel-geometry";
 import { getQrCookingProgress, type QrCookingProgress } from "@/lib/qr-cooking-progress";
 import type { QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
@@ -65,9 +65,8 @@ type Payload = {
   message?: string;
 };
 type Invite = { url: string; qrData: string; expiresAt: string };
-type PanelSnapIndex = 0 | 1 | 2;
-type PanelDrag = { pointerId: number; startY: number; lastY: number; startOffset: number; startSnapIndex: PanelSnapIndex; startedAt: number; moved: boolean };
-type PanelGeometry = { baseTop: number; offsets: [number, number, number] };
+type PanelSnapIndex = QrPanelSnapIndex;
+type PanelDrag = { pointerId: number; startY: number; startScrollTop: number; startSnapIndex: QrPanelSnapIndex; startedAt: number; moved: boolean };
 const emptyOrders: QrOrder[] = [];
 const emptyItems: OrderItem[] = [];
 const emptyPosOrders: PosOrder[] = [];
@@ -77,6 +76,16 @@ const dateTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { hour: "2-
 const orderTime = (value: string) => new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 }).format(new Date(value));
+function readOrderPanelGeometry(hasHero: boolean, titleHeight: number) {
+  const hero = document.querySelector<HTMLElement>("[data-qr-fixed-hero]");
+  const navigation = document.querySelector<HTMLElement>('[aria-label="주문내역 하단 메뉴"]');
+  return getQrOrderPanelGeometry({
+    viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+    heroHeight: hasHero ? hero?.getBoundingClientRect().height ?? window.innerWidth * 0.75 : null,
+    titleHeight,
+    bottomReserved: navigation?.getBoundingClientRect().height ?? 72,
+  });
+}
 function QrCookingProgressLine({ progress }: { progress: QrCookingProgress }) {
   const labels = ["대기중", "조리중", "조리완료", progress.tableBoilLabel, "완료"];
   const columns = "0.9fr 0.9fr 1.05fr 1.65fr 0.75fr";
@@ -115,22 +124,6 @@ function QrSummaryDivider() {
   }} />;
 }
 
-function orderPanelGeometry(hasHero: boolean, titleHeight: number): PanelGeometry {
-  const viewportHeight = window.innerHeight;
-  const topTarget = 6;
-  if (!hasHero) {
-    const bottomTop = Math.max(topTarget, Math.min(viewportHeight - 72 - 180, viewportHeight * 0.62));
-    const middleTop = (topTarget + bottomTop) / 2;
-    return { baseTop: middleTop, offsets: [topTarget - middleTop, 0, bottomTop - middleTop] };
-  }
-  const width = window.innerWidth;
-  const heroHeight = width * 0.75;
-  const maxPanelTop = Math.max(topTarget, viewportHeight - 72 - 180);
-  const bottomTop = Math.max(topTarget, Math.min(heroHeight - titleHeight - 16, maxPanelTop));
-  const middleTop = Math.max(topTarget, Math.min(heroHeight / 2 - titleHeight / 2, bottomTop - 48));
-  return { baseTop: middleTop, offsets: [topTarget - middleTop, 0, bottomTop - middleTop] };
-}
-
 export default function QrOrderHistory({ titleData, notices = [] }: { titleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
   const router = useRouter();
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -143,61 +136,39 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState("");
   const [shareMessage, setShareMessage] = useState("");
-  const [panelOffset, setPanelOffset] = useState(0);
   const [panelBaseTop, setPanelBaseTop] = useState<number | null>(null);
   const [panelBackgroundStart, setPanelBackgroundStart] = useState(34);
-  const [panelDragging, setPanelDragging] = useState(false);
-  const panelOffsetRef = useRef(0);
   const panelSnapIndexRef = useRef<PanelSnapIndex>(1);
   const panelTitleHeightRef = useRef(68);
   const panelDragRef = useRef<PanelDrag | null>(null);
-  const panelScrollRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const panelSpacerRef = useRef<HTMLDivElement>(null);
   const panelSectionRef = useRef<HTMLElement | null>(null);
-  const wheelSettleTimerRef = useRef<number | null>(null);
-  const wheelIntentRef = useRef<QrPanelWheelIntent | null>(null);
-  const panelFrameRef = useRef<number | null>(null);
-  const pendingPanelOffsetRef = useRef<number | null>(null);
+  const panelGeometryFrameRef = useRef<number | null>(null);
+  const initialPanelScrollSetRef = useRef(false);
   const pointerFallbackRef = useRef<((event: PointerEvent) => void) | null>(null);
   const inviteRequestRef = useRef(false);
   const refreshSequenceRef = useRef(0);
 
-  const setPanelOffsetValue = (offset: number) => {
-    panelOffsetRef.current = offset;
-    setPanelOffset(offset);
-  };
-  const schedulePanelOffset = (offset: number) => {
-    panelOffsetRef.current = offset;
-    pendingPanelOffsetRef.current = offset;
-    if (panelFrameRef.current !== null) return;
-    panelFrameRef.current = window.requestAnimationFrame(() => {
-      panelFrameRef.current = null;
-      const nextOffset = pendingPanelOffsetRef.current;
-      pendingPanelOffsetRef.current = null;
-      if (nextOffset !== null && panelSectionRef.current) {
-        panelSectionRef.current.style.transform = `translateY(${nextOffset}px)`;
-      }
-    });
+  const setPanelSnap = (index: QrPanelSnapIndex) => {
+    panelSnapIndexRef.current = index;
+    const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+    window.scrollTo({ top: qrPanelDocumentScrollTop(geometry, index), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   };
   const startPanelDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (event.pointerType !== "mouse" || event.button !== 0 ||
+    const mouseDrag = event.pointerType === "mouse" && event.button === 0;
+    const touchHeaderDrag = event.pointerType === "touch" && Boolean(target.closest('[data-qr-menu-background-anchor="title"]'));
+    if ((!mouseDrag && !touchHeaderDrag) ||
       target.closest("button, a, input, select, textarea, [role=button], [role=dialog], [contenteditable=true]")) return;
     if (panelDragRef.current) return;
-    if (wheelSettleTimerRef.current !== null) {
-      window.clearTimeout(wheelSettleTimerRef.current);
-      wheelSettleTimerRef.current = null;
-    }
-    wheelIntentRef.current = null;
-    const stops = orderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current).offsets;
-    const transform = getComputedStyle(event.currentTarget).transform;
-    const matrix = transform.match(/^matrix(3d)?\((.+)\)$/);
-    const values = matrix?.[2].split(",").map(Number);
-    const renderedOffset = values ? (matrix?.[1] ? values[13] : values[5]) : panelOffsetRef.current;
-    const offset = Number.isFinite(renderedOffset) ? renderedOffset : panelOffsetRef.current;
+    const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+    const panelTop = panelSectionRef.current?.getBoundingClientRect().top ?? geometry.baseTop;
+    const stops = geometry.offsets.map(offset => geometry.baseTop + offset);
     const startSnapIndex = stops.reduce<PanelSnapIndex>((closest, stop, index) =>
-      Math.abs(stop - offset) < Math.abs(stops[closest] - offset) ? index as PanelSnapIndex : closest, 1);
-    panelDragRef.current = { pointerId: event.pointerId, startY: event.clientY, lastY: event.clientY,
-      startOffset: offset, startSnapIndex, startedAt: event.timeStamp, moved: false };
+      Math.abs(stop - panelTop) < Math.abs(stops[closest] - panelTop) ? index as PanelSnapIndex : closest, 1);
+    panelDragRef.current = { pointerId: event.pointerId, startY: event.clientY, startScrollTop: window.scrollY,
+      startSnapIndex, startedAt: event.timeStamp, moved: false };
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
@@ -211,52 +182,12 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     const drag = panelDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (!drag.moved && Math.abs(event.clientY - drag.startY) < 4) return;
-    if (!drag.moved) {
-      panelOffsetRef.current = drag.startOffset;
-      setPanelOffset(drag.startOffset);
-      setPanelDragging(true);
-    }
     drag.moved = true;
     event.preventDefault();
-    const stops = orderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current).offsets;
-    const [topOffset, , bottomOffset] = stops;
-    const scroll = panelScrollRef.current;
-    const deltaY = event.clientY - drag.lastY;
-    let offset = panelOffsetRef.current;
-    if (offset <= topOffset + 0.5) {
-      const maxScrollTop = Math.max(0, (scroll?.scrollHeight ?? 0) - (scroll?.clientHeight ?? 0));
-      const currentScrollTop = Math.min(maxScrollTop, Math.max(0, scroll?.scrollTop ?? 0));
-      if (scroll && currentScrollTop !== scroll.scrollTop) scroll.scrollTop = currentScrollTop;
-      if (deltaY < 0) {
-        if (scroll) scroll.scrollTop = Math.min(maxScrollTop, currentScrollTop - deltaY);
-      } else {
-        const consumedByScroll = Math.min(currentScrollTop, deltaY);
-        if (scroll && consumedByScroll > 0) scroll.scrollTop = currentScrollTop - consumedByScroll;
-        const remaining = deltaY - consumedByScroll;
-        if (remaining > 0) offset = Math.min(stops[Math.min(2, drag.startSnapIndex + 1)], offset + remaining);
-      }
-    } else {
-      const requestedOffset = offset + deltaY;
-      if (requestedOffset < topOffset) {
-        if (drag.startSnapIndex === 2) {
-          offset = stops[1];
-        } else {
-          const maxScrollTop = Math.max(0, (scroll?.scrollHeight ?? 0) - (scroll?.clientHeight ?? 0));
-          if (scroll) scroll.scrollTop = Math.min(maxScrollTop, Math.max(0, scroll.scrollTop) + topOffset - requestedOffset);
-          offset = topOffset;
-        }
-      } else {
-        const lowerDragStop = stops[Math.max(0, drag.startSnapIndex - 1)];
-        const upperDragStop = stops[Math.min(2, drag.startSnapIndex + 1)];
-        if (drag.startSnapIndex === 2 && requestedOffset > bottomOffset) {
-          offset = bottomOffset + Math.min(48, (requestedOffset - bottomOffset) * 0.28);
-        } else {
-          offset = Math.max(lowerDragStop, Math.min(upperDragStop, requestedOffset));
-        }
-      }
-    }
-    if (offset !== panelOffsetRef.current) schedulePanelOffset(offset);
-    drag.lastY = event.clientY;
+    const requestedScrollTop = drag.startScrollTop - (event.clientY - drag.startY);
+    const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+    const maxPanelScroll = Math.max(0, geometry.baseTop + geometry.offsets[2] - 6);
+    window.scrollTo(0, Math.min(maxPanelScroll, Math.max(0, requestedScrollTop)));
   };
   const finishPanelDrag = (event: Pick<PointerEvent, "pointerId" | "clientY" | "timeStamp">, cancelled = false) => {
     const drag = panelDragRef.current;
@@ -267,41 +198,59 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
       window.removeEventListener("pointercancel", pointerFallbackRef.current);
       pointerFallbackRef.current = null;
     }
-    if (panelFrameRef.current !== null) {
-      window.cancelAnimationFrame(panelFrameRef.current);
-      panelFrameRef.current = null;
-    }
-    pendingPanelOffsetRef.current = null;
-    setPanelDragging(false);
     if (!drag.moved) return;
-    const stops = orderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current).offsets;
-    const currentOffset = panelOffsetRef.current;
+    const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+    const stops = geometry.offsets.map(offset => geometry.baseTop + offset);
+    const currentPanelTop = panelSectionRef.current?.getBoundingClientRect().top ?? stops[1];
     let targetIndex = stops.reduce<PanelSnapIndex>((closest, stop, index) =>
-      Math.abs(stop - currentOffset) < Math.abs(stops[closest] - currentOffset) ? index as PanelSnapIndex : closest, 1);
-    if (!cancelled && Math.abs(currentOffset - drag.startOffset) > 0.5) {
+      Math.abs(stop - currentPanelTop) < Math.abs(stops[closest] - currentPanelTop) ? index as PanelSnapIndex : closest, 1);
+    if (!cancelled) {
       const delta = event.clientY - drag.startY;
       const velocity = delta / Math.max(1, event.timeStamp - drag.startedAt);
       if (drag.startSnapIndex > 0 && (delta <= -28 || velocity < -0.35)) targetIndex = (drag.startSnapIndex - 1) as PanelSnapIndex;
       else if (drag.startSnapIndex < 2 && (delta >= 28 || velocity > 0.35)) targetIndex = (drag.startSnapIndex + 1) as PanelSnapIndex;
     }
-    panelSnapIndexRef.current = targetIndex;
-    setPanelOffsetValue(stops[targetIndex]);
+    setPanelSnap(targetIndex);
   };
 
   useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const previousMinHeight = main.style.minHeight;
     const resize = () => {
+      const previousPanelTop = panelSectionRef.current?.getBoundingClientRect().top ?? null;
       const titleCard = document.querySelector<HTMLElement>('[data-qr-menu-background-anchor="title"]');
       if (titleCard) {
         const cardRect = titleCard.getBoundingClientRect();
         const measuredHeight = cardRect.height;
         panelTitleHeightRef.current = measuredHeight;
-        const scroller = panelScrollRef.current;
-        const scrollerTop = scroller?.getBoundingClientRect().top ?? 0;
-        setPanelBackgroundStart(Math.max(0, cardRect.top - scrollerTop + (scroller?.scrollTop ?? 0) + measuredHeight / 2));
       }
-      const geometry = orderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
-      setPanelBaseTop(geometry.baseTop);
-      if (!panelDragRef.current) setPanelOffsetValue(geometry.offsets[panelSnapIndexRef.current]);
+      const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+      const flowTop = geometry.baseTop + geometry.offsets[2];
+      const maxPanelScroll = Math.max(0, flowTop - 6);
+      panelSpacerRef.current?.style.setProperty("height", `${flowTop}px`);
+      main.style.minHeight = `${Math.max(window.visualViewport?.height ?? window.innerHeight, (window.visualViewport?.height ?? window.innerHeight) + maxPanelScroll)}px`;
+      setPanelBaseTop(flowTop);
+      const panelTop = panelSectionRef.current?.getBoundingClientRect().top ?? flowTop;
+      const titleTop = titleCard?.getBoundingClientRect().top ?? panelTop;
+      setPanelBackgroundStart(Math.max(0, titleTop - panelTop + panelTitleHeightRef.current / 2));
+      if (panelGeometryFrameRef.current !== null) window.cancelAnimationFrame(panelGeometryFrameRef.current);
+      panelGeometryFrameRef.current = window.requestAnimationFrame(() => {
+        panelGeometryFrameRef.current = null;
+        const targetScrollTop = initialPanelScrollSetRef.current && previousPanelTop !== null
+          ? flowTop - previousPanelTop
+          : qrPanelDocumentScrollTop(geometry, 1);
+        window.scrollTo(0, Math.min(maxPanelScroll, Math.max(0, targetScrollTop)));
+        initialPanelScrollSetRef.current = true;
+      });
+    };
+    const updateSnapIndex = () => {
+      const panelTop = panelSectionRef.current?.getBoundingClientRect().top;
+      if (panelTop === undefined || panelTop === null) return;
+      const geometry = readOrderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current);
+      const stops = geometry.offsets.map(offset => geometry.baseTop + offset);
+      panelSnapIndexRef.current = stops.reduce<PanelSnapIndex>((closest, stop, index) =>
+        Math.abs(stop - panelTop) < Math.abs(stops[closest] - panelTop) ? index as PanelSnapIndex : closest, 1);
     };
     const titleCard = document.querySelector<HTMLElement>('[data-qr-menu-background-anchor="title"]');
     const observer = titleCard && typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
@@ -309,103 +258,24 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     const visualViewport = window.visualViewport;
     visualViewport?.addEventListener("resize", resize);
     window.addEventListener("resize", resize);
+    window.addEventListener("scroll", updateSnapIndex, { passive: true });
     resize();
     return () => {
       observer?.disconnect();
       visualViewport?.removeEventListener("resize", resize);
       window.removeEventListener("resize", resize);
-    };
-  }, [titleData.photos.length]);
-
-  useEffect(() => {
-    const panel = panelSectionRef.current;
-    if (!panel) return;
-
-    const clearWheelBurst = () => {
-      wheelSettleTimerRef.current = null;
-      wheelIntentRef.current = null;
-    };
-
-    const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.deltaY === 0) return;
-      const scroller = panelScrollRef.current;
-      if (!scroller) return;
-
-      let deltaY = event.deltaY;
-      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) deltaY *= 16;
-      else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) deltaY *= scroller.clientHeight;
-      if (!Number.isFinite(deltaY) || deltaY === 0) return;
-
-      event.preventDefault();
-      if (panelDragRef.current) return;
-      if (wheelSettleTimerRef.current !== null) {
-        window.clearTimeout(wheelSettleTimerRef.current);
-      }
-
-      const stops = orderPanelGeometry(titleData.photos.length > 0, panelTitleHeightRef.current).offsets;
-      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      const scrollTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop));
-      if (scrollTop !== scroller.scrollTop) scroller.scrollTop = scrollTop;
-      const snapIndex = panelSnapIndexRef.current;
-
-      // Once the panel is fully raised, upward input belongs to the receipt
-      // content. No snap timer is allowed to pull it back down.
-      if (deltaY < 0) {
-        if (snapIndex === 0) {
-          scroller.scrollTop = Math.min(maxScrollTop, scrollTop - deltaY);
-        } else {
-          const result = accumulateQrPanelWheelIntent(wheelIntentRef.current, deltaY);
-          if (result) {
-            wheelIntentRef.current = result.intent;
-            if (result.shouldAdvance) {
-              const nextIndex = Math.max(0, snapIndex - 1) as PanelSnapIndex;
-              panelSnapIndexRef.current = nextIndex;
-              setPanelOffsetValue(stops[nextIndex]);
-            }
-          }
-        }
-      } else {
-        const contentDelta = Math.min(deltaY, scrollTop);
-        if (contentDelta > 0) scroller.scrollTop = scrollTop - contentDelta;
-        const remaining = deltaY - contentDelta;
-        if (remaining > 0 && snapIndex < 2) {
-          const result = accumulateQrPanelWheelIntent(wheelIntentRef.current, remaining);
-          if (result) {
-            wheelIntentRef.current = result.intent;
-            if (result.shouldAdvance) {
-              const nextIndex = Math.min(2, snapIndex + 1) as PanelSnapIndex;
-              panelSnapIndexRef.current = nextIndex;
-              setPanelOffsetValue(stops[nextIndex]);
-            }
-          }
-        }
-      }
-
-      // Trackpad deltas accumulate within one gesture. Quiet time only resets
-      // the threshold; it never snaps to a nearby offset or reverses input.
-      wheelSettleTimerRef.current = window.setTimeout(clearWheelBurst, 180);
-    };
-
-    panel.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      panel.removeEventListener("wheel", onWheel);
-      if (wheelSettleTimerRef.current !== null) {
-        window.clearTimeout(wheelSettleTimerRef.current);
-        wheelSettleTimerRef.current = null;
-      }
-      wheelIntentRef.current = null;
+      window.removeEventListener("scroll", updateSnapIndex);
+      if (panelGeometryFrameRef.current !== null) window.cancelAnimationFrame(panelGeometryFrameRef.current);
+      panelGeometryFrameRef.current = null;
+      main.style.minHeight = previousMinHeight;
     };
   }, [titleData.photos.length]);
 
   useEffect(() => () => {
-    if (panelFrameRef.current !== null) window.cancelAnimationFrame(panelFrameRef.current);
-    if (wheelSettleTimerRef.current !== null) window.clearTimeout(wheelSettleTimerRef.current);
     if (pointerFallbackRef.current) {
       window.removeEventListener("pointerup", pointerFallbackRef.current);
       window.removeEventListener("pointercancel", pointerFallbackRef.current);
     }
-    panelFrameRef.current = null;
-    wheelSettleTimerRef.current = null;
     pointerFallbackRef.current = null;
     panelDragRef.current = null;
   }, []);
@@ -583,14 +453,14 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     },
   ];
 
-  return <main className="min-h-svh w-full bg-slate-50 text-slate-900">
-    {titleData.photos.length > 0 && <QrTitleCarousel fixedHero photos={titleData.photos} />}
-    <section aria-label="주문내역 패널" className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 mx-auto max-w-2xl" ref={panelSectionRef}
+  return <main className="isolate min-h-svh w-full overflow-x-clip bg-slate-50 text-slate-900" ref={mainRef} style={{ paddingBottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
+    {titleData.photos.length > 0 && <QrTitleCarousel fixedHero onTap={() => setPanelSnap(nextQrOrderPanelSnap(panelSnapIndexRef.current, "show-image"))} photos={titleData.photos} />}
+    <div aria-hidden="true" ref={panelSpacerRef} style={{ height: panelBaseTop === null ? titleData.photos.length ? "75vw" : "62dvh" : `${panelBaseTop}px` }} />
+    <section aria-label="주문내역 패널" className="relative z-20 mx-auto w-full max-w-2xl" ref={panelSectionRef} data-qr-content-start
       onLostPointerCapture={event => finishPanelDrag(event.nativeEvent, true)} onPointerCancel={event => finishPanelDrag(event.nativeEvent, true)}
       onPointerDown={startPanelDrag} onPointerMove={movePanelDrag} onPointerUp={event => finishPanelDrag(event.nativeEvent)}
-      style={{ top: panelBaseTop === null ? titleData.photos.length ? "calc(37.5vw - 34px)" : "35dvh" : `${panelBaseTop}px`, transform: panelDragging ? undefined : `translateY(${panelOffset}px)`, transition: panelDragging ? "none" : "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)", touchAction: "pan-y pinch-zoom", overscrollBehaviorY: "contain" }}>
-      <div className="h-full w-full overflow-x-hidden overflow-y-auto" ref={panelScrollRef} style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y pinch-zoom", overscrollBehaviorY: "contain" }} data-qr-content-start>
-        <div className="relative min-h-full">
+      style={{ touchAction: "pan-y pinch-zoom" }}>
+        <div className="relative">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-slate-50" style={{ top: `${panelBackgroundStart}px` }} />
           <div className="relative z-10">
             <QrStoreTitle fixedHero orderHistoryHeader notices={notices} onShareTableQr={payload?.canViewOrders && accessState === null ? openShare : undefined} screenSettings={titleData.screenSettings} settings={titleData} />
@@ -700,7 +570,6 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
             </div>
           </div>
         </div>
-      </div>
     </section>
 
     <nav aria-label="주문내역 하단 메뉴" className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl border-t border-[#D1D5DB] bg-white pb-[env(safe-area-inset-bottom)]">

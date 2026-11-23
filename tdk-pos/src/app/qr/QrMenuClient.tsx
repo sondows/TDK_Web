@@ -1195,7 +1195,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     <p className="text-lg font-bold">메뉴 둘러보기를 종료했습니다.</p>
   </main>;
 
-  return <main className="min-h-svh bg-white text-slate-900" style={{ paddingBottom: `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
+  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
     {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 bottom-[69.6px] z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status">{quickAddFeedback}</div>}
     {titleData.photos.length > 0 && <QrTitleCarousel exitDisabled={tableOrderMode && !cartReady} fixedHero onExitRequest={!waitingMode ? requestQrExit : undefined} photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>

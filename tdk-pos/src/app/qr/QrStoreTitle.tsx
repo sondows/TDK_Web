@@ -87,7 +87,7 @@ export default function QrStoreTitle({ settings, screenSettings, previewMode = f
     setTitleSnapOffset(safeOffset);
   };
   const startTitleSnapDrag = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!snapEnabled || !fixedHero || !settings.photos.length || (event.pointerType === "mouse" && event.button !== 0) ||
+    if (!snapEnabled || !fixedHero || !settings.photos.length || event.pointerType !== "mouse" || event.button !== 0 ||
       (event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
     const titleBox = event.currentTarget;
     const geometry = measureQrTitleSnapGeometry(titleBox, tableOrderMode ? QR_ORDER_TOP_SNAP_TARGET_PX : 0);
@@ -509,7 +509,7 @@ export default function QrStoreTitle({ settings, screenSettings, previewMode = f
   return <>
     <div className={orderHistoryHeader ? "contents" : "w-full"} data-qr-title-stack>
       {settings.photos.length > 0 && !fixedHero && <QrTitleCarousel key={settings.photos.map(photo => photo.id).join("|")} photos={settings.photos} photoHeightPx={photoHeightPx} viewportHeightPx={photoViewportHeightPx} />}
-      {hasBox && <section className={`relative z-10 mx-auto w-[92%] max-w-2xl rounded-2xl bg-white text-center shadow-[0_4px_16px_rgba(0,0,0,0.12)] ${fixedHero && settings.photos.length || photoViewportHeightPx !== undefined ? "mt-0" : settings.photos.length ? "-mt-9" : "mt-4"}`} data-qr-menu-background-anchor="title" data-qr-title-snap-offset={snapEnabled ? titleSnapOffset : undefined} data-qr-title-snap-position={snapEnabled ? titleSnapPosition : undefined} onPointerCancel={snapEnabled ? event => finishTitleSnapDrag(event, true) : undefined} onPointerDown={snapEnabled ? startTitleSnapDrag : undefined} onPointerMove={snapEnabled ? moveTitleSnapDrag : undefined} onPointerUp={snapEnabled ? event => finishTitleSnapDrag(event) : undefined} style={snapEnabled ? { transform: `translateY(${titleSnapOffset}px)`, marginBottom: titleSnapOffset, transition: titleSnapDragging ? "none" : "transform 300ms cubic-bezier(0.22, 1, 0.36, 1), margin-bottom 300ms cubic-bezier(0.22, 1, 0.36, 1)", touchAction: "none" } : undefined}>
+      {hasBox && <section className={`relative z-10 mx-auto w-[92%] max-w-2xl rounded-2xl bg-white text-center shadow-[0_4px_16px_rgba(0,0,0,0.12)] ${fixedHero && settings.photos.length || photoViewportHeightPx !== undefined ? "mt-0" : settings.photos.length ? "-mt-9" : "mt-4"}`} data-qr-menu-background-anchor="title" data-qr-title-snap-offset={snapEnabled ? titleSnapOffset : undefined} data-qr-title-snap-position={snapEnabled ? titleSnapPosition : undefined} onPointerCancel={snapEnabled ? event => finishTitleSnapDrag(event, true) : undefined} onPointerDown={snapEnabled ? startTitleSnapDrag : undefined} onPointerMove={snapEnabled ? moveTitleSnapDrag : undefined} onPointerUp={snapEnabled ? event => finishTitleSnapDrag(event) : undefined} style={snapEnabled ? { transform: `translateY(${titleSnapOffset}px)`, marginBottom: titleSnapOffset, transition: titleSnapDragging ? "none" : "transform 300ms cubic-bezier(0.22, 1, 0.36, 1), margin-bottom 300ms cubic-bezier(0.22, 1, 0.36, 1)", touchAction: "pan-y pinch-zoom" } : orderHistoryHeader ? { touchAction: "none" } : undefined}>
         <div className={`px-3 ${compactScreenHeader ? "py-0.5" : "py-1"}`}>
           {screenSettings
             ? <div className={`grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 ${compactScreenHeader ? "py-0.5" : "py-1"}`}>
