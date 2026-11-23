@@ -180,7 +180,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
   };
   const startPanelDrag = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if ((event.pointerType === "mouse" && event.button !== 0) ||
+    if (event.pointerType !== "mouse" || event.button !== 0 ||
       target.closest("button, a, input, select, textarea, [role=button], [role=dialog], [contenteditable=true]")) return;
     if (panelDragRef.current) return;
     if (wheelSettleTimerRef.current !== null) {
@@ -588,8 +588,8 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     <section aria-label="주문내역 패널" className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 mx-auto max-w-2xl" ref={panelSectionRef}
       onLostPointerCapture={event => finishPanelDrag(event.nativeEvent, true)} onPointerCancel={event => finishPanelDrag(event.nativeEvent, true)}
       onPointerDown={startPanelDrag} onPointerMove={movePanelDrag} onPointerUp={event => finishPanelDrag(event.nativeEvent)}
-      style={{ top: panelBaseTop === null ? titleData.photos.length ? "calc(37.5vw - 34px)" : "35dvh" : `${panelBaseTop}px`, transform: panelDragging ? undefined : `translateY(${panelOffset}px)`, transition: panelDragging ? "none" : "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)", touchAction: "none", overscrollBehaviorY: "contain" }}>
-      <div className="h-full w-full overflow-x-hidden overflow-y-auto" ref={panelScrollRef} style={{ WebkitOverflowScrolling: "touch", overscrollBehaviorY: "contain" }} data-qr-content-start>
+      style={{ top: panelBaseTop === null ? titleData.photos.length ? "calc(37.5vw - 34px)" : "35dvh" : `${panelBaseTop}px`, transform: panelDragging ? undefined : `translateY(${panelOffset}px)`, transition: panelDragging ? "none" : "transform 300ms cubic-bezier(0.22, 1, 0.36, 1)", touchAction: "pan-y pinch-zoom", overscrollBehaviorY: "contain" }}>
+      <div className="h-full w-full overflow-x-hidden overflow-y-auto" ref={panelScrollRef} style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y pinch-zoom", overscrollBehaviorY: "contain" }} data-qr-content-start>
         <div className="relative min-h-full">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-slate-50" style={{ top: `${panelBackgroundStart}px` }} />
           <div className="relative z-10">

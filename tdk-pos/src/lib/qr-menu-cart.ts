@@ -232,3 +232,7 @@ export function qrCartTotal(lines: QrCartLine[], menus: QrMenu[]): number {
     return menu ? sum + qrLineTotal(menu, line.options, line.qty) : sum;
   }, 0);
 }
+
+export function qrCartItemCount(lines: readonly Pick<QrCartLine, "qty">[]): number {
+  return lines.reduce((sum, line) => sum + line.qty, 0);
+}

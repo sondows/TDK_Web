@@ -10,8 +10,15 @@ export function shouldOpenQrOrdersForTable(table: { sessionId: number | null; ha
 }
 
 export function qrOrderNotificationMessage(event: QrOrderNotification) {
-  const time = /^\d{2}:\d{2}$/.test(event.orderedAt.slice(11, 16)) ? event.orderedAt.slice(11, 16) : "--:--";
-  return `${time} ${event.tableNo}T QR 주문이 접수되었습니다.`;
+  const tableNo = typeof event.tableNo === "string" && /^\d{1,3}$/.test(event.tableNo.trim())
+    ? `${event.tableNo.trim()}T `
+    : "";
+  return `${tableNo}주문이 접수되었습니다.`;
+}
+
+export function qrOrderNotificationTime(event: QrOrderNotification) {
+  const time = event.orderedAt.slice(11, 16);
+  return /^\d{2}:\d{2}$/.test(time) ? time : "--:--";
 }
 
 export function mergeQrOrderNotifications(existing: QrOrderNotification[], incoming: QrOrderNotification[], limit = 20) {

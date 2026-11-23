@@ -1,6 +1,6 @@
 "use client";
 
-import { qrOrderNotificationMessage, type QrOrderNotification } from "@/lib/qr-order-notification-model";
+import { qrOrderNotificationMessage, qrOrderNotificationTime, type QrOrderNotification } from "@/lib/qr-order-notification-model";
 
 export default function QrOrderNotificationAlerts({ events, onOpenTable }: {
   events: QrOrderNotification[]; onOpenTable: (tableId: number, qrOrderId: number) => void;
@@ -10,6 +10,7 @@ export default function QrOrderNotificationAlerts({ events, onOpenTable }: {
     {events.slice(-3).reverse().map(event => <button className="pointer-events-auto flex min-h-12 items-center justify-between gap-3 rounded-xl border border-blue-200 bg-white px-3 py-2 text-left shadow-lg" key={event.qrOrderId}
       onClick={() => onOpenTable(event.tableId, event.qrOrderId)} type="button">
       <span className="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">{qrOrderNotificationMessage(event)}</span>
+      <span className="shrink-0 text-[10px] text-slate-400">{qrOrderNotificationTime(event)}</span>
       <span className="shrink-0 rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white">확인</span>
     </button>)}
   </aside>;

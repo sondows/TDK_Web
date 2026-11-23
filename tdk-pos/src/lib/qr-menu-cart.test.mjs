@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartTotal, qrLineItemCount, qrLineTotal, qrLineUnitPrice,
+  addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartItemCount, qrCartTotal, qrLineItemCount, qrLineTotal, qrLineUnitPrice,
   qrLocaleFromPreferences, qrMenusForCategory, QR_CART_STORAGE_KEY, QR_LOCALE_STORAGE_KEY, validQrSelections, isQrSpiceGroupName, selectedQrOptions,
   qrMenuAddonGroups, qrOtherOptionalGroups, splitQrCartAddonLines, qrImmediateAddLine,
 } from "./qr-menu-cart.ts";
@@ -18,6 +18,14 @@ const rows = [
 ];
 const menu = { menuId: 7, categoryId: 3, name: "김치찌개", price: "10000", imageUrl: "/qr.webp", groups: groupQrModifiers(rows, 7) };
 const catalog = { categories: [{ categoryId: 3, name: "찌개" }, { categoryId: 4, name: "단품" }], menus: [menu] };
+
+test("cart badge quantity sums line quantities, including option-specific duplicate menu lines", () => {
+  assert.equal(qrCartItemCount([]), 0);
+  assert.equal(qrCartItemCount([{ qty: 1 }]), 1);
+  assert.equal(qrCartItemCount([{ menuId: 7, qty: 2, options: [] },
+    { menuId: 7, qty: 1, options: [{ modifierOptionId: 21, qty: 1 }] }]), 3);
+  assert.equal(qrCartItemCount([{ qty: 3 }, { qty: 2 }, { qty: 1 }]), 6);
+});
 
 test("QR cart price formatting uses a trailing won unit without a currency symbol", () => {
   assert.equal(formatQrCartPrice(16000), "16,000원");

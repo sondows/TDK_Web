@@ -8,7 +8,7 @@ import QRCode from "qrcode";
 import { getMenuChoice } from "@/lib/menu-choice-selection";
 import { qrOriginHasDisplayText, qrOriginTextRuns } from "@/lib/qr-menu-description-model";
 import { hasQrOrderHistory } from "@/lib/qr-order-history-model";
-import { addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartTotal, qrImmediateAddLine, qrMenuAddonGroups, qrOtherOptionalGroups,
+import { addQrCartLine, defaultQrSelections, formatQrCartPrice, groupQrModifiers, normalizeQrCart, qrCartItemCount, qrCartTotal, qrImmediateAddLine, qrMenuAddonGroups, qrOtherOptionalGroups,
   QR_CART_STORAGE_KEY, qrLineItemCount, qrLineTotal, qrLocaleFromPreferences,
   selectedQrOptions, splitQrCartAddonLines, validQrSelections, isQrSpiceGroupName, type QrCartLine, type QrCatalog, type QrLocale, type QrMenu } from "@/lib/qr-menu-cart";
 import { acknowledgeQrCartEvents, appendQrCartEvents, normalizeQrCartEventOutbox, QR_CART_EVENT_BATCH_SIZE, QR_CART_EVENT_OUTBOX_KEY,
@@ -540,7 +540,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     const menus = catalog?.menus.filter(menu => menu.categoryId === category.categoryId) ?? [];
     return menus.length ? [{ category, menus }] : [];
   }), [catalog]);
-  const itemCount = cart.reduce((sum, line) => sum + line.qty, 0);
+  const itemCount = qrCartItemCount(cart);
   const cartHasItems = itemCount > 0;
   const cartHeaderVisible = cartSheetOpen || cartHasItems;
   const cartPeekHeight = cartHasItems ? 57.6 : 17.28;
@@ -1268,9 +1268,9 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
       <div className="relative shrink-0">
         <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex w-full flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
           <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />
-          {cartHeaderVisible && <span className={`flex w-full max-w-xl items-center gap-3 ${tableOrderMode ? "pr-11" : "justify-between"}`}>
-            <span className="flex min-w-0 items-center gap-2 font-extrabold"><svg aria-hidden="true" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 1.9-1.4L22 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg><span>{t.cart}</span>{!tableOrderMode && <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{itemCount}{t.count}</span>}</span>
-            {!tableOrderMode && <span className="flex shrink-0 items-center gap-2 font-bold tabular-nums">{formatQrCartPrice(total)}<svg aria-hidden="true" className={`h-5 w-5 transition-transform duration-300 motion-reduce:transition-none ${cartSheetOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg></span>}
+          {cartHeaderVisible && <span className={`flex w-full max-w-xl items-center gap-2 ${tableOrderMode ? "pr-12" : "justify-between"}`}>
+            <span className="flex min-w-0 items-center gap-2 font-extrabold">{cartHasItems && <span aria-label={`${itemCount}개`} className="inline-flex min-w-7 shrink-0 items-center justify-center rounded-lg bg-blue-100 px-2 py-1 text-xs font-extrabold leading-none tabular-nums text-blue-800">{itemCount}</span>}<span className="truncate">{t.cart}</span></span>
+            {cartHasItems && <span className={`min-w-0 truncate text-right text-sm font-bold tabular-nums ${tableOrderMode ? "ml-auto" : "shrink-0"}`}>{formatQrCartPrice(total)}</span>}
           </span>}
         </button>
         {tableOrderMode && cartHasItems && <div className="pointer-events-none absolute inset-x-4 top-[6.8px] z-20 mx-auto flex max-w-xl justify-end">
@@ -1296,13 +1296,13 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
                   <button aria-label={menu.name + " " + t.qty + " -"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, -1)} type="button">-</button>
                   <span className="min-w-5 text-center tabular-nums">{line.qty}</span>
                   <button aria-label={menu.name + " " + t.qty + " +"} className="h-9 w-9 rounded-full bg-slate-100 font-bold" onClick={() => changeCartQty(line, 1)} type="button">+</button>
-                  <button aria-label={menu.name + " " + t.remove} className="ml-1 px-2 py-2 text-xs font-semibold text-red-600" onClick={() => removeCartLine(line)} type="button">{t.remove}</button>
+                  <button aria-label={menu.name + " " + t.remove} className="ml-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#8B95A3] transition-colors hover:text-[#687280] active:text-[#687280] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#687280]" onClick={() => removeCartLine(line)} type="button"><svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 4v7m4-7v7" /></svg></button>
                 </div>
               </div>
             </div>;
           })}</div>}
         </div>
-        <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl"><div className="flex items-center justify-between text-lg font-extrabold"><span>{t.total}</span><span className="tabular-nums">{formatQrCartPrice(total)}</span></div>
+        <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl">
           {waitingMode && <>{waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}<button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50" disabled={!cart.length || waitBusy || Boolean(waitOrder && ["PENDING", "ASSIGNED"].includes(waitOrder.status) && !editingWaitOrder)} onClick={() => void submitWaitOrder()} type="button">{waitBusy ? "\uCC98\uB9AC \uC911..." : editingWaitOrder ? "\uB300\uAE30 \uC8FC\uBB38 \uC218\uC815 \uC800\uC7A5" : "\uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</button></>}
           {tableOrderMode && <>{waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}<button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50" disabled={!cart.length || tableOrderBusy} onClick={() => void submitTableOrder()} type="button">{tableOrderBusy ? "처리 중..." : "주문 전송"}</button></>}
           {!waitingMode && !tableOrderMode && <a className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-amber-50 text-sm font-bold text-amber-900" href="/qr/wait">{"\uB300\uAE30 QR\uC5D0\uC11C \uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</a>}
