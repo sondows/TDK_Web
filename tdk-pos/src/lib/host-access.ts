@@ -85,6 +85,7 @@ export function isExternalPosPath(pathname: string): boolean {
   return pathname === "/login" || isPathOrChild(pathname, "/pos") || isPathOrChild(pathname, "/tdkpos")
     || isPathOrChild(pathname, "/api/auth") || pathname === "/api/staff/active"
     || pathname === "/api/table-cancellations" || pathname === "/api/tables" || pathname === "/api/kds/table-order"
+    || pathname === "/api/qr/staff-order-history" || pathname === "/api/qr/staff-order-notifications"
     || isPathOrChild(pathname, "/api/pos") || isPathOrChild(pathname, "/api/table-sessions")
     || isPathOrChild(pathname, "/api/table-session-merges") || isPathOrChild(pathname, "/api/table-layout")
     || (isPathOrChild(pathname, "/api/pos-settings") && !["/api/pos-settings/business-day", "/api/pos-settings/takeout-preparation"].includes(pathname))
