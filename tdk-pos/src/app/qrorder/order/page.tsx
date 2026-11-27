@@ -4,6 +4,8 @@ import { getQrScreenTitleData } from "@/lib/qr-title-settings";
 import { listPublicQrNotices } from "@/lib/qr-notices";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
 import QrDevTestBadge from "../QrDevTestBadge";
+import { cookies } from "next/headers";
+import { getQrAccessTokenFromCookies, isQrOrderAuthRuntimeEnabled, QR_DEV_TEST_COOKIE, resolveQrDevTestSession, resolveQrOrderSession } from "@/lib/qr-order-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,5 +15,8 @@ export default async function QrOrderMenuPage() {
   try { initialTitleData = await getQrScreenTitleData("order"); } catch { initialTitleData.storeName = "탑동김치찌개"; /* Keep a readable fallback if public title settings are unavailable. */ }
   try { notices = await listPublicQrNotices(); } catch { /* Preserve menu ordering if public notices are unavailable. */ }
   if (!initialTitleData.storeName.trim()) initialTitleData.storeName = "탑동김치찌개";
-  return <><QrDevTestBadge /><QrMenuClient tableOrderMode initialTitleData={initialTitleData} notices={notices} /></>;
+  const customer = await resolveQrDevTestSession((await cookies()).get(QR_DEV_TEST_COOKIE)?.value)
+    ?? await resolveQrOrderSession(await getQrAccessTokenFromCookies());
+  const qrAuthFlowEnabled = await isQrOrderAuthRuntimeEnabled();
+  return <><QrDevTestBadge /><QrMenuClient key={customer?.tableId ?? "no-table"} tableOrderMode qrAuthFlowEnabled={qrAuthFlowEnabled} cartTableId={customer?.tableId ?? null} initialTitleData={initialTitleData} notices={notices} /></>;
 }

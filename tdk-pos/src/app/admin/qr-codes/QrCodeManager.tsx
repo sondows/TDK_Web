@@ -13,6 +13,8 @@ type QrCode = {
   status: QrStatus;
   tableId: number | null;
   tableNo: string | null;
+  preparationTableId?: number | null;
+  preparationTableNo?: string | null;
   createdAt: string;
   updatedAt: string;
   history: Array<{ actionType: string; description: string | null; createdAt: string }>;
@@ -68,6 +70,7 @@ export default function QrCodeManager() {
   const [filter, setFilter] = useState<Filter>("AVAILABLE");
   const [background, setBackground] = useState<"transparent" | "white">("transparent");
   const [selected, setSelected] = useState<number[]>([]);
+  const [selectedTableIds, setSelectedTableIds] = useState<number[]>([]);
   const [choiceByQr, setChoiceByQr] = useState<Record<number, TargetChoice>>({});
   const [devTestEnabled, setDevTestEnabled] = useState(false);
   const [testSessionFor, setTestSessionFor] = useState<number | null>(null);
@@ -125,6 +128,34 @@ export default function QrCodeManager() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const prepareTableQrs = async (allTables: boolean) => {
+    const tableIds = [...selectedTableIds];
+    if (!allTables && !tableIds.length) { setError("준비할 테이블을 선택해 주세요."); return; }
+    if (!window.confirm(allTables ? "아직 준비 QR이 없는 모든 활성 테이블에 교체용 QR을 준비할까요? 기존 QR은 계속 사용할 수 있습니다." : `선택한 ${tableIds.length}개 테이블에 교체용 QR을 준비할까요? 기존 QR은 계속 사용할 수 있습니다.`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/admin/qr-codes", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "PREPARE_TABLES", allTables, tableIds: allTables ? undefined : tableIds }) });
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; prepared?: number; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "준비 QR 생성에 실패했습니다.");
+      setSelectedTableIds([]); await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "준비 QR 생성에 실패했습니다."); }
+    finally { setBusy(false); }
+  };
+
+  const activatePreparation = async (code: QrCode) => {
+    if (!window.confirm(`테이블 ${code.preparationTableNo}T에 준비한 QR(${code.managementNumber})을 활성화할까요? 기존 QR은 즉시 폐기되고, 이미 연결된 이용 고객은 유지됩니다. 미처리 주문이 있으면 활성화되지 않습니다.`)) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/admin/qr-codes", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qrCodeId: code.qrCodeId, action: "ACTIVATE_PREPARATION" }) });
+      const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message ?? "QR 활성화에 실패했습니다.");
+      await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "QR 활성화에 실패했습니다."); }
+    finally { setBusy(false); }
   };
 
   const updateTarget = async (code: QrCode) => {
@@ -262,13 +293,15 @@ export default function QrCodeManager() {
   };
 
   return <div className="w-full text-slate-900">
-    <style>{`@media print{@page{size:A4 portrait;margin:10mm}html,body{width:190mm!important;height:auto!important;margin:0!important;background:#fff!important}[data-admin-workspace-shell]{display:block!important;min-height:0!important;background:#fff!important}[data-admin-shell-header],[data-admin-workspace]>aside{display:none!important}[data-admin-workspace]{display:block!important;width:190mm!important;min-height:0!important}[data-admin-main]{display:block!important;box-sizing:border-box!important;width:190mm!important;min-width:0!important;max-width:none!important;margin:0!important;padding:0!important}body *{visibility:hidden!important;box-shadow:none!important}.qr-print-area,.qr-print-area *{visibility:visible!important}.qr-print-area{display:block!important;position:static!important;width:190mm!important;margin:0!important;padding:0!important;background:#fff!important}.qr-print-grid{display:grid!important;grid-template-columns:repeat(4,45mm)!important;grid-auto-rows:50mm!important;gap:3mm!important;width:189mm!important;margin:0!important}.qr-print-card{display:flex!important;box-sizing:border-box!important;width:45mm!important;height:50mm!important;min-width:45mm!important;max-width:45mm!important;min-height:50mm!important;max-height:50mm!important;overflow:hidden!important;break-inside:avoid!important;page-break-inside:avoid!important;border:0.3mm dashed #aaa!important;border-radius:0!important;padding:2mm!important;background:#fff!important;box-shadow:none!important}.qr-print-content{display:flex!important;width:100%!important;height:100%!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:2mm!important}.qr-print-details{display:contents!important}.qr-print-details>div{display:contents!important}.qr-print-image{display:block!important;width:35mm!important;height:35mm!important;max-width:35mm!important;max-height:35mm!important;flex:none!important;object-fit:contain!important}.qr-print-identifier{display:block!important;box-sizing:border-box!important;width:35mm!important;max-width:35mm!important;flex:none!important;overflow:hidden!important;text-align:center!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;font-family:ui-monospace,Consolas,monospace!important;font-size:7pt!important;line-height:1!important;letter-spacing:0!important}.qr-no-print,.qr-print-status,.qr-print-target,.qr-retired-card{display:none!important}.qr-print-area *{color:#000!important;background-color:transparent!important;box-shadow:none!important}}`}</style>
+    <style>{`@media print{@page{size:A4 portrait;margin:10mm}html,body{width:190mm!important;height:auto!important;margin:0!important;background:#fff!important}[data-admin-workspace-shell]{display:block!important;min-height:0!important;background:#fff!important}[data-admin-shell-header],[data-admin-workspace]>aside{display:none!important}[data-admin-workspace]{display:block!important;width:190mm!important;min-height:0!important}[data-admin-main]{display:block!important;box-sizing:border-box!important;width:190mm!important;min-width:0!important;max-width:none!important;margin:0!important;padding:0!important}body *{visibility:hidden!important;box-shadow:none!important}.qr-print-area,.qr-print-area *{visibility:visible!important}.qr-print-area{display:block!important;position:static!important;width:190mm!important;margin:0!important;padding:0!important;background:#fff!important}.qr-print-grid{display:grid!important;grid-template-columns:repeat(4,45mm)!important;grid-auto-rows:50mm!important;gap:3mm!important;width:189mm!important;margin:0!important}.qr-print-card{display:flex!important;box-sizing:border-box!important;width:45mm!important;height:50mm!important;min-width:45mm!important;max-width:45mm!important;min-height:50mm!important;max-height:50mm!important;overflow:hidden!important;break-inside:avoid!important;page-break-inside:avoid!important;border:0.3mm dashed #aaa!important;border-radius:0!important;padding:2mm!important;background:#fff!important;box-shadow:none!important}.qr-print-content{display:flex!important;width:100%!important;height:100%!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:2mm!important}.qr-print-details{display:contents!important}.qr-print-details>div{display:contents!important}.qr-print-image{display:block!important;width:35mm!important;height:35mm!important;max-width:35mm!important;max-height:35mm!important;flex:none!important;object-fit:contain!important}.qr-print-table{display:block!important;font-size:12pt!important;font-weight:800!important;line-height:1!important;text-align:center!important}.qr-print-identifier{display:block!important;box-sizing:border-box!important;width:35mm!important;max-width:35mm!important;flex:none!important;overflow:hidden!important;text-align:center!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;font-family:ui-monospace,Consolas,monospace!important;font-size:6pt!important;line-height:1!important;letter-spacing:0!important}.qr-no-print,.qr-print-status,.qr-retired-card{display:none!important}.qr-print-area *{color:#000!important;background-color:transparent!important;box-shadow:none!important}}`}</style>
     <header className="qr-no-print flex flex-wrap items-center justify-between gap-3">
       <div><h1 className="text-2xl font-black">QR 발행·관리</h1><p className="mt-1 text-sm text-slate-500">스티커 식별값과 고객 접근 권한은 별도로 발급됩니다.</p></div>
       <div className="flex flex-wrap items-center gap-2">
         <label className="text-sm">관리번호 검색 <input className="w-36 rounded border px-2 py-2 font-mono" onChange={event => setSearch(event.target.value)} placeholder="YYYYMMDD-0001" type="search" value={search} /></label>
         <label className="text-sm">수량 <input className="w-20 rounded border px-2 py-2" max={500} min={1} onChange={event => setCount(Number(event.target.value))} type="number" value={count} /></label>
         <button className="rounded-lg bg-blue-700 px-4 py-2 font-bold text-white" disabled={busy} onClick={() => void issue()} type="button">QR 일괄 발행</button>
+        <button className="rounded-lg bg-emerald-700 px-4 py-2 font-bold text-white" disabled={busy} onClick={() => void prepareTableQrs(true)} type="button">전체 테이블 교체 QR 준비</button>
+        <button className="rounded-lg border px-4 py-2 font-bold" disabled={busy || !selectedTableIds.length} onClick={() => void prepareTableQrs(false)} type="button">선택 테이블 준비 ({selectedTableIds.length})</button>
         <button className="rounded-lg border px-4 py-2 font-bold" onClick={() => window.print()} type="button">A4 인쇄</button>
         <button className="rounded-lg border px-4 py-2 font-bold" disabled={exporting || !selectedForExport.length} onClick={() => void saveSelectedPngs()} type="button">{exporting ? "PNG 생성 중…" : `PNG 일괄 저장 (${selectedForExport.length})`}</button>
         <button className="rounded-lg border px-4 py-2 font-bold" onClick={() => void refresh()} type="button">새로고침</button>
@@ -283,6 +316,12 @@ export default function QrCodeManager() {
         <label>PNG 배경 <select className="ml-2 rounded border bg-white px-2 py-2" onChange={event => setBackground(event.target.value as "transparent" | "white")} value={background}><option value="transparent">투명 배경</option><option value="white">흰색 배경</option></select></label>
         <span className="text-slate-500">투명 PNG는 밝은 바탕에서 사용하세요. ZIP은 한 번에 최대 500개까지 저장할 수 있습니다.</span>
       </div>
+    </div>
+    <div className="qr-no-print mt-3 flex flex-wrap gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm">
+      <strong className="w-full">선택 테이블</strong>
+      {tables.map(table => <label className="flex items-center gap-1 rounded bg-white px-2 py-1" key={table.tableId}>
+        <input checked={selectedTableIds.includes(table.tableId)} onChange={() => setSelectedTableIds(current => current.includes(table.tableId) ? current.filter(id => id !== table.tableId) : [...current, table.tableId])} type="checkbox" />{table.tableNo}T
+      </label>)}
     </div>
     {legacyLockedCount > 0 && <p className="qr-no-print mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">기존 잠금 상태 QR {legacyLockedCount}개는 변경 없이 보존했습니다. 전체 필터에서 확인할 수 있습니다.</p>}
     {error && <p className="qr-no-print mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
@@ -307,7 +346,8 @@ export default function QrCodeManager() {
                   <span className={`qr-print-status shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${locked ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>{statusLabel[code.status]}</span>
                 </div>
                 {code.attentionRequired && <p className="qr-no-print mt-1 text-xs font-bold text-red-700">접속 이력: {(code.attentionLabels ?? []).map(label => accessAlertLabel[label] ?? "QR 접속 기록 확인 필요").join(", ") || "QR 접속 기록 확인 필요"}</p>}
-                {!retired && <p className="qr-print-target mt-2 text-sm font-medium text-slate-600">현재 연결: {targetDescription(currentChoice(code), tables)}</p>}
+                {!retired && <p className="qr-print-target mt-2 text-sm font-medium text-slate-600">{code.preparationTableId ? `준비 QR · 테이블 ${code.preparationTableNo}T` : `현재 연결: ${targetDescription(currentChoice(code), tables)}`}</p>}
+                {(code.preparationTableId || code.tableNo) && <strong className="qr-print-table mt-1 hidden">{code.preparationTableNo ?? code.tableNo}T</strong>}
                 {!retired && <div className="qr-no-print mt-3 flex w-full max-w-full flex-col items-start">
                   <div className="flex w-full items-center gap-2">
                   <select aria-label={`QR ${code.managementNumber} 연결 대상`} className="min-h-10 w-0 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" disabled={busy || locked || retired} onChange={event => setChoiceByQr(current => ({ ...current, [code.qrCodeId]: event.target.value as TargetChoice }))} value={choice}>
@@ -320,6 +360,7 @@ export default function QrCodeManager() {
                   </div>
                 <div className="mt-3 flex w-max max-w-full flex-wrap items-center gap-2">
                   <button className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold whitespace-nowrap hover:bg-slate-50" disabled={exporting} onClick={() => void savePng(code)} type="button">PNG 저장</button>
+                  {code.preparationTableId && <button className="min-h-10 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold whitespace-nowrap text-white" disabled={busy} onClick={() => void activatePreparation(code)} type="button">{code.preparationTableNo}T QR 활성화</button>}
                   <button className="min-h-10 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold whitespace-nowrap text-red-700 hover:bg-red-50 disabled:opacity-50" disabled={busy} onClick={() => void retire(code)} type="button">폐기</button>
                   {devTestEnabled && <button className="min-h-10 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold whitespace-nowrap text-blue-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={testSessionFor !== null || code.status !== "IN_USE" || code.targetType !== "TABLE_ORDER" || !code.tableId} onClick={() => void openCustomerTest(code)} type="button">{testSessionFor === code.qrCodeId ? "테스트창 여는 중…" : "테스트창 열기"}</button>}
                 </div>

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "node server.cjs",
     "lint": "eslint",
-    "test:api-access": "node --experimental-strip-types --test src/lib/api-route-manifest.test.mjs src/lib/host-access.test.mjs src/lib/api-response.test.mjs src/lib/qr-processing-policy.test.mjs"
+    "test:api-access": "node --experimental-strip-types --test src/lib/api-route-manifest.test.mjs src/lib/host-access.test.mjs src/lib/api-response.test.mjs src/lib/qr-processing-policy.test.mjs src/lib/tdktv-qr-auth-code-policy.test.mjs",
+    "test:tv-auth-code-db": "node --experimental-strip-types --conditions=react-server --experimental-loader ./tests/tdktv-auth-code-ts-loader.mjs ./tests/tdktv-auth-code-db.integration.mjs",
+    "test:qr-preparation-db": "node tests/qr-code-preparation-db.integration.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

@@ -30,7 +30,7 @@ COPY --from=build /app/scripts/verify-runtime-files.cjs /tmp/verify-runtime-file
 RUN node /tmp/verify-runtime-files.cjs /app \
     && rm /tmp/verify-runtime-files.cjs
 
-RUN mkdir -p /app/public/uploads/menu /app/storage/receipt-logo \
+RUN mkdir -p /app/public/uploads/menu /app/storage/receipt-logo /app/storage/tdktv-images \
     && chown -R node:node /app/public/uploads /app/storage /app/.next
 
 USER node

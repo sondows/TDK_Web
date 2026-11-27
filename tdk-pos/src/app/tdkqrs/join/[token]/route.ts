@@ -42,7 +42,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       const effectiveRemainingSeconds = Math.min(Number(invite.remainingSeconds), Number(rootExpiry.remainingSeconds));
       const cookieMaxAgeSeconds = qrSessionCookieMaxAgeSeconds(effectiveRemainingSeconds, QR_ORDER_ACCESS_MAX_AGE_SECONDS);
       if (cookieMaxAgeSeconds <= 0) return { kind: "INVALID" as const };
-      if (current?.sessionId === Number(session.sessionId)) return { kind: "EXISTING" as const };
+      if (current?.sessionId === Number(session.sessionId)) return { kind: current.canViewOrders ? "EXISTING" as const : "INVALID" as const };
       const [active] = await tx.select({ count: sql<number>`COUNT(*)` }).from(qrSessions)
         .where(and(eq(qrSessions.sessionId, invite.sessionId), eq(qrSessions.status, "ACTIVE")));
       const cap = Math.max(1, Number(session.capacity) || 8);
@@ -50,7 +50,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       if (current?.isTest) {
         if (current.sessionId !== null && current.sessionId !== Number(session.sessionId)) return { kind: "INVALID" as const };
         if (current.sessionId === null && current.tableId === Number(session.tableId)) {
-          const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now })
+          const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now,
+            accessGrantSource: "INVITED", accessGrantInviteId: Number(invite.inviteId), accessGrantQrOrderId: null, accessGrantedAt: now })
             .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
           if (updated[0].affectedRows !== 1) return { kind: "INVALID" as const };
           if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
@@ -60,11 +61,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       }
       const accessToken = createQrAccessToken();
       if (current?.sessionId === null && current.tableId === Number(session.tableId)) {
-        const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now })
+        const updated = await tx.update(qrSessions).set({ sessionId: invite.sessionId, tableId: session.tableId, lastActiveAt: now,
+          accessGrantSource: "INVITED", accessGrantInviteId: Number(invite.inviteId), accessGrantQrOrderId: null, accessGrantedAt: now })
           .where(and(eq(qrSessions.qrSessionId, current.qrSessionId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)));
         if (updated[0].affectedRows !== 1) return { kind: "INVALID" as const };
       } else {
-        await tx.insert(qrSessions).values({ sessionId: invite.sessionId, tableId: session.tableId, tokenHash: hashQrToken(accessToken), languageCode: "ko", status: "ACTIVE", lastActiveAt: now });
+        await tx.insert(qrSessions).values({ sessionId: invite.sessionId, tableId: session.tableId, tokenHash: hashQrToken(accessToken), languageCode: "ko", status: "ACTIVE", lastActiveAt: now,
+          accessGrantSource: "INVITED", accessGrantInviteId: Number(invite.inviteId), accessGrantQrOrderId: null, accessGrantedAt: now });
       }
       if (!invite.redeemedAt) await tx.update(qrSessionInvites).set({ redeemedAt: now }).where(and(eq(qrSessionInvites.inviteId, invite.inviteId), isNull(qrSessionInvites.redeemedAt)));
       const responseToken = current?.sessionId === null && current.tableId === Number(session.tableId) ? undefined : accessToken;

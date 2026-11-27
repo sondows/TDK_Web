@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getQrCookingProgress, isQrCookingProgressMenu } from "./qr-cooking-progress.ts";
 
-test("only visible POT menus in existing stew categories receive the QR cooking progress", () => {
+test("all visible KDS menus have progress; the menu timer policy determines whether boiling applies", () => {
   assert.equal(isQrCookingProgressMenu({ categoryName: "김치찌개", kdsKind: "POT", kdsVisible: true }), true);
   assert.equal(isQrCookingProgressMenu({ categoryName: "찌개", kdsKind: "POT", kdsVisible: true }), true);
-  assert.equal(isQrCookingProgressMenu({ categoryName: "사이드", kdsKind: "POT", kdsVisible: true }), false);
-  assert.equal(isQrCookingProgressMenu({ categoryName: "김치찌개", kdsKind: "ADDON", kdsVisible: true }), false);
+  assert.equal(isQrCookingProgressMenu({ categoryName: "사이드", kdsKind: "SOLO", kdsVisible: true }), true);
+  assert.equal(isQrCookingProgressMenu({ categoryName: "김치찌개", kdsKind: "ADDON", kdsVisible: true }), true);
   assert.equal(isQrCookingProgressMenu({ categoryName: "김치찌개", kdsKind: "POT", kdsVisible: false }), false);
-  assert.equal(isQrCookingProgressMenu({ categoryName: null, kdsKind: "POT", kdsVisible: true }), false);
+  assert.equal(isQrCookingProgressMenu({ categoryName: null, kdsKind: "POT", kdsVisible: true }), true);
+  assert.equal(isQrCookingProgressMenu({ categoryName: null, kdsKind: "NONE", kdsVisible: true }), false);
 });
 
 const base = {
@@ -25,19 +26,21 @@ test("table boil label percentage stays synchronized with its ten timer segments
   const start = base.postCookTimerStartedAtMs;
   const progress = getQrCookingProgress(base, start);
   assert.equal(progress?.currentStep, 4);
-  assert.equal(progress?.tableBoilLabel, "테이블끓이기(0%)");
+  assert.equal(progress?.tableBoilLabel, "매장끓이기(0%)");
   assert.equal(progress?.timerSegments, 10);
   assert.equal(progress?.timerElapsedSegments, 0);
-  assert.equal(getQrCookingProgress(base, start + 17_999)?.tableBoilLabel, "테이블끓이기(0%)");
+  assert.equal(progress?.remainingSeconds, 180);
+  assert.equal(getQrCookingProgress(base, start + 17_999)?.tableBoilLabel, "매장끓이기(0%)");
   const tenPercent = getQrCookingProgress(base, start + 18_000);
   assert.equal(tenPercent?.timerElapsedSegments, 1);
-  assert.equal(tenPercent?.tableBoilLabel, "테이블끓이기(10%)");
+  assert.equal(tenPercent?.tableBoilLabel, "매장끓이기(10%)");
   const fiftyPercent = getQrCookingProgress(base, start + 90_000);
   assert.equal(fiftyPercent?.timerElapsedSegments, 5);
-  assert.equal(fiftyPercent?.tableBoilLabel, "테이블끓이기(50%)");
+  assert.equal(fiftyPercent?.tableBoilLabel, "매장끓이기(50%)");
+  assert.equal(fiftyPercent?.remainingSeconds, 90);
   const timerEnded = getQrCookingProgress(base, start + 180_000);
   assert.equal(timerEnded?.timerElapsedSegments, 10);
-  assert.equal(timerEnded?.tableBoilLabel, "테이블끓이기(100%)");
+  assert.equal(timerEnded?.tableBoilLabel, "매장끓이기(100%)");
   assert.equal(timerEnded?.currentStep, 4, "boiling duration alone does not mark the final step complete");
 });
 
@@ -53,13 +56,14 @@ test("3-minute boil keeps ten red segments through the 30-second transfer window
   const transferWindowEnd = getQrCookingProgress(base, start + 209_999);
   assert.equal(transferWindowEnd?.currentStep, 4);
   assert.equal(transferWindowEnd?.timerElapsedSegments, 10);
-  assert.equal(transferWindowEnd?.tableBoilLabel, "테이블끓이기(100%)");
+  assert.equal(transferWindowEnd?.tableBoilLabel, "매장끓이기(100%)");
 
   const completed = getQrCookingProgress(base, start + 210_000);
   assert.equal(completed?.currentStep, 5);
-  assert.equal(completed?.tableBoilLabel, "테이블끓이기");
+  assert.equal(completed?.tableBoilLabel, "매장끓이기");
   assert.equal(completed?.timerSegments, 0);
   assert.equal(completed?.timerElapsedSegments, 0);
+  assert.equal(completed?.remainingSeconds, null);
 });
 
 test("5-minute, 7-minute, 9-minute, and 11-minute boils complete only after the additional 30 seconds", () => {
@@ -107,17 +111,20 @@ test("unaccepted orders, non KDS items, and items without a timer start do not s
   assert.equal(getQrCookingProgress({ ...base, orderStatus: "PENDING" }, 2_000_000), null);
   assert.equal(getQrCookingProgress({ ...base, stage: null }, 2_000_000), null);
   const noStart = getQrCookingProgress({ ...base, postCookTimerStartedAtMs: null }, 2_000_000);
-  assert.equal(noStart.tableBoilLabel, "테이블끓이기");
-  assert.equal(noStart.currentStep, 5);
+  assert.equal(noStart.tableBoilLabel, "매장끓이기");
+  assert.equal(noStart.currentStep, 3);
   assert.equal(noStart.timerSegments, 0);
   assert.equal(noStart.timerElapsedSegments, 0);
+  assert.equal(noStart.remainingSeconds, null);
+  assert.equal(getQrCookingProgress({ ...base, postCookTimerEligible: false }, 2_000_000)?.currentStep, 5);
+  assert.equal(getQrCookingProgress({ ...base, postCookTimerEligible: false }, 2_000_000)?.showBoilStep, false);
 });
 
 test("five-minute timer percentage remains at 100% through transfer then disappears at completion", () => {
   const input = { ...base, postCookTimerMinutes: 5 };
   const start = input.postCookTimerStartedAtMs;
-  assert.equal(getQrCookingProgress(input, start + 299_999)?.tableBoilLabel, "테이블끓이기(90%)");
-  assert.equal(getQrCookingProgress(input, start + 300_000)?.tableBoilLabel, "테이블끓이기(100%)");
-  assert.equal(getQrCookingProgress(input, start + 329_999)?.tableBoilLabel, "테이블끓이기(100%)");
-  assert.equal(getQrCookingProgress(input, start + 330_000)?.tableBoilLabel, "테이블끓이기");
+  assert.equal(getQrCookingProgress(input, start + 299_999)?.tableBoilLabel, "매장끓이기(90%)");
+  assert.equal(getQrCookingProgress(input, start + 300_000)?.tableBoilLabel, "매장끓이기(100%)");
+  assert.equal(getQrCookingProgress(input, start + 329_999)?.tableBoilLabel, "매장끓이기(100%)");
+  assert.equal(getQrCookingProgress(input, start + 330_000)?.tableBoilLabel, "매장끓이기");
 });

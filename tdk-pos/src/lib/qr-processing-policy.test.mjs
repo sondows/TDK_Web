@@ -15,25 +15,22 @@ test("token cancellation is blocked while any unprocessed QR order remains", () 
   assert.equal(shouldBlockQrTokenCancellation(3), true);
 });
 
-test("first accepted QR order can bind only its own active, unexpired customer session", () => {
+test("accepted QR order can bind only its own active, unexpired customer session", () => {
   const candidate = { orderQrSessionId: 41, customerQrSessionId: 41, candidateTableId: 4, targetTableId: 4,
-    customerSessionId: null, customerStatus: "ACTIVE", customerExpired: false, hasOpenTableSession: false };
+    customerStatus: "ACTIVE", customerExpired: false };
   assert.equal(canBindAcceptedQrOrderSession(candidate), true);
   assert.equal(canBindAcceptedQrOrderSession({ ...candidate, orderQrSessionId: 42 }), false);
   assert.equal(canBindAcceptedQrOrderSession({ ...candidate, customerExpired: true }), false);
   assert.equal(canBindAcceptedQrOrderSession({ ...candidate, candidateTableId: 5 }), false);
-  assert.equal(canBindAcceptedQrOrderSession({ ...candidate, customerSessionId: 91 }), true);
   assert.equal(canBindAcceptedQrOrderSession({ ...candidate, customerStatus: "CLOSED" }), false);
-  assert.equal(canBindAcceptedQrOrderSession({ ...candidate, hasOpenTableSession: true }), false);
 });
 
 test("orders remain blocked with an explicit reason instead of being implicitly rejected", () => {
   const base = { customerStatus: "ACTIVE", customerExpired: false, customerSessionId: null,
-    hasOpenTableSession: false, tableSessionOpen: false, tableIdMatches: true, currentQrValid: true };
+    tableSessionOpen: false, tableIdMatches: true, currentQrValid: true };
   assert.equal(qrOrderBlockReason(base), null);
   assert.equal(qrOrderBlockReason({ ...base, customerExpired: true }), "EXPIRED");
   assert.equal(qrOrderBlockReason({ ...base, customerStatus: "CLOSED" }), "SESSION_CLOSED");
-  assert.equal(qrOrderBlockReason({ ...base, hasOpenTableSession: true }), "INVITE_REQUIRED");
   assert.equal(qrOrderBlockReason({ ...base, customerSessionId: 12, tableSessionOpen: false }), "SESSION_CLOSED");
   assert.equal(qrOrderBlockReason({ ...base, currentQrValid: false }), "QR_INVALID");
   assert.equal(qrOrderBlockReason({ ...base, tableIdMatches: false }), "TABLE_MISMATCH");

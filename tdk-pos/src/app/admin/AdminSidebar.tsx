@@ -46,7 +46,7 @@ export default function AdminSidebar({ menuOnly = false, mobileDrawer = false, c
               aria-controls={childrenId}
               onClick={() => toggleGroup(item.id)}
             >
-              <span>{item.label}</span>
+              <span className="flex items-center gap-2">{item.id === "tdktv" && <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>}{item.label}</span>
               <svg className={`${styles.navChevron}${expanded ? ` ${styles.navChevronExpanded}` : ""}`} aria-hidden="true" viewBox="0 0 16 16"><path d="m6 3 5 5-5 5" /></svg>
             </button>
             <div id={childrenId} className={`${styles.navChildren}${expanded ? ` ${styles.navChildrenOpen}` : ""}`} aria-hidden={!expanded} inert={!expanded}>

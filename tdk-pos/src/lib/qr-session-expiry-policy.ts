@@ -24,6 +24,7 @@ export function qrTableSessionExpiresAtSql(sessionId: SQLWrapper | number) {
       FROM qr_session_invites owner_invite
       INNER JOIN qr_sessions invite_owner ON invite_owner.qr_session_id = owner_invite.created_by_qr_session_id
       WHERE owner_invite.session_id = ${sessionId}
+        AND owner_invite.revoked_at IS NULL
       ORDER BY owner_invite.invite_id ASC
       LIMIT 1
     ),
@@ -31,6 +32,7 @@ export function qrTableSessionExpiresAtSql(sessionId: SQLWrapper | number) {
       SELECT DATE_ADD(MIN(first_member.created_at), INTERVAL ${QR_ORDER_ACCESS_MAX_AGE_SECONDS} SECOND)
       FROM qr_sessions first_member
       WHERE first_member.session_id = ${sessionId}
+        AND first_member.status = 'ACTIVE'
     )
   )`;
 }

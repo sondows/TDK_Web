@@ -19,6 +19,7 @@ import { shouldOpenQrOrdersForTable } from "@/lib/qr-order-notification-model";
 import { POS_IDLE_RESET_ACTIVITY_EVENTS } from "@/lib/pos-idle-reset";
 import { formatHosNavBadge } from "@/lib/hos-nav-counts";
 import { shouldShowHosEmptyTableState } from "@/lib/hos-table-view-state";
+import { useTvQrAuthCode } from "@/lib/use-tv-qr-auth-code";
 
 type TableRow = {
   tableId: number; tableNo: string; tableName: string | null; positionX: number; positionY: number;
@@ -118,6 +119,7 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [detail, setDetail] = useState<TableDetail | null>(null);
   const [screen, setScreen] = useState<"tables" | "qrOrders" | "detail" | "menu" | "customer" | "balance" | "tradeDetail">("tables");
+  const tvQrAuthCode = useTvQrAuthCode("/api/hos/qr-auth-code");
   const [hosCustomers, setHosCustomers] = useState<HosCustomer[]>([]);
   const [customersLoadedKey, setCustomersLoadedKey] = useState("");
   const [customerError, setCustomerError] = useState("");
@@ -1438,6 +1440,10 @@ export default function HosHome({ staffLoginId, idleResetSeconds }: { staffLogin
           <span className="relative inline-flex size-6 items-center justify-center"><svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect height="7" rx="1" width="7" x="3" y="3"/><rect height="7" rx="1" width="7" x="14" y="3"/><rect height="7" rx="1" width="7" x="3" y="14"/><path d="M14 14h3v3h-3zM20 14v2m-3 4h3v-3"/></svg>{qrPendingOrderBadge && <span aria-hidden="true" className="absolute -right-2 -top-1 z-10 grid min-h-[17px] min-w-[17px] place-items-center rounded-full bg-blue-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#F3F5F8]">{qrPendingOrderBadge}</span>}</span>
           <span className="text-[11px] leading-tight">QR{"\uC8FC\uBB38"}</span>
         </button>
+        <div aria-label={`인증번호 ${tvQrAuthCode ?? "--"}`} className="flex min-h-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 text-slate-600" role="status">
+          <span className="inline-flex h-6 min-w-8 items-center justify-center rounded bg-white px-1.5 text-base font-bold tabular-nums text-slate-800">{tvQrAuthCode ?? "--"}</span>
+          <span className="text-[11px] leading-tight">인증</span>
+        </div>
         <div className="flex flex-1">
           <button aria-expanded={settingsOpen} aria-haspopup="dialog" aria-pressed={settingsOpen} aria-label={"\uC124\uC815"} className={"flex min-h-[4.5rem] w-full flex-col items-center justify-center gap-0.5 bg-transparent text-sm " + (settingsOpen ? "text-blue-700" : "text-slate-500")} disabled={busy} onClick={() => setSettingsOpen(true)} type="button">
             <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg>

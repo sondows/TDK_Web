@@ -40,7 +40,8 @@ function discoverRoutes() {
 }
 
 function samplePath(routePath) {
-  return routePath.replace(/:assetId/g, "d3519cb2-c301-451e-b3aa-888682bbb641").replace(/:[^/]+/g, "1");
+  return routePath.replace(/:assetId/g, "d3519cb2-c301-451e-b3aa-888682bbb641")
+    .replace(":screenCode", "DP1").replace(/:[^/]+/g, "1");
 }
 
 function routePattern(routePath) {
@@ -54,6 +55,7 @@ function expectedSurface(pathname) {
   if (isExternalHosPath(pathname)) return "HOS";
   if (isExternalKdsPath(pathname)) return "KDS";
   if (pathname.startsWith("/api/admin/") || pathname.startsWith("/api/admin-center/")
+    || pathname.startsWith("/api/tdktv/")
     || pathname.startsWith("/api/customers") || pathname.startsWith("/api/pos-settings/")
     || pathname.startsWith("/api/program-trust/")) return "ADM";
   if (pathname.startsWith("/api/qr/") || pathname.startsWith("/api/menu-images/")) return "QRS";
@@ -135,14 +137,14 @@ test("staff QR order and token routes require POS ingress and are never customer
 test("staff QR endpoints retain server authentication and customer QR link retains session checks", () => {
   const read = path => readFileSync(resolve(import.meta.dirname, path), "utf8");
   const tokenRoute = read("../app/api/qr/staff-table-token/route.ts");
-  const staffTokenAuth = read("./qr-notice-admin-auth.ts");
   const orderHistoryRoute = read("../app/api/qr/staff-order-history/route.ts");
   const notificationsRoute = read("../app/api/qr/staff-order-notifications/route.ts");
   const customerLinkRoute = read("../app/api/qr/table-order-link/route.ts");
 
-  assert.match(tokenRoute, /requireQrNoticeManager\(\)/);
-  assert.match(staffTokenAuth, /requireAdminAccess\(\)/);
-  assert.match(staffTokenAuth, /canManageMenu\(staff\.role\)/);
+  assert.match(tokenRoute, /getCurrentStaff\(\)\s*\?\?\s*await getCurrentHosStaff\(\)/);
+  assert.match(tokenRoute, /isHttpsSameOriginRequest\(request\)/);
+  assert.match(tokenRoute, /isKnownInternalHost\(request\.headers\.get\("host"\)\)/);
+  assert.doesNotMatch(tokenRoute, /requireQrNoticeManager|requireAdminAccess/);
   assert.match(orderHistoryRoute, /getCurrentStaff\(\)\s*\?\?\s*await getCurrentHosStaff\(\)/);
   assert.match(notificationsRoute, /getCurrentStaff\(\)\s*\?\?\s*await getCurrentHosStaff\(\)/);
   assert.match(customerLinkRoute, /isSameOriginQrRequest\(request\)/);

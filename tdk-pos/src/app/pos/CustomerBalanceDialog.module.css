@@ -128,7 +128,7 @@
 @media print {
   @page { margin: 12mm; }
 
-  body * {
+  :global(body) *:not(.dialog):not(.dialog *) {
     visibility: hidden !important;
   }
 

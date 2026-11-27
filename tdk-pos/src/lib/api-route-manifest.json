@@ -546,6 +546,12 @@
                     ]
     },
     {
+        "path":  "/api/hos/qr-auth-code",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
         "path":  "/api/hos/tables",
         "methods":  [
                         "GET"
@@ -890,6 +896,20 @@
                     ]
     },
     {
+        "path": "/api/qr/order-auth",
+        "methods": [
+          "DELETE",
+          "GET",
+          "POST"
+        ]
+    },
+    {
+        "path": "/api/qr/order-auth/verify",
+        "methods": [
+          "POST"
+        ]
+    },
+    {
         "path":  "/api/qr/order-invites",
         "methods":  [
                         "POST"
@@ -1082,6 +1102,62 @@
         "path":  "/api/table-sessions/party-groups/:groupId",
         "methods":  [
                         "DELETE"
+                    ]
+    },
+    {
+        "path":  "/api/admin/tdktv",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/tdktv/events",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "PATCH",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/tdktv/images/:imageId/file",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/admin/tdktv/notice",
+        "methods":  [
+                        "DELETE",
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/admin/tdktv/qr-auth-code/test",
+        "methods":  [
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/tdktv/images/:imageId",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/tdktv/:screenCode",
+        "methods":  [
+                        "GET"
+                    ]
+    },
+    {
+        "path":  "/api/tdktv/qr-auth-code",
+        "methods":  [
+                        "GET"
                     ]
     }
 ]

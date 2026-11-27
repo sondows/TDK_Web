@@ -235,7 +235,8 @@ async function main() {
     const afterClose = await request("/api/qr/table-orders", { headers: { cookie, origin } });
     assert.ok([401, 409].includes(afterClose.status), "closed table session rejects guest access");
 
-    // A second table has an open session and an independent, uninvited pending order.
+    // A second table has an open session and an independent pending order.
+    // Approval, not an invite, grants visit-history access to its customer.
     const [otherTableSession] = await connection.query(
       "INSERT INTO table_sessions (table_id, status, session_kind) VALUES (?, 'OPEN', 'DINE_IN')", [tableIds[1]],
     );
@@ -255,13 +256,16 @@ async function main() {
     const staffPayload = await staffResponse.json();
     assert.equal(staffResponse.status, 200, JSON.stringify(staffPayload));
     const shownUninvited = staffPayload.orders.find(order => order.qrOrderId === Number(uninvitedOrder.insertId));
-    assert.equal(shownUninvited?.canAccept, false);
-    assert.equal(shownUninvited?.blockedReason, "INVITE_REQUIRED");
-    const blockedAcceptance = await request("/api/pos/qr-table-orders", {
-      method: "PATCH", headers: { cookie: staffCookie, "x-tdk-local-dev": "1", "Content-Type": "application/json" },
-      body: JSON.stringify({ qrOrderId: Number(uninvitedOrder.insertId), action: "ACCEPT" }),
+    assert.equal(shownUninvited?.canAccept, true, "staff may review a valid QR order without an invite");
+    assert.equal(shownUninvited?.blockedReason, null);
+    const uninvitedHistory = await request("/api/qr/table-orders", {
+      headers: { cookie: `tdkon_qr_session=${uninvitedToken}`, origin },
     });
-    assert.equal(blockedAcceptance.status, 409);
+    const uninvitedHistoryBody = await uninvitedHistory.json();
+    assert.equal(uninvitedHistory.status, 200);
+    assert.equal(uninvitedHistoryBody.canViewOrders, false, "pending order does not grant visit history");
+    assert.equal(uninvitedHistoryBody.posOrders.length, 0);
+    assert.equal(uninvitedHistoryBody.ownRequests.length, 1, "customer can still view their own request");
     const [[stillPending]] = await connection.query("SELECT status FROM qr_orders WHERE qr_order_id = ?", [uninvitedOrder.insertId]);
     assert.equal(stillPending.status, "PENDING", "uninvited order remains pending, not implicitly rejected");
 
@@ -287,7 +291,7 @@ async function main() {
     assert.equal(expiredAcceptance.status, 422);
     const [[expiredStillPending]] = await connection.query("SELECT status FROM qr_orders WHERE qr_order_id = ?", [expiredOrder.insertId]);
     assert.equal(expiredStillPending.status, "PENDING", "expired order remains pending");
-    console.log("PASS: invite join/token preservation, uninvited pending order stays blocked, six-hour expiry blocks acceptance, invite and session guards");
+    console.log("PASS: invite join/token preservation, approval-based access isolation, six-hour expiry blocks acceptance, invite and session guards");
   } finally {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (tableIds.length || qrCodeIds.length || staffSessionId || programTrustTokenId) {

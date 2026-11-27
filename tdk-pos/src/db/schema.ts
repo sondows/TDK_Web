@@ -3,6 +3,7 @@ import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 
 import {
   mysqlTable,
+  char,
   bigint,
   varchar,
   int,
@@ -17,6 +18,99 @@ import {
   uniqueIndex,
   mysqlEnum,
 } from "drizzle-orm/mysql-core";
+
+export const tvScreens = mysqlTable("tv_screens", {
+  screenId: bigint("screen_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  code: varchar("code", { length: 32 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  purpose: mysqlEnum("purpose", ["MENU", "ADVERTISEMENT"]).notNull(),
+  width: int("width").notNull().default(1920),
+  height: int("height").notNull().default(1080),
+  isActive: tinyint("is_active").notNull().default(1),
+  playbackEnabled: tinyint("playback_enabled").notNull().default(1),
+  defaultDurationSeconds: int("default_duration_seconds").notNull().default(10),
+  loopEnabled: tinyint("loop_enabled").notNull().default(1),
+  syncGroup: varchar("sync_group", { length: 40 }),
+  fitMode: mysqlEnum("fit_mode", ["CONTAIN", "COVER"]).notNull().default("CONTAIN"),
+  transitionEffect: mysqlEnum("transition_effect", ["NONE", "FADE", "SLIDE", "ZOOM"]).notNull().default("FADE"),
+  physicalOrder: int("physical_order").notNull().default(1),
+  layoutX: int("layout_x").notNull().default(0),
+  layoutY: int("layout_y").notNull().default(0),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_tv_screens_code").on(table.code)]);
+
+export const tvSyncGroups = mysqlTable("tv_sync_groups", {
+  groupName: varchar("group_name", { length: 40 }).primaryKey(),
+  intervalSeconds: int("interval_seconds").notNull().default(10),
+  transitionEffect: mysqlEnum("transition_effect", ["NONE", "FADE", "SLIDE", "ZOOM"]).notNull().default("FADE"),
+  epochStartedAt: datetime("epoch_started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const tvBusinessNotice = mysqlTable("tv_business_notice", {
+  noticeId: tinyint("notice_id").primaryKey(),
+  isActive: tinyint("is_active").notNull().default(0),
+  targetCode: varchar("target_code", { length: 3 }),
+  message: varchar("message", { length: 1000 }),
+  startedAt: datetime("started_at"),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const tvQrAuthCodeState = mysqlTable("tv_qr_auth_code_state", {
+  stateId: tinyint("state_id", { unsigned: true }).primaryKey(),
+  issuanceId: char("issuance_id", { length: 36 }),
+  code: char("code", { length: 2 }),
+  issuedAt: datetime("issued_at", { fsp: 3 }),
+  lastRequestedAt: datetime("last_requested_at", { fsp: 3 }),
+  expiresAt: datetime("expires_at", { fsp: 3 }),
+  stateVersion: bigint("state_version", { mode: "number", unsigned: true }).notNull().default(0),
+  createdAt: datetime("created_at", { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  updatedAt: datetime("updated_at", { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+});
+
+export const tvImages = mysqlTable("tv_images", {
+  imageId: bigint("image_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  screenId: bigint("screen_id", { mode: "number", unsigned: true }).notNull().references(() => tvScreens.screenId),
+  originalName: varchar("original_name", { length: 255 }).notNull(),
+  storedName: varchar("stored_name", { length: 64 }).notNull(),
+  mimeType: varchar("mime_type", { length: 32 }).notNull(),
+  fileSize: bigint("file_size", { mode: "number", unsigned: true }).notNull(),
+  width: int("width").notNull(),
+  height: int("height").notNull(),
+  sortOrder: int("sort_order").notNull(),
+  durationSeconds: int("duration_seconds").notNull().default(10),
+  isActive: tinyint("is_active").notNull().default(1),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_tv_images_stored_name").on(table.storedName), index("idx_tv_images_screen_order").on(table.screenId, table.sortOrder)]);
+
+export const tvImageEvents = mysqlTable("tv_image_events", {
+  eventId: bigint("event_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
+  imageId: bigint("image_id", { mode: "number", unsigned: true }).notNull().references(() => tvImages.imageId, { onDelete: "cascade" }),
+  eventName: varchar("event_name", { length: 100 }).notNull(),
+  message: varchar("message", { length: 500 }).notNull(),
+  positionX: int("position_x").notNull().default(5000),
+  positionY: int("position_y").notNull().default(5000),
+  widthPercent: int("width_percent").notNull().default(3500),
+  fontSize: int("font_size").notNull().default(48),
+  fontWeight: int("font_weight").notNull().default(700),
+  textColor: varchar("text_color", { length: 7 }).notNull().default("#FFFFFF"),
+  textAlign: mysqlEnum("text_align", ["LEFT", "CENTER", "RIGHT"]).notNull().default("CENTER"),
+  lineHeight: int("line_height").notNull().default(120),
+  backgroundMode: mysqlEnum("background_mode", ["NONE", "SOLID", "TRANSLUCENT"]).notNull().default("TRANSLUCENT"),
+  backgroundColor: varchar("background_color", { length: 7 }).notNull().default("#145B46"),
+  backgroundOpacity: int("background_opacity").notNull().default(85),
+  borderEnabled: tinyint("border_enabled").notNull().default(0),
+  borderColor: varchar("border_color", { length: 7 }).notNull().default("#FFFFFF"),
+  borderWidth: int("border_width").notNull().default(2),
+  borderRadius: int("border_radius").notNull().default(16),
+  animation: mysqlEnum("animation", ["NONE", "FADE", "PULSE", "SLIDE", "GLOW"]).notNull().default("PULSE"),
+  isActive: tinyint("is_active").notNull().default(1),
+  sortOrder: int("sort_order").notNull().default(1),
+  createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: datetime("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [index("idx_tv_image_events_image_active").on(table.imageId, table.isActive, table.sortOrder)]);
 
 export const diningTables = mysqlTable(
   "dining_tables",
@@ -559,6 +653,10 @@ export const qrSessions = mysqlTable("qr_sessions", {
   tokenHash: varchar("token_hash", { length: 255 }).notNull(),
   languageCode: varchar("language_code", { length: 10 }).notNull().default("ko"),
   status: mysqlEnum("status", ["ACTIVE", "CLOSED", "EXPIRED"]).notNull().default("ACTIVE"),
+  accessGrantSource: mysqlEnum("access_grant_source", ["ORDER_APPROVED", "INVITED", "LEGACY"]),
+  accessGrantQrOrderId: bigint("access_grant_qr_order_id", { mode: "number", unsigned: true }),
+  accessGrantInviteId: bigint("access_grant_invite_id", { mode: "number", unsigned: true }),
+  accessGrantedAt: datetime("access_granted_at"),
   createdAt: datetime("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   lastActiveAt: datetime("last_active_at"),
   closedAt: datetime("closed_at"),
@@ -591,6 +689,14 @@ export const qrTableLinks = mysqlTable("qr_table_links", {
   assignedAt: datetime("assigned_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, table => [uniqueIndex("uq_qr_table_links_table").on(table.tableId)]);
 
+/** A single not-yet-active replacement QR may be prepared for each table. */
+export const qrCodePreparations = mysqlTable("qr_code_preparations", {
+  qrCodeId: bigint("qr_code_id", { mode: "number", unsigned: true }).primaryKey().references(() => qrCodes.qrCodeId),
+  tableId: bigint("table_id", { mode: "number", unsigned: true }).notNull().references(() => diningTables.tableId),
+  preparedByStaffId: bigint("prepared_by_staff_id", { mode: "number", unsigned: true }).notNull().references(() => staff.staffId),
+  preparedAt: datetime("prepared_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex("uq_qr_code_preparations_table").on(table.tableId)]);
+
 /** Invitation bearer values may be reused until expiry/revocation and are stored only as a hash. */
 export const qrSessionInvites = mysqlTable("qr_session_invites", {
   inviteId: bigint("invite_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),
@@ -618,6 +724,42 @@ export const qrOrders = mysqlTable("qr_orders", {
   rejectedAt: datetime("rejected_at"),
   note: varchar("note", { length: 500 }),
 }, table => [uniqueIndex("uq_qr_orders_accepted_order").on(table.acceptedOrderId), uniqueIndex("uq_qr_orders_client_request_id").on(table.clientRequestId), index("idx_qr_orders_status_time").on(table.status, table.orderedAt)]);
+
+/** Active representative only. A released claim is removed without deleting its QR order. */
+export const qrTableOrderClaims = mysqlTable("qr_table_order_claims", {
+  tableId: bigint("table_id", { mode: "number", unsigned: true }).primaryKey().references(() => diningTables.tableId),
+  representativeQrSessionId: bigint("representative_qr_session_id", { mode: "number", unsigned: true }).notNull().references(() => qrSessions.qrSessionId),
+  firstQrOrderId: bigint("first_qr_order_id", { mode: "number", unsigned: true }).notNull().references(() => qrOrders.qrOrderId),
+  tableSessionId: bigint("table_session_id", { mode: "number", unsigned: true }).references(() => tableSessions.sessionId),
+  state: mysqlEnum("state", ["PENDING", "CONFIRMED"]).notNull().default("PENDING"),
+  claimedAt: datetime("claimed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  confirmedAt: datetime("confirmed_at"),
+}, table => [index("idx_qr_table_order_claims_session").on(table.tableSessionId)]);
+
+/** Short-lived, per-customer proof attempts for the shared TV QR verification code. */
+export const qrOrderAuthAttempts = mysqlTable("qr_order_auth_attempts", {
+  attemptId: char("attempt_id", { length: 36 }).primaryKey(),
+  qrSessionId: bigint("qr_session_id", { mode: "number", unsigned: true }).notNull().references(() => qrSessions.qrSessionId),
+  tableId: bigint("table_id", { mode: "number", unsigned: true }).notNull().references(() => diningTables.tableId),
+  tableSessionIdAtAuth: bigint("table_session_id_at_auth", { mode: "number", unsigned: true }),
+  sessionSnapshotRecorded: tinyint("session_snapshot_recorded", { unsigned: true }).notNull().default(0),
+  clientRequestId: char("client_request_id", { length: 36 }).notNull(),
+  issuanceId: char("issuance_id", { length: 36 }).notNull(),
+  /** Private server-side snapshot only; never returned by customer APIs. */
+  code: char("code", { length: 2 }).notNull(),
+  cartFingerprint: char("cart_fingerprint", { length: 64 }).notNull(),
+  state: mysqlEnum("state", ["PENDING", "VERIFIED", "CONSUMED", "BLOCKED", "EXPIRED"]).notNull().default("PENDING"),
+  failedAttempts: tinyint("failed_attempts", { unsigned: true }).notNull().default(0),
+  createdAt: datetime("created_at", { fsp: 3 }).notNull().default(sql`CURRENT_TIMESTAMP(3)`),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  verifiedAt: datetime("verified_at", { fsp: 3 }),
+  consumedAt: datetime("consumed_at", { fsp: 3 }),
+  qrOrderId: bigint("qr_order_id", { mode: "number", unsigned: true }).references(() => qrOrders.qrOrderId),
+}, table => [
+  uniqueIndex("uq_qr_order_auth_session_request").on(table.qrSessionId, table.clientRequestId),
+  index("idx_qr_order_auth_table_created").on(table.tableId, table.createdAt),
+  index("idx_qr_order_auth_expiry_state").on(table.state, table.expiresAt),
+]);
 
 export const qrOrderItems = mysqlTable("qr_order_items", {
   qrOrderItemId: bigint("qr_order_item_id", { mode: "number", unsigned: true }).autoincrement().primaryKey(),

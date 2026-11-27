@@ -53,6 +53,13 @@ export async function loadCurrentPendingQrOrderCount() {
 
 /** Returns per-table token, pending-order, and current-use QR-order history indicators. */
 export async function loadQrTableIndicators(): Promise<Map<number, QrTableIndicator>> {
+  const boundQrAnchor = `COALESCE(root_qs.created_at,
+    (SELECT invite_owner.created_at FROM qr_session_invites owner_invite
+      INNER JOIN qr_sessions invite_owner ON invite_owner.qr_session_id = owner_invite.created_by_qr_session_id
+      WHERE owner_invite.session_id = qs.session_id AND owner_invite.revoked_at IS NULL
+      ORDER BY owner_invite.invite_id ASC LIMIT 1),
+    (SELECT MIN(first_member.created_at) FROM qr_sessions first_member
+      WHERE first_member.session_id = qs.session_id AND first_member.status = 'ACTIVE'))`;
   const [rows] = await pool.query<QrTableIndicatorRow[]>(`
     SELECT t.table_id AS tableId, t.table_no AS tableNo,
       DATE_FORMAT(MIN(qs.created_at), '%Y-%m-%d %H:%i:%s') AS issuedAt,
@@ -60,7 +67,7 @@ export async function loadQrTableIndicators(): Promise<Map<number, QrTableIndica
       MAX(COALESCE(ts.baby_count, active_ts.baby_count)) AS babyCount,
       MAX(CASE WHEN qs.status = 'ACTIVE' AND (
         (qs.session_id IS NULL AND qs.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
-        OR (qs.session_id IS NOT NULL AND root_qs.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
+        OR (qs.session_id IS NOT NULL AND ${boundQrAnchor} >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
       ) THEN 1 ELSE 0 END) AS hasActiveQrToken,
       MAX(CASE WHEN qo.qr_order_id IS NOT NULL THEN 1 ELSE 0 END) AS hasPendingQrOrder,
       MAX(CASE WHEN history_order.qr_order_id IS NOT NULL AND (
@@ -92,7 +99,7 @@ export async function loadQrTableIndicators(): Promise<Map<number, QrTableIndica
     WHERE (
       (qs.status = 'ACTIVE' AND (
         (qs.session_id IS NULL AND qs.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
-        OR (qs.session_id IS NOT NULL AND root_qs.created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
+        OR (qs.session_id IS NOT NULL AND ${boundQrAnchor} >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ? SECOND))
         OR qo.qr_order_id IS NOT NULL
         OR (history_order.qr_order_id IS NOT NULL AND (
           (active_ts.session_id IS NOT NULL AND (

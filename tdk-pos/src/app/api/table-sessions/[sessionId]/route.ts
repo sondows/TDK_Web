@@ -6,6 +6,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { getCurrentHosStaff } from "@/lib/hos-auth";
 import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { cancelOrphanedUnpaidCheckouts } from "@/lib/orphan-checkout-cancellation";
+import { finishQrOrderAuthorizationForClosedVisits } from "@/lib/qr-table-order-claims";
 
 export async function PATCH(_request: Request, { params }: { params: Promise<{ sessionId: string }> }) {
   const currentStaff = await getCurrentStaff();
@@ -22,9 +23,14 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
     const closed = await db.transaction(async tx => {
       if (tableSession.tableId !== null) await tx.select({ tableId: diningTables.tableId }).from(diningTables)
         .where(eq(diningTables.tableId, tableSession.tableId)).for("update").limit(1);
-      const customerSessionScope = tableSession.tableId === null
+      const [lockedSession] = await tx.select({ status: tableSessions.status, sessionKind: tableSessions.sessionKind,
+        tableId: tableSessions.tableId }).from(tableSessions).where(eq(tableSessions.sessionId, sessionId)).for("update").limit(1);
+      if (!lockedSession || lockedSession.status !== "OPEN" || lockedSession.sessionKind !== "DINE_IN" ||
+        lockedSession.tableId !== tableSession.tableId) return { kind: "CONFLICT" as const };
+      const customerSessionScope = lockedSession.tableId === null
         ? eq(qrSessions.sessionId, sessionId)
-        : or(eq(qrSessions.sessionId, sessionId), eq(qrSessions.tableId, tableSession.tableId))!;
+        : or(eq(qrSessions.sessionId, sessionId), and(isNull(qrSessions.sessionId),
+          eq(qrSessions.tableId, lockedSession.tableId), eq(qrSessions.status, "ACTIVE")))!;
       const relatedQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId })
         .from(qrSessions).where(customerSessionScope).for("update");
       const qrSessionIds = relatedQrSessions.map(row => Number(row.qrSessionId));
@@ -35,6 +41,7 @@ export async function PATCH(_request: Request, { params }: { params: Promise<{ s
       }
       const [updateResult] = await tx.update(tableSessions).set({ status: "CLOSED", closedAt: new Date(), closedByStaffId: currentStaff.staffId }).where(and(eq(tableSessions.sessionId, sessionId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")));
       if (updateResult.affectedRows !== 1) return { kind: "CONFLICT" as const };
+      await finishQrOrderAuthorizationForClosedVisits(tx, [sessionId], lockedSession.tableId === null ? [] : [Number(lockedSession.tableId)], qrSessionIds);
       const closedAt = new Date();
       await tx.update(qrSessions).set({ status: "CLOSED", closedAt }).where(and(customerSessionScope, eq(qrSessions.status, "ACTIVE")));
       await tx.update(qrSessionInvites).set({ revokedAt: closedAt }).where(and(eq(qrSessionInvites.sessionId, sessionId), isNull(qrSessionInvites.revokedAt)));

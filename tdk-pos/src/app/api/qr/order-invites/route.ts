@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403 });
   const member = await resolveQrOrderRequest(request);
   if (!member) return Response.json({ success: false }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  if (member.sessionId === null) return Response.json({ success: false, message: "첫 주문이 POS에서 승인된 뒤 일행 초대를 만들 수 있습니다." }, { status: 409, headers: { "Cache-Control": "no-store" } });
+  if (member.sessionId === null || !member.canViewOrders) return Response.json({ success: false, message: "첫 주문이 POS에서 승인된 뒤 일행 초대를 만들 수 있습니다." }, { status: 409, headers: { "Cache-Control": "no-store" } });
   const memberSessionId = member.sessionId;
   try {
     const token = randomBytes(32).toString("base64url");

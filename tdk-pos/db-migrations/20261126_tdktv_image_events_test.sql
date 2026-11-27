@@ -1,0 +1,30 @@
+-- TDK_POS_TEST only. Event rows follow their image and are removed with it.
+USE TDK_POS_TEST;
+CREATE TABLE tv_image_events (
+  event_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  image_id BIGINT UNSIGNED NOT NULL,
+  event_name VARCHAR(100) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  position_x INT NOT NULL DEFAULT 5000,
+  position_y INT NOT NULL DEFAULT 5000,
+  width_percent INT NOT NULL DEFAULT 3500,
+  font_size INT NOT NULL DEFAULT 48,
+  font_weight INT NOT NULL DEFAULT 700,
+  text_color VARCHAR(7) NOT NULL DEFAULT '#FFFFFF',
+  text_align ENUM('LEFT','CENTER','RIGHT') NOT NULL DEFAULT 'CENTER',
+  line_height INT NOT NULL DEFAULT 120,
+  background_mode ENUM('NONE','SOLID','TRANSLUCENT') NOT NULL DEFAULT 'TRANSLUCENT',
+  background_color VARCHAR(7) NOT NULL DEFAULT '#145B46',
+  background_opacity INT NOT NULL DEFAULT 85,
+  border_enabled TINYINT NOT NULL DEFAULT 0,
+  border_color VARCHAR(7) NOT NULL DEFAULT '#FFFFFF',
+  border_width INT NOT NULL DEFAULT 2,
+  border_radius INT NOT NULL DEFAULT 16,
+  animation ENUM('NONE','FADE','PULSE','SLIDE','GLOW') NOT NULL DEFAULT 'PULSE',
+  is_active TINYINT NOT NULL DEFAULT 1,
+  sort_order INT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_tv_image_events_image_active (image_id,is_active,sort_order),
+  CONSTRAINT fk_tv_image_events_image FOREIGN KEY (image_id) REFERENCES tv_images(image_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

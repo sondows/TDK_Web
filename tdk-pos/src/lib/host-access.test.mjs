@@ -31,6 +31,10 @@ test("the DDNS host is allowed only for QR development routes and the exact forw
   assert.equal(isQrDevelopmentPathAllowed("/tdkqrs/23456789ABCDEFGH", "GET"), true);
   assert.equal(isQrDevelopmentPathAllowed(`/tdkqrs/join/${"a".repeat(43)}`, "GET"), true);
   assert.equal(isQrDevelopmentPathAllowed("/api/qr/wait-orders/123", "PATCH"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/order-auth", "POST"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/order-auth", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/order-auth", "DELETE"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/order-auth/verify", "POST"), true);
   assert.equal(isQrDevelopmentPathAllowed("/api/menu-images/4/qr-image.webp", "GET"), true);
   for (const path of ["/tdkpos", "/pos", "/tdkadm", "/admin", "/tdkkds", "/kitchen", "/hos", "/api/auth/login", "/api/pos/qr-wait-orders", "/api/db-test"]) {
     assert.equal(isQrDevelopmentPathAllowed(path, "GET"), false, path);
@@ -99,7 +103,7 @@ test("external POS requires verified HTTPS ingress while KDS keeps its existing 
 });
 
 test("POS and KDS paths are blocked on the public Host, including old and API routes", () => {
-  for (const path of ["/tdkpos", "/tdkpos/pos", "/login", "/pos", "/pos/session/4", "/api/auth/login", "/api/pos/menu-catalog", "/api/table-sessions", "/api/checkouts", "/api/sales", "/api/account-transfer-notice", "/api/staff/active", "/api/pos-settings/login-mode", "/api/admin/verify", "/api/admin/menus", "/api/admin/staff", "/api/qr/staff-order-history", "/api/qr/staff-order-notifications"]) {
+  for (const path of ["/tdkpos", "/tdkpos/pos", "/login", "/pos", "/pos/session/4", "/api/auth/login", "/api/pos/menu-catalog", "/api/table-sessions", "/api/checkouts", "/api/sales", "/api/account-transfer-notice", "/api/staff/active", "/api/pos-settings/login-mode", "/api/admin/verify", "/api/admin/menus", "/api/admin/staff", "/api/qr/staff-order-history", "/api/qr/staff-order-notifications", "/api/qr/staff-table-token"]) {
     assert.equal(isExternalPosPath(path), true, path);
     assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
   }
@@ -140,7 +144,32 @@ test("external Host keeps management and read-only assets while rejecting unknow
   }
 });
 
+test("public TV playback allows only DP1-DP5 read paths and keeps TV management private", () => {
+  for (const path of ["/tdktv/dp1", "/tdktv/dp2", "/tdktv/dp3", "/tdktv/dp4", "/tdktv/dp5",
+    "/tdktv/DP1", "/tdktv/DP5", "/tdktv/AD-01", "/tdktv/MENU-04",
+    "/api/tdktv/DP1", "/api/tdktv/DP5", "/api/tdktv/qr-auth-code", "/api/tdktv/images/123"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "HEAD"), true, path);
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+    assert.equal(isExternalAdminPathAllowed(path, "DELETE"), false, path);
+  }
+  for (const path of ["/tdktv/dp0", "/tdktv/dp6", "/api/tdktv/DP0", "/api/tdktv/images/0"]) {
+    assert.equal(isExternalAdminPathAllowed(path, "GET"), false, path);
+    assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
+  }
+  assert.equal(isExternalAdminPathAllowed("/api/admin/tdktv", "GET"), true,
+    "The existing management handler remains reachable for its own ADM authentication check");
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "GET"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth/verify", "POST"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/tdktv/images/123", "PUT"), false);
+});
+
 test("public QRS APIs allow only required read and session-authenticated routes", () => {
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "POST"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "GET"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "DELETE"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth/verify", "POST"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth/verify", "GET"), false);
   const assetId = "d3519cb2-c301-451e-b3aa-888682bbb641";
   for (const path of ["/api/qr/notices", "/api/qr/table-order-link"]) {
     assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);

@@ -32,6 +32,7 @@ type OrderItem = {
   postCookTimerStartedAtMs: number | null;
   showCookingProgress: boolean;
 };
+type QrRequestItem = Pick<OrderItem, "qrOrderId" | "qrOrderItemId" | "itemName" | "qty" | "totalAmount" | "options">;
 type QrOrder = {
   qrOrderId: number;
   status: string;
@@ -41,7 +42,7 @@ type QrOrder = {
   acceptedAt: string | null;
   note: string | null;
 };
-type PosOrder = { orderId: number; acceptedQrOrderId: number | null; status: string; totalAmount: string; orderedAt: string };
+type PosOrder = { orderId: number; acceptedQrOrderId: number | null; status: string; totalAmount: string; effectiveTotalAmount: string; orderedAt: string };
 type PosOrderItem = { orderId: number; orderItemId: number; parentOrderItemId: number | null; menuId: number; itemType: "NORMAL" | "COMPONENT" | "SERVICE";
   status: string; itemName: string; qty: number; originalQty: number; effectiveQty: number; cancelledQty: number; unitPrice: string; totalAmount: string;
   effectiveTotalAmount: string; kdsKind: string; stage: "WAITING" | "COOKING" | "DONE" | null; postCookTimerEligible: boolean;
@@ -57,9 +58,12 @@ type Payload = {
   totalPersonCount?: number | null;
   serverNow?: number;
   canViewOrders?: boolean;
+  canViewCurrentVisitOrders?: boolean;
   needsJoin?: boolean;
   orders?: QrOrder[];
   items?: OrderItem[];
+  ownRequests?: QrOrder[];
+  ownRequestItems?: QrRequestItem[];
   posOrders?: PosOrder[];
   posItems?: PosOrderItem[];
   confirmedSummary?: { items: ConfirmedSummaryItem[]; grossAmount: number; discountAmount: number; prepaidAmount: number; totalAmount: number; receivableAmount: number };
@@ -90,24 +94,29 @@ function readOrderPanelGeometry(hasHero: boolean, titleHeight: number) {
   }), viewportHeight, bottomReserved };
 }
 function QrCookingProgressLine({ progress }: { progress: QrCookingProgress }) {
-  const labels = ["대기중", "조리중", "조리완료", progress.tableBoilLabel, "완료"];
-  const columns = "0.85fr 0.85fr 1fr 2.25fr 0.65fr";
-  return <div aria-label={`조리 진행 상태: ${labels[progress.currentStep - 1]}`} className="mt-2 grid min-w-0 gap-x-[2px]" role="status" style={{ gridTemplateColumns: columns }}>
-    {labels.map((label, index) => {
-      const step = index + 1;
+  const boilLabel = progress.tableBoilLabel.split("(")[0];
+  const steps = [{ step: 1, label: "조리대기" }, { step: 2, label: "조리중" }, { step: 3, label: "주방조리완료" },
+    ...(progress.showBoilStep ? [{ step: 4, label: boilLabel }] : []), { step: 5, label: "조리완료" }];
+  const columns = progress.showBoilStep ? "0.9fr 0.75fr 1.5fr 2.35fr 0.95fr" : "1fr 0.85fr 1.6fr 1fr";
+  const currentLabel = progress.currentStep === 4 ? progress.tableBoilLabel : steps.find(item => item.step === progress.currentStep)?.label ?? "";
+  return <div aria-label={`조리 진행 상태: ${currentLabel}`} className="mt-2 grid min-w-0 gap-x-[2px]" role="status" style={{ gridTemplateColumns: columns }}>
+    {steps.map(({ step, label }) => {
       const current = step === progress.currentStep;
       const past = step < progress.currentStep;
       const isWaiting = step === 1;
       const isBoil = step === 4;
       const colorClass = current ? "text-blue-700" : isWaiting && !past ? "text-slate-300" : past ? "text-slate-500" : "text-slate-300";
       return <div className="min-w-0 overflow-visible text-center" key={step}>
-        {isBoil && progress.timerSegments > 0 ? <div aria-label={`테이블끓이기 ${progress.timerElapsedSegments}/10단계`} className="grid h-[3px] overflow-hidden rounded-full" style={{ gridTemplateColumns: "repeat(10, minmax(0, 1fr))" }}>
+        {isBoil && progress.timerSegments > 0 ? <div aria-label={`매장끓이기 ${progress.timerElapsedSegments}/10단계`} className="grid h-[3px] overflow-hidden rounded-full" style={{ gridTemplateColumns: "repeat(10, minmax(0, 1fr))" }}>
           {Array.from({ length: 10 }, (_, segment) => <span className={segment < progress.timerElapsedSegments ? "bg-red-500" : "bg-slate-200"} key={segment} />)}
         </div> : <span aria-hidden="true" className={`block h-[3px] rounded-full ${current ? "bg-blue-600" : isWaiting && !past ? "bg-slate-100" : past ? "bg-slate-400" : "bg-slate-200"}`} />}
         <span aria-current={current ? "step" : undefined}
           className={`mt-1 block whitespace-nowrap leading-tight transition-[font-size] duration-150 ease-out motion-reduce:transition-none ${current ? "text-[12px] font-semibold" : "text-[8px]"} ${colorClass}`}>{label}</span>
       </div>;
     })}
+    {progress.remainingSeconds !== null && <span className="col-span-full mt-1 text-right text-[10px] tabular-nums text-slate-500">
+      {progress.timerElapsedSegments * 10}% · 남은 시간 {Math.floor(progress.remainingSeconds / 60)}:{String(progress.remainingSeconds % 60).padStart(2, "0")}
+    </span>}
   </div>;
 }
 
@@ -312,8 +321,8 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     setAccessState(null);
     setServerOffset((data.serverNow ?? Date.now()) - Date.now());
     setError("");
-    if (data.needsJoin && !data.orders?.some(order => order.status === "PENDING")) router.replace("/qrorder/join-required");
-    else if (data.orders?.length === 0 && (data.posOrders?.length ?? 0) === 0) router.replace("/qrorder/order");
+    if (data.needsJoin && !data.ownRequests?.some(order => order.status === "PENDING")) router.replace("/qrorder/join-required");
+    else if ((data.ownRequests?.length ?? 0) === 0 && (data.posOrders?.length ?? 0) === 0) router.replace("/qrorder/order");
   }, [router]);
 
   useEffect(() => {
@@ -362,14 +371,15 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
 
   const orders = payload?.orders ?? emptyOrders;
   const items = payload?.items ?? emptyItems;
+  const ownPendingRequests = (payload?.ownRequests ?? emptyOrders).filter(order => order.status !== "ACCEPTED");
+  const ownRequestItems = payload?.ownRequestItems ?? [];
   const posOrders = payload?.posOrders ?? emptyPosOrders;
   const posItems = payload?.posItems ?? emptyPosItems;
   const unifiedRounds = useMemo(() => buildUnifiedQrOrderRounds(orders, items, posOrders, posItems), [items, orders, posItems, posOrders]);
   const confirmedSummary = payload?.confirmedSummary;
   const aggregateItems = confirmedSummary?.items ?? [];
   const visibleAggregateItems = aggregateItems.filter(item => item.itemType !== "COMPONENT");
-  const rejectedOrder = orders.some(order => order.status === "REJECTED");
-  const canUseOrderAction = Boolean(payload?.canViewOrders || rejectedOrder);
+  const canUseOrderAction = Boolean(payload?.success && accessState === null);
   const serverNow = now ? now + serverOffset : payload?.serverNow ?? 0;
   const inviteIsValid = Boolean(invite && Date.parse(invite.expiresAt) > serverNow);
 
@@ -496,7 +506,25 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
       </div>}
       {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
       {!payload && !error && accessState === null && <p className="py-5 text-center text-sm text-slate-500">주문내역을 불러오는 중입니다.</p>}
-      {payload && accessState !== "PAYMENT_COMPLETED" && <section aria-label="전체 주문 집계" className="mt-3">
+      {payload && accessState !== "PAYMENT_COMPLETED" && ownPendingRequests.length > 0 && <section aria-label="내 주문 요청" className="mt-3">
+        <h2 className="-mx-1 rounded-[10px] bg-[#F1F5F9] px-3 py-1.5 font-bold">내 주문 요청</h2>
+        {ownPendingRequests.map(request => <article className="border-b border-slate-200 py-2" key={request.qrOrderId}>
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <strong>주문 요청 (<time dateTime={request.orderedAt}>{orderTime(request.orderedAt)}</time>)</strong>
+            <span className={request.status === "PENDING" ? "text-amber-700" : "text-red-600"}>
+              {request.status === "PENDING" ? "승인 대기중" : request.status === "REJECTED" ? "승인거절" : "요청 취소"}
+            </span>
+          </div>
+          {request.note && request.status === "REJECTED" && <p className="mt-1 text-xs text-red-600">{request.note}</p>}
+          <ul className="mt-1 divide-y divide-slate-100">{ownRequestItems.filter(item => Number(item.qrOrderId) === Number(request.qrOrderId)).map(item =>
+            <li className="flex items-start justify-between gap-2 py-1 text-sm" key={item.qrOrderItemId}>
+              <span className="min-w-0 break-words">{item.itemName}{item.options.length > 0 && <small className="ml-1 text-slate-500">{item.options.map(option => option.optionName).join(" · ")}</small>} × {item.qty}</span>
+              <span className="shrink-0 tabular-nums">{won(item.totalAmount)}</span>
+            </li>)}</ul>
+          <p className="text-right text-sm font-semibold tabular-nums">{won(request.totalAmount)}</p>
+        </article>)}
+      </section>}
+      {payload?.canViewCurrentVisitOrders && accessState !== "PAYMENT_COMPLETED" && <section aria-label="전체 주문 집계" className="mt-3">
         <div className="-mx-1 flex min-w-0 items-center justify-between gap-2 rounded-[10px] bg-[#F1F5F9] px-3 py-1.5">
           <h2 className="shrink-0 whitespace-nowrap font-bold">주문집계</h2>
           {typeof payload.totalPersonCount === "number" && payload.totalPersonCount > 0
@@ -505,9 +533,9 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
         </div>
         {visibleAggregateItems.length > 0 ? <ul className="divide-y divide-slate-200">{visibleAggregateItems.map(item => <li className="py-2" key={item.menuId}>
           <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap">
-              <span className={`${item.optionLabel ? "min-w-0 max-w-[55%] shrink-0 truncate" : "min-w-0 flex-[0_1_auto] truncate"} font-medium`}>{item.itemName}</span>
-              {item.optionLabel && <span className="min-w-0 flex-[0_1_auto] truncate text-xs text-slate-500">{item.optionLabel}</span>}
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5">
+              <span className="min-w-0 break-words font-medium">{item.itemName}</span>
+              {item.optionLabel && <span className="min-w-0 break-words text-xs text-slate-500">{item.optionLabel}</span>}
               <span className="shrink-0 tabular-nums">× {item.qty}</span>
             </div>
             <strong className="shrink-0 tabular-nums">{won(item.totalAmount)}</strong>
@@ -527,18 +555,19 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
         <QrSummaryDivider />
         {unifiedRounds.length > 0 ? unifiedRounds.map((round, index) => {
           const acceptedPosOrder = round.source === "QR" ? round.acceptedPosOrder : null;
+          const acceptedAt = acceptedPosOrder?.orderedAt ?? round.order.orderedAt;
           const orderStatus = acceptedPosOrder?.status === "CANCELLED" || acceptedPosOrder?.status === "COMPLETED"
             ? acceptedPosOrder.status : round.order.status;
-          const roundAmount = acceptedPosOrder?.totalAmount ?? round.order.totalAmount;
+          const roundAmount = acceptedPosOrder?.effectiveTotalAmount ?? (round.source === "POS" ? round.order.effectiveTotalAmount : round.order.totalAmount);
           const renderPosItem = (item: PosOrderItem) => {
             const progress = getQrCookingProgress({ orderStatus: round.source === "QR" ? round.order.status : "ACCEPTED", stage: item.stage,
               postCookTimerEligible: item.postCookTimerEligible, postCookTimerMinutes: item.postCookTimerMinutes,
               postCookTimerStartedAtMs: item.postCookTimerStartedAtMs }, serverNow);
             return <li className="py-2" key={item.orderItemId}>
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap">
-                  <span className={`${item.options.length ? "max-w-[55%] shrink-0" : "flex-[0_1_auto]"} min-w-0 truncate font-medium ${item.effectiveQty <= 0 ? "text-slate-400 line-through" : ""}`}>{item.itemName}</span>
-                  {item.options.length > 0 && <span className="min-w-0 flex-[0_1_auto] truncate text-xs text-slate-500">{item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`).join(" · ")}</span>}
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5">
+                  <span className={`min-w-0 break-words font-medium ${item.effectiveQty <= 0 ? "text-slate-400 line-through" : ""}`}>{item.itemName}</span>
+                  {item.options.length > 0 && <span className="min-w-0 break-words text-xs text-slate-500">{item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`).join(" · ")}</span>}
                   {item.effectiveQty > 0 ? <span className="shrink-0 tabular-nums">× {item.effectiveQty}</span>
                     : <span className="shrink-0 text-xs text-slate-400">취소</span>}
                 </div>
@@ -550,10 +579,10 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
           return <div key={`${round.source}-${round.source === "QR" ? round.order.qrOrderId : round.order.orderId}`}>
             <article className="py-2">
               <div className="-mx-1 flex items-center gap-2 rounded-[10px] bg-[#F1F5F9] px-3 py-1.5">
-                <h2 className="shrink-0 whitespace-nowrap font-bold">주문 (<time className="font-normal text-slate-500" dateTime={round.order.orderedAt}>{orderTime(round.order.orderedAt)}</time>)</h2>
+                <h2 className="shrink-0 whitespace-nowrap font-bold">{round.roundNumber}차 주문 (<time className="font-normal text-slate-500" dateTime={acceptedAt}>{orderTime(acceptedAt)}</time>)</h2>
                 {round.source === "QR" ? <>
                   <span className={`min-w-0 flex-1 truncate whitespace-nowrap text-center text-xs font-semibold ${round.order.status === "PENDING" ? "text-amber-700" : round.order.status === "ACCEPTED" ? "text-blue-700" : round.order.status === "REJECTED" ? "text-red-600" : "text-slate-500"}`}>
-                    {round.order.status === "PENDING" ? "승인 대기중" : round.order.status === "ACCEPTED" ? "승인완료" : round.order.status === "REJECTED" ? "승인거절" : orderStatus === "COMPLETED" ? "결제 완료" : "주문 취소"}
+                    {orderStatus === "CANCELLED" ? "주문 취소" : orderStatus === "COMPLETED" ? "결제 완료" : "승인완료"}
                   </span>
                   <strong className="shrink-0 whitespace-nowrap text-sm tabular-nums">{won(roundAmount)}</strong>
                 </> : <>
@@ -562,29 +591,11 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
                     {round.order.status === "CANCELLED" && <span className="text-slate-500"> · 주문 취소</span>}
                     {round.order.status === "COMPLETED" && <span className="text-slate-500"> · 결제 완료</span>}
                   </span>
-                  <strong className="shrink-0 whitespace-nowrap text-sm tabular-nums">{won(round.order.totalAmount)}</strong>
+                  <strong className="shrink-0 whitespace-nowrap text-sm tabular-nums">{won(roundAmount)}</strong>
                 </>}
               </div>
-              {round.source === "QR" && round.order.status === "REJECTED" && round.order.note && <p className="mt-1 text-xs leading-5 text-red-600">{round.order.note}</p>}
-              {round.source === "QR" ? acceptedPosOrder
-                ? <ul className="mt-1 divide-y divide-slate-200">{round.acceptedPosItems.filter(item => item.itemType !== "COMPONENT").map(renderPosItem)}</ul>
-                : <ul className="mt-1 divide-y divide-slate-200">{round.items.map(item => {
-                  const progress = getQrCookingProgress({ orderStatus: round.order.status, stage: item.stage,
-                    postCookTimerEligible: item.postCookTimerEligible, postCookTimerMinutes: item.postCookTimerMinutes,
-                    postCookTimerStartedAtMs: item.postCookTimerStartedAtMs }, serverNow);
-                  return <li className="py-2" key={item.qrOrderItemId}>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex min-w-0 flex-1 items-center gap-1 whitespace-nowrap">
-                        <span className={item.options.length ? "min-w-0 max-w-[55%] shrink-0 truncate font-medium" : "min-w-0 flex-[0_1_auto] truncate font-medium"}>{item.itemName}</span>
-                        {item.options.length > 0 && <span className="min-w-0 flex-[0_1_auto] truncate text-xs font-normal text-slate-500">{item.options.map(option => `${option.optionName}${option.qty > 1 ? ` ×${option.qty}` : ""}`).join(" · ")}</span>}
-                        <span className="shrink-0 tabular-nums">× {item.qty}</span>
-                      </div>
-                      <strong className="shrink-0 tabular-nums">{won(item.totalAmount)}</strong>
-                    </div>
-                    {item.showCookingProgress && progress && <QrCookingProgressLine progress={progress} />}
-                  </li>;
-                })}</ul>
-                : <ul className="mt-1 divide-y divide-slate-200">{round.items.filter(item => item.itemType !== "COMPONENT").map(renderPosItem)}</ul>}
+              <ul className="mt-1 divide-y divide-slate-200">{(round.source === "QR" ? round.acceptedPosItems : round.items)
+                .filter(item => item.itemType !== "COMPONENT").map(renderPosItem)}</ul>
             </article>
             {index === unifiedRounds.length - 1 ? <QrSummaryDivider /> : <QrReceiptDivider />}
           </div>;

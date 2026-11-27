@@ -6,20 +6,20 @@ const groupIds = items => items.filter(isNavigationGroup).map(item => item.id);
 
 test("OWNER navigation keeps every authorized management group", () => {
   const items = getAdminNavigationItems({ canAccessSecurity: true, canManageHosLayout: true, canManageMenu: true });
-  assert.deepEqual(groupIds(items), ["sales", "menus", "qr-settings", "pos-settings", "kds-settings", "hos-settings", "printing", "security"]);
+  assert.deepEqual(groupIds(items), ["sales", "menus", "qr-settings", "pos-settings", "kds-settings", "hos-settings", "tdktv", "printing", "security"]);
   assert.ok(items.some(item => !isNavigationGroup(item) && item.href === "/tdkadm/business-hours"));
 });
 
 test("ordinary staff retain allowed menus and cannot see restricted management groups", () => {
   const items = getAdminNavigationItems({});
   assert.deepEqual(items.filter(item => !isNavigationGroup(item)).map(item => item.label), ["대시보드", "고객 관리"]);
-  assert.deepEqual(groupIds(items), ["sales", "pos-settings", "kds-settings", "printing"]);
+  assert.deepEqual(groupIds(items), ["sales", "pos-settings", "kds-settings", "tdktv", "printing"]);
   assert.ok(!items.some(item => !isNavigationGroup(item) && item.href === "/tdkadm/business-hours"));
 });
 
 test("MANAGER receives menu and QR access without OWNER-only HOS or security", () => {
   const items = getAdminNavigationItems({ canManageMenu: true });
-  assert.deepEqual(groupIds(items), ["sales", "menus", "qr-settings", "pos-settings", "kds-settings", "printing"]);
+  assert.deepEqual(groupIds(items), ["sales", "menus", "qr-settings", "pos-settings", "kds-settings", "tdktv", "printing"]);
   assert.ok(items.some(item => !isNavigationGroup(item) && item.href === "/tdkadm/business-hours"));
 });
 

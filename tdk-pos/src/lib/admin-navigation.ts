@@ -63,6 +63,18 @@ export const adminNavigation: NavigationItem[] = [
     children: [{ label: "테이블 배치", href: "/tdkadm/hos/table-layout" }],
   },
   {
+    id: "tdktv",
+    label: "디지털 사이니지",
+    href: "/tdkadm/tv",
+    children: [
+      { label: "TV 관리", href: "/tdkadm/tv" },
+      { label: "이미지 관리", href: "/tdkadm/tv/images" },
+      { label: "재생 설정", href: "/tdkadm/tv/playback" },
+      { label: "안내문 관리", href: "/tdkadm/tv/notice" },
+      { label: "이벤트 효과 관리", href: "/tdkadm/tv/events" },
+    ],
+  },
+  {
     id: "printing",
     label: "인쇄 설정",
     href: "/tdkadm/settings/printing",

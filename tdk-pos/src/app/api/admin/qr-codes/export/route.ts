@@ -1,6 +1,7 @@
-import { inArray } from "drizzle-orm";
+import { inArray, eq, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/db";
-import { qrCodes } from "@/db/schema";
+import { diningTables, qrCodePreparations, qrCodes, qrTableLinks } from "@/db/schema";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import { createQrZipStream, publicQrUrl } from "@/lib/admin-qr-export";
 import { qrIssueDateInSeoul } from "@/lib/qr-management-number";
@@ -22,16 +23,22 @@ export async function POST(request: Request) {
   if (background !== "transparent" && background !== "white") {
     return Response.json({ success: false, message: "배경 옵션이 유효하지 않습니다." }, { status: 400 });
   }
-  const rows = await db.select({ qrCodeId: qrCodes.qrCodeId, identifier: qrCodes.identifier, managementNumber: qrCodes.managementNumber, status: qrCodes.status })
-    .from(qrCodes).where(inArray(qrCodes.qrCodeId, ids));
+  const preparedTable = alias(diningTables, "prepared_table");
+  const activeTable = alias(diningTables, "active_table");
+  const rows = await db.select({ qrCodeId: qrCodes.qrCodeId, identifier: qrCodes.identifier, managementNumber: qrCodes.managementNumber, status: qrCodes.status,
+    tableNo: sql<string | null>`COALESCE(${preparedTable.tableNo}, ${activeTable.tableNo})` })
+    .from(qrCodes).leftJoin(qrCodePreparations, eq(qrCodePreparations.qrCodeId, qrCodes.qrCodeId))
+    .leftJoin(preparedTable, eq(preparedTable.tableId, qrCodePreparations.tableId))
+    .leftJoin(qrTableLinks, eq(qrTableLinks.qrCodeId, qrCodes.qrCodeId))
+    .leftJoin(activeTable, eq(activeTable.tableId, qrTableLinks.tableId)).where(inArray(qrCodes.qrCodeId, ids));
   if (rows.length !== ids.length) return Response.json({ success: false, message: "선택한 QR 중 일부를 찾을 수 없습니다." }, { status: 404 });
   if (rows.some(row => row.status === "RETIRED")) return Response.json({ success: false, message: "폐기된 QR은 일괄 내보낼 수 없습니다. 목록을 새로고침해 주세요." }, { status: 409 });
   const byId = new Map(rows.map(row => [Number(row.qrCodeId), row]));
-  let entries: Array<{ fileName: string; targetUrl: string }>;
+  let entries: Array<{ fileName: string; targetUrl: string; label: string | null }>;
   try {
     entries = ids.map(id => {
       const row = byId.get(id)!;
-      return { fileName: `${row.managementNumber}.png`, targetUrl: publicQrUrl(row.identifier) };
+      return { fileName: `${row.managementNumber}.png`, targetUrl: publicQrUrl(row.identifier), label: row.tableNo ? `${row.tableNo}T` : null };
     });
   } catch {
     return Response.json({ success: false, message: "QR 공개 주소 설정을 확인해 주세요." }, { status: 503 });

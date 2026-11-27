@@ -9,6 +9,7 @@ import { checkouts, diningTables, orders, paymentSessionAllocations, payments, q
 import { QR_ORDER_ACCESS_MAX_AGE_SECONDS, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 import { classifyQrOrderAccessState } from "@/lib/qr-order-access-state";
 import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
+import { isQrOrderAuthFlowEnabled } from "@/lib/qr-order-auth-attempt-policy";
 
 export { QR_ORDER_ACCESS_MAX_AGE_SECONDS } from "@/lib/qr-session-expiry-policy";
 
@@ -38,6 +39,28 @@ export async function isDevelopmentQrTestDatabase() {
   } catch {
     return false;
   }
+}
+
+/** Verify the live database before using the optional representative-order tables. */
+export async function hasQrOrderAuthSchema() {
+  if (!((process.env.NODE_ENV === "development" && process.env.DB_NAME === "TDK_POS_TEST") ||
+    (process.env.NODE_ENV === "production" && process.env.DB_NAME === "TDK_POS"))) return false;
+  try {
+    const [rows] = await pool.query<(RowDataPacket & { databaseName: string | null; schemaColumns: number })[]>(`
+      SELECT DATABASE() AS databaseName,
+        (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND
+          (TABLE_NAME='qr_table_order_claims' AND COLUMN_NAME IN ('table_id','representative_qr_session_id','state','table_session_id') OR
+           TABLE_NAME='qr_order_auth_attempts' AND COLUMN_NAME IN ('attempt_id','qr_session_id','table_id','table_session_id_at_auth','session_snapshot_recorded','state','qr_order_id') OR
+           TABLE_NAME='tv_qr_auth_code_state' AND COLUMN_NAME IN ('state_id','code','expires_at') OR
+           TABLE_NAME='qr_sessions' AND COLUMN_NAME IN ('qr_session_id','table_id'))) AS schemaColumns`);
+    return rows[0]?.databaseName === process.env.DB_NAME && Number(rows[0]?.schemaColumns) === 16;
+  } catch { return false; }
+}
+
+/** Fail closed when the configured database, live connection, or TV-7 schema differs. */
+export async function isQrOrderAuthRuntimeEnabled() {
+  return isQrOrderAuthFlowEnabled(process.env.NODE_ENV, process.env.DB_NAME, process.env.TDK_QR_ORDER_AUTH_ENABLED) &&
+    await hasQrOrderAuthSchema();
 }
 
 export function hashQrToken(token: string) {
@@ -76,8 +99,6 @@ async function resolveQrOrderToken(token: string, testSession = false) {
     eq(qrSessions.tokenHash, tokenHash),
     eq(qrSessions.status, "ACTIVE"),
     or(isNull(qrSessions.sessionId), and(eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN")))!,
-    eq(qrCodes.targetType, "TABLE_ORDER"),
-    eq(qrCodes.status, "IN_USE"),
     eq(diningTables.isActive, 1),
   ];
   const tokenLifetime = sql`${qrSessions.createdAt} >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL ${testSession ? QR_DEV_TEST_MAX_AGE_SECONDS : QR_ORDER_ACCESS_MAX_AGE_SECONDS} SECOND)`;
@@ -98,18 +119,38 @@ async function resolveQrOrderToken(token: string, testSession = false) {
     languageCode: qrSessions.languageCode,
     createdAt: qrSessions.createdAt,
     qrTableId: qrSessions.tableId,
+    canViewOrders: sql<boolean>`CASE
+      WHEN ${qrSessions.tableId} <> ${tableSessions.tableId} THEN FALSE
+      WHEN ${qrSessions.accessGrantSource} = 'ORDER_APPROVED' THEN EXISTS (
+        SELECT 1 FROM qr_orders proof_order
+        JOIN orders proof_pos ON proof_pos.order_id = proof_order.accepted_order_id
+        WHERE proof_order.qr_order_id = ${qrSessions.accessGrantQrOrderId}
+          AND proof_order.qr_session_id = ${qrSessions.qrSessionId}
+          AND proof_order.status = 'ACCEPTED'
+          AND proof_pos.session_id = ${qrSessions.sessionId})
+      WHEN ${qrSessions.accessGrantSource} = 'INVITED' THEN EXISTS (
+        SELECT 1 FROM qr_session_invites proof_invite
+        WHERE proof_invite.invite_id = ${qrSessions.accessGrantInviteId}
+          AND proof_invite.session_id = ${qrSessions.sessionId}
+          AND proof_invite.redeemed_at IS NOT NULL)
+      WHEN ${qrSessions.accessGrantSource} = 'LEGACY'
+        THEN ${qrSessions.accessGrantedAt} IS NOT NULL
+      ELSE FALSE END`,
     tableId: diningTables.tableId,
     tableNo: diningTables.tableNo,
     capacity: diningTables.capacity,
   }).from(qrSessions)
     .leftJoin(tableSessions, eq(tableSessions.sessionId, qrSessions.sessionId))
     .innerJoin(diningTables, eq(diningTables.tableId, sql`COALESCE(${tableSessions.tableId}, ${qrSessions.tableId})`))
-    .innerJoin(qrTableLinks, eq(qrTableLinks.tableId, diningTables.tableId))
-    .innerJoin(qrCodes, eq(qrCodes.qrCodeId, qrTableLinks.qrCodeId))
-    .where(and(...whereConditions)).limit(1);
+    .leftJoin(qrTableLinks, eq(qrTableLinks.tableId, diningTables.tableId))
+    .leftJoin(qrCodes, eq(qrCodes.qrCodeId, qrTableLinks.qrCodeId))
+    .where(and(...whereConditions, or(
+      and(isNull(qrSessions.sessionId), eq(qrCodes.targetType, "TABLE_ORDER"), eq(qrCodes.status, "IN_USE")),
+      and(sql`${qrSessions.sessionId} IS NOT NULL`, eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN"))
+    )!)).limit(1);
   if (!row?.qrSessionId) return null;
   await db.update(qrSessions).set({ lastActiveAt: new Date() }).where(eq(qrSessions.qrSessionId, row.qrSessionId));
-  return { ...row, isTest: testSession, canViewOrders: row.sessionId !== null, sessionId: row.sessionId === null ? null : Number(row.sessionId), qrSessionId: Number(row.qrSessionId), tableId: Number(row.tableId), capacity: Number(row.capacity) };
+  return { ...row, isTest: testSession, canViewOrders: Boolean(row.canViewOrders), sessionId: row.sessionId === null ? null : Number(row.sessionId), qrSessionId: Number(row.qrSessionId), tableId: Number(row.tableId), capacity: Number(row.capacity) };
 }
 
 export async function resolveQrDevTestSession(token: unknown) {

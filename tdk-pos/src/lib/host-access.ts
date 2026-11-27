@@ -67,16 +67,18 @@ function isPublicAsset(pathname: string, method: string): boolean {
     || /^\/api\/qr\/(?:title-images|notices\/images)\/[0-9a-f-]{36}$/i.test(pathname);
 }
 function isAdminPageOrApi(pathname: string): boolean {
-  return isPathOrChild(pathname, "/admin") || isPathOrChild(pathname, "/api/admin") || isPathOrChild(pathname, "/api/admin-center");
+  return isPathOrChild(pathname, "/admin") || isPathOrChild(pathname, "/api/admin") || isPathOrChild(pathname, "/api/admin-center")
+    || isPathOrChild(pathname, "/api/tdktv");
 }
 function isCustomerQrApiPathAllowed(pathname: string, method: string): boolean {
   if (method === "GET" || method === "HEAD") return pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title"
     || pathname === "/api/qr/notices" || pathname === "/api/qr/table-order-link"
-    || pathname === "/api/qr/table-orders" || pathname === "/api/qr/visit"
+    || pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/visit"
     || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname)
     || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)
     || /^\/api\/qr\/table-orders\/[1-9]\d*$/.test(pathname);
-  if (method === "POST") return pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-invites" || pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" || pathname === "/api/qr/cart-events";
+  if (method === "POST") return pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/order-auth/verify" || pathname === "/api/qr/order-invites" || pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" || pathname === "/api/qr/cart-events";
+  if (method === "DELETE" && pathname === "/api/qr/order-auth") return true;
   return method === "PATCH" || method === "DELETE" ? /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname) : false;
 }
 function isCustomerQrPageAllowed(pathname: string, method: string): boolean {
@@ -110,6 +112,10 @@ export function isExternalHosPath(pathname: string): boolean {
 export function isExternalAdminPathAllowed(pathname: string, method: string): boolean {
   if (pathname === "/") return isReadOnly(method);
   if (isPublicAsset(pathname, method)) return true;
+  if (/^\/tdktv(?:\/|$)/i.test(pathname)) return isReadOnly(method) &&
+    (/^\/tdktv\/(?:dp[1-5]|ad-01|menu-0[1-4])$/i.test(pathname));
+  if (/^\/api\/tdktv(?:\/|$)/i.test(pathname)) return isReadOnly(method) &&
+    (/^\/api\/tdktv\/(?:DP[1-5]|qr-auth-code)$/i.test(pathname) || /^\/api\/tdktv\/images\/[1-9]\d*$/.test(pathname));
   if (isCustomerQrPageAllowed(pathname, method) || isCustomerQrApiPathAllowed(pathname, method.toUpperCase())) return true;
   if (isExternalPosPath(pathname) || isExternalKdsPath(pathname)) return false;
   // Credential setup endpoints enforce their own one-time proof and origin checks.

@@ -11,6 +11,7 @@ import { getPosLoginMode } from "@/lib/pos-login-mode";
 import { captureCardPayment } from "@/lib/payment/card-payment-adapter";
 import { createLookupCode } from "@/lib/lookup-code";
 import { DailyOpeningRequiredError, ensureDailyOpeningCash } from "@/lib/daily-opening-cash";
+import { finishQrOrderAuthorizationForClosedVisits } from "@/lib/qr-table-order-claims";
 
 type PaymentCode = "CARD" | "CASH" | "TRANSFER" | "MEAL_TICKET" | "GIFT" | "OTHER";
 const paymentCodes = new Set<PaymentCode>(["CARD", "CASH", "TRANSFER", "MEAL_TICKET", "GIFT", "OTHER"]);
@@ -51,8 +52,11 @@ async function closeSessionsAndMerges(
   const sessionRows = await tx.select({ sessionId: tableSessions.sessionId, tableId: tableSessions.tableId })
     .from(tableSessions).where(inArray(tableSessions.sessionId, sessionIds));
   const tableIds = [...new Set(sessionRows.flatMap(row => row.tableId === null ? [] : [Number(row.tableId)]))];
+  if (tableIds.length) await tx.select({ tableId: diningTables.tableId }).from(diningTables)
+    .where(inArray(diningTables.tableId, tableIds.slice().sort((a, b) => a - b))).for("update");
   const qrSessionScope = tableIds.length
-    ? or(inArray(qrSessions.sessionId, sessionIds), inArray(qrSessions.tableId, tableIds))!
+    ? or(inArray(qrSessions.sessionId, sessionIds), and(isNull(qrSessions.sessionId),
+      inArray(qrSessions.tableId, tableIds), eq(qrSessions.status, "ACTIVE")))!
     : inArray(qrSessions.sessionId, sessionIds);
   const relatedQrSessions = await tx.select({ qrSessionId: qrSessions.qrSessionId })
     .from(qrSessions).where(qrSessionScope).for("update");
@@ -65,6 +69,7 @@ async function closeSessionsAndMerges(
   await tx.update(tableSessions)
     .set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP`, closedByStaffId })
     .where(inArray(tableSessions.sessionId, sessionIds));
+  await finishQrOrderAuthorizationForClosedVisits(tx, sessionIds, tableIds, qrSessionIds);
   if (qrSessionIds.length) await tx.update(qrSessions).set({ status: "CLOSED", closedAt: sql`CURRENT_TIMESTAMP` })
     .where(and(inArray(qrSessions.qrSessionId, qrSessionIds), eq(qrSessions.status, "ACTIVE")));
   await tx.update(qrSessionInvites).set({ revokedAt: sql`CURRENT_TIMESTAMP` })
@@ -330,6 +335,8 @@ export async function POST(request: Request) {
     if (!Number.isSafeInteger(tableId) || tableId === 0 || (body.sessionId !== undefined && Number(body.sessionId) <= 0)) throw new CheckoutError("주문을 확인해 주세요.", 400);
     const action = body.action;
     const result = await db.transaction(async tx => {
+      if (action === "COMPLETE" && tableId > 0) await tx.select({ tableId: diningTables.tableId })
+        .from(diningTables).where(eq(diningTables.tableId, tableId)).for("update").limit(1);
       if (action === "PAY" || action === "PAY_OTHER" || action === "PAY_CUSTOMER" || action === "COMPLETE")
         await ensureDailyOpeningCash(tx);
       requestPhase = `load bill (${String(action)})`;

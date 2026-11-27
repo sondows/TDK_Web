@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLogs, diningTables, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { auditLogs, diningTables, orders, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { createQrAccessToken, getQrAccessTokenFromCookies, hashQrToken, qrSessionRedirectResponse, resolveQrOrderSession } from "@/lib/qr-order-auth";
 import { recordQrAccess, type QrAccessFailureType } from "@/lib/qr-access-log";
 import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
@@ -63,22 +63,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
       return unavailable(request);
     }
     const qrTableId = Number(qr.tableId);
+    const activeVisits = await db.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
+      .where(and(eq(tableSessions.tableId, qrTableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN")))
+      .limit(2);
+    let currentVisitHasOrders = activeVisits.length > 1;
+    if (activeVisits.length === 1) {
+      const [currentVisitOrder] = await db.select({ orderId: orders.orderId }).from(orders)
+        .where(and(eq(orders.sessionId, activeVisits[0].sessionId), eq(orders.orderType, "POS"))).limit(1);
+      currentVisitHasOrders = Boolean(currentVisitOrder);
+    }
+    const entryDestination = currentVisitHasOrders ? "/qrorder" : "/qrorder/order";
 
     const currentToken = await getQrAccessTokenFromCookies();
+    let reusableQrSessionId: number | null = null;
     if (currentToken) {
       const current = await resolveQrOrderSession(currentToken);
       if (current?.tableId === qrTableId) {
-        await recordQrAccess(qrCodeId, "QR_ACCESS_REUSED");
-        authEventRecorded = true;
-        if (current.sessionId !== null) return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
-        const [ownOrder] = await db.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
-          .where(eq(qrOrders.qrSessionId, current.qrSessionId)).limit(1);
-        if (ownOrder) return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
-        const [occupied] = await db.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
-          .where(and(eq(tableSessions.tableId, qrTableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).limit(1);
-        return Response.redirect(qrCustomerRedirectUrl(request, occupied ? "/qrorder/join-required" : "/qrorder/order"));
+        if (current.canViewOrders) {
+          await recordQrAccess(qrCodeId, "QR_ACCESS_REUSED");
+          authEventRecorded = true;
+          return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
+        }
+        reusableQrSessionId = current.qrSessionId;
       }
-      if (current) {
+      if (current && current.tableId !== qrTableId) {
         await recordQrAccess(qrCodeId, "QR_ACCESS_FAILED", "SESSION_TABLE_MISMATCH");
         authEventRecorded = true;
         return unavailable(request);
@@ -98,21 +106,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
         const [link] = await tx.select({ qrCodeId: qrTableLinks.qrCodeId }).from(qrTableLinks)
           .where(and(eq(qrTableLinks.qrCodeId, qrCodeId), eq(qrTableLinks.tableId, qrTableId))).limit(1);
         if (!link) return { failure: "QR_LINK_CHANGED" as const };
-        const openSessions = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
-          .where(and(eq(tableSessions.tableId, table.tableId), eq(tableSessions.sessionKind, "DINE_IN"), eq(tableSessions.status, "OPEN"))).for("update").limit(1);
-        const openSessionId = openSessions[0]?.sessionId ?? null;
-        const existingSessionQr = openSessionId === null ? [] : await tx.select({ qrSessionId: qrSessions.qrSessionId })
-          .from(qrSessions).where(eq(qrSessions.sessionId, openSessionId)).for("update").limit(1);
-        // The table lock serializes first scans. Claim a POS-created session only
-        // when it has never had a QR member; even closed/cancelled QR rows keep
-        // ownership reserved so an expired owner cannot be silently replaced.
-        const canClaimOpenSession = openSessionId !== null && existingSessionQr.length === 0;
-        await tx.insert(qrSessions).values({ sessionId: canClaimOpenSession ? openSessionId : null, tableId: table.tableId,
+        if (reusableQrSessionId !== null) {
+          const [reusable] = await tx.select({ qrSessionId: qrSessions.qrSessionId }).from(qrSessions)
+            .where(and(eq(qrSessions.qrSessionId, reusableQrSessionId), eq(qrSessions.tableId, qrTableId), eq(qrSessions.status, "ACTIVE"), isNull(qrSessions.sessionId)))
+            .for("update").limit(1);
+          if (!reusable) return { failure: "SESSION_ISSUE_FAILED" as const };
+          const [ownOrder] = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
+            .where(eq(qrOrders.qrSessionId, reusableQrSessionId)).limit(1);
+          const destination = ownOrder || currentVisitHasOrders ? "/qrorder" : "/qrorder/order";
+          return { response: Response.redirect(qrCustomerRedirectUrl(request, destination)) };
+        }
+        await tx.insert(qrSessions).values({ sessionId: null, tableId: table.tableId,
           tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
-        const destination = openSessionId !== null && !canClaimOpenSession
-          ? "/qrorder/join-required"
-          : canClaimOpenSession ? "/qrorder" : "/qrorder/order";
-        return { response: qrSessionRedirectResponse(request, destination, token) };
+        return { response: qrSessionRedirectResponse(request, entryDestination, token) };
       });
     } catch (error) {
       logQrAccessError("SESSION_ISSUE", qrCodeId, error);
@@ -127,7 +133,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
       return unavailable(request);
     }
 
-    await recordQrAccess(qrCodeId, "QR_ACCESS_ISSUED");
+    await recordQrAccess(qrCodeId, reusableQrSessionId === null ? "QR_ACCESS_ISSUED" : "QR_ACCESS_REUSED");
     authEventRecorded = true;
     return result.response;
   } catch (error) {

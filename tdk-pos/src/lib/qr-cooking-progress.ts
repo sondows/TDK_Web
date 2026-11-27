@@ -1,10 +1,7 @@
 export type QrCookingStage = "WAITING" | "COOKING" | "DONE" | null;
 
-const qrCookingProgressCategories = new Set(["김치찌개", "찌개"]);
-
 export function isQrCookingProgressMenu(input: { categoryName: string | null; kdsKind: string; kdsVisible: boolean }) {
-  return input.kdsVisible && input.kdsKind === "POT" && input.categoryName !== null &&
-    qrCookingProgressCategories.has(input.categoryName.trim());
+  return input.kdsVisible && input.kdsKind !== "NONE";
 }
 
 export type QrCookingProgressInput = {
@@ -20,6 +17,8 @@ export type QrCookingProgress = {
   tableBoilLabel: string;
   timerSegments: number;
   timerElapsedSegments: number;
+  remainingSeconds: number | null;
+  showBoilStep: boolean;
 };
 
 export function getQrCookingProgress(input: QrCookingProgressInput, nowMs: number): QrCookingProgress | null {
@@ -44,16 +43,19 @@ export function getQrCookingProgress(input: QrCookingProgressInput, nowMs: numbe
     : 0;
   const currentStep = input.stage === "WAITING" ? 1
     : input.stage === "COOKING" ? 2
-      : hasBoilTimer && !isFinalComplete ? 4 : 5;
+      : hasBoilTimer && !isFinalComplete ? 4
+        : input.stage === "DONE" && input.postCookTimerEligible && !hasBoilTimer ? 3 : 5;
   const timerSegments = hasBoilTimer && !isFinalComplete ? 10 : 0;
   const tableBoilLabel = currentStep === 4
-    ? `테이블끓이기(${timerElapsedSegments * 10}%)`
-    : "테이블끓이기";
+    ? `매장끓이기(${timerElapsedSegments * 10}%)`
+    : "매장끓이기";
 
   return {
     currentStep,
     tableBoilLabel,
     timerSegments,
     timerElapsedSegments,
+    remainingSeconds: currentStep === 4 ? Math.max(0, Math.ceil(boilingSeconds - timerElapsedSeconds)) : null,
+    showBoilStep: input.postCookTimerEligible,
   };
 }

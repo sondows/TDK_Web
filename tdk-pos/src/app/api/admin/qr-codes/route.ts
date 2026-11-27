@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { db } from "@/db";
-import { auditLogs, diningTables, qrCodeDailyCounters, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { auditLogs, diningTables, qrCodeDailyCounters, qrCodePreparations, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import { createQrIdentifier } from "@/lib/qr-order-auth";
 import { formatQrManagementNumber, qrIssueDateInSeoul } from "@/lib/qr-management-number";
@@ -16,10 +17,15 @@ const qrHistoryActions = ["QR_TABLE_ASSIGN", "QR_TARGET_ASSIGN", "QR_RETIRE", "Q
 export async function GET() {
   const auth = await requireQrNoticeManager();
   if ("error" in auth) return auth.error;
+  const preparedTables = alias(diningTables, "prepared_table");
   const [rows, tables] = await Promise.all([db.select({ qrCodeId: qrCodes.qrCodeId, managementNumber: qrCodes.managementNumber, targetType: qrCodes.targetType,
-    status: qrCodes.status, createdAt: qrCodes.createdAt, updatedAt: qrCodes.updatedAt, tableId: qrTableLinks.tableId, tableNo: diningTables.tableNo })
+    status: qrCodes.status, createdAt: qrCodes.createdAt, updatedAt: qrCodes.updatedAt, tableId: qrTableLinks.tableId, tableNo: diningTables.tableNo,
+    preparationTableId: qrCodePreparations.tableId, preparationTableNo: preparedTables.tableNo })
     .from(qrCodes).leftJoin(qrTableLinks, eq(qrTableLinks.qrCodeId, qrCodes.qrCodeId))
-    .leftJoin(diningTables, eq(diningTables.tableId, qrTableLinks.tableId)).orderBy(asc(qrCodes.createdAt), asc(qrCodes.qrCodeId)),
+    .leftJoin(diningTables, eq(diningTables.tableId, qrTableLinks.tableId))
+    .leftJoin(qrCodePreparations, eq(qrCodePreparations.qrCodeId, qrCodes.qrCodeId))
+    .leftJoin(preparedTables, eq(preparedTables.tableId, qrCodePreparations.tableId))
+    .orderBy(asc(qrCodes.createdAt), asc(qrCodes.qrCodeId)),
     db.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo, isActive: diningTables.isActive }).from(diningTables).orderBy(asc(diningTables.sortOrder), asc(diningTables.tableNo))]);
   const retiredIds = rows.filter(row => row.status === "RETIRED").map(row => row.qrCodeId);
   const historyRows = retiredIds.length ? await db.select({ entityId: auditLogs.entityId, actionType: auditLogs.actionType, description: auditLogs.description, createdAt: auditLogs.createdAt })
@@ -67,7 +73,10 @@ export async function GET() {
     codes: rows.map(row => {
       const qrCodeId = Number(row.qrCodeId);
       return { ...row, status: row.status === "UNUSED" && row.targetType !== "UNASSIGNED" ? "IN_USE" : row.status,
-        qrCodeId, tableId: row.tableId === null ? null : Number(row.tableId), history: historyByQr.get(qrCodeId) ?? [],
+        qrCodeId, tableId: row.tableId === null ? null : Number(row.tableId),
+        preparationTableId: row.preparationTableId === null ? null : Number(row.preparationTableId),
+        preparationTableNo: row.preparationTableNo,
+        history: historyByQr.get(qrCodeId) ?? [],
         attentionRequired: tableQrIds.has(qrCodeId) && Boolean(anomaliesByQr.get(qrCodeId)?.length),
         attentionLabels: tableQrIds.has(qrCodeId) ? anomaliesByQr.get(qrCodeId) ?? [] : [] };
     }), accessEventsTruncated: accessRows.length >= ACCESS_RECORD_LIMIT }, { headers: { "Cache-Control": "no-store" } });
@@ -75,7 +84,51 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await requireQrNoticeManager();
   if ("error" in auth) return auth.error;
-  const body = await request.json().catch(() => null) as { count?: unknown } | null;
+  const body = await request.json().catch(() => null) as { count?: unknown; action?: unknown; tableIds?: unknown; allTables?: unknown } | null;
+  if (body?.action === "PREPARE_TABLES") {
+    const requestedIds = body.allTables === true ? null : Array.isArray(body.tableIds) ? body.tableIds.map(Number) : null;
+    if (body.allTables !== true && (!requestedIds?.length || requestedIds.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(requestedIds).size !== requestedIds.length))
+      return Response.json({ success: false, message: "준비할 테이블을 선택해 주세요." }, { status: 400 });
+    try {
+      const prepared = await db.transaction(async tx => {
+        const activeTables = await tx.select({ tableId: diningTables.tableId, tableNo: diningTables.tableNo }).from(diningTables)
+          .where(requestedIds ? and(eq(diningTables.isActive, 1), inArray(diningTables.tableId, requestedIds)) : eq(diningTables.isActive, 1))
+          .orderBy(asc(diningTables.sortOrder), asc(diningTables.tableNo)).for("update");
+        if (!activeTables.length || (requestedIds && activeTables.length !== requestedIds.length)) throw new Error("INVALID_TABLES");
+        const ids = activeTables.map(row => Number(row.tableId));
+        const existing = await tx.select({ tableId: qrCodePreparations.tableId }).from(qrCodePreparations).where(inArray(qrCodePreparations.tableId, ids));
+        if (existing.length) throw new Error("PREPARATION_EXISTS");
+        const issueDate = qrIssueDateInSeoul(new Date());
+        await tx.execute(sql`INSERT INTO qr_code_daily_counters (issue_date, last_serial) VALUES (${issueDate}, 0) ON DUPLICATE KEY UPDATE last_serial = qr_code_daily_counters.last_serial`);
+        const [counter] = await tx.select({ lastSerial: qrCodeDailyCounters.lastSerial }).from(qrCodeDailyCounters).where(eq(qrCodeDailyCounters.issueDate, issueDate)).for("update").limit(1);
+        if (!counter) throw new Error("COUNTER_NOT_FOUND");
+        const lastSerial = Number(counter.lastSerial) + activeTables.length;
+        if (!Number.isSafeInteger(lastSerial) || lastSerial > 4_294_967_295) throw new Error("DAILY_SERIAL_LIMIT");
+        const now = new Date();
+        const qrRows = activeTables.map((table, index) => ({ identifier: createQrIdentifier(),
+          managementNumber: formatQrManagementNumber(issueDate, Number(counter.lastSerial) + index + 1),
+          targetType: "UNASSIGNED" as const, status: "UNUSED" as const,
+          createdByStaffId: auth.staff.staffId, updatedByStaffId: auth.staff.staffId }));
+        await tx.update(qrCodeDailyCounters).set({ lastSerial }).where(eq(qrCodeDailyCounters.issueDate, issueDate));
+        await tx.insert(qrCodes).values(qrRows);
+        const inserted = await tx.select({ qrCodeId: qrCodes.qrCodeId, identifier: qrCodes.identifier, managementNumber: qrCodes.managementNumber })
+          .from(qrCodes).where(inArray(qrCodes.managementNumber, qrRows.map(row => row.managementNumber)));
+        if (inserted.length !== activeTables.length) throw new Error("PREPARATION_INSERT_FAILED");
+        const qrByNumber = new Map(inserted.map(row => [row.managementNumber, row]));
+        const prepRows = qrRows.map((row, index) => ({ qrCodeId: qrByNumber.get(row.managementNumber)!.qrCodeId,
+          tableId: activeTables[index].tableId, preparedByStaffId: auth.staff.staffId, preparedAt: now }));
+        await tx.insert(qrCodePreparations).values(prepRows);
+        await tx.insert(auditLogs).values({ staffId: auth.staff.staffId, actionType: "QR_TABLE_PREPARE", entityType: "QR_CODE",
+          description: `Prepared ${prepRows.length} table QR replacements` });
+        return { count: prepRows.length };
+      });
+      return Response.json({ success: true, prepared: prepared.count }, { status: 201 });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "";
+      const status = reason === "INVALID_TABLES" ? 400 : reason === "PREPARATION_EXISTS" ? 409 : 503;
+      return Response.json({ success: false, message: status === 409 ? "선택한 테이블에 이미 준비 QR이 있습니다." : status === 400 ? "활성 테이블을 확인해 주세요." : "테이블 QR 준비에 실패했습니다." }, { status });
+    }
+  }
   const count = Number(body?.count);
   if (!Number.isInteger(count) || count < 1 || count > 500) return Response.json({ success: false, message: "발행 수량은 1~500개로 입력해 주세요." }, { status: 400 });
   try {
@@ -141,10 +194,46 @@ export async function PATCH(request: Request) {
         await tx.update(qrSessions).set({ status: "CLOSED", closedAt: now })
           .where(and(eq(qrSessions.tableId, tableId), isNull(qrSessions.sessionId), eq(qrSessions.status, "ACTIVE")));
       };
+      if (body?.action === "ACTIVATE_PREPARATION") {
+        if (qr.status !== "UNUSED" || qr.targetType !== "UNASSIGNED") throw new Error("PREPARATION_QR_INVALID");
+        const [preparation] = await tx.select({ tableId: qrCodePreparations.tableId })
+          .from(qrCodePreparations).where(eq(qrCodePreparations.qrCodeId, qrCodeId)).for("update").limit(1);
+        if (!preparation) throw new Error("PREPARATION_NOT_FOUND");
+        const [existingQrLink] = await tx.select({ qrCodeId: qrTableLinks.qrCodeId })
+          .from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
+        if (existingQrLink) throw new Error("PREPARATION_QR_ALREADY_LINKED");
+        const tableId = Number(preparation.tableId);
+        const [table] = await tx.select({ tableId: diningTables.tableId }).from(diningTables)
+          .where(and(eq(diningTables.tableId, tableId), eq(diningTables.isActive, 1))).for("update").limit(1);
+        if (!table) throw new Error("NOT_FOUND_TABLE");
+        await assertNoPendingQrOrders([tableId]);
+        const [oldLink] = await tx.select({ qrCodeId: qrTableLinks.qrCodeId }).from(qrTableLinks)
+          .where(eq(qrTableLinks.tableId, tableId)).for("update").limit(1);
+        if (oldLink) {
+          const [oldQr] = await tx.select({ qrCodeId: qrCodes.qrCodeId, managementNumber: qrCodes.managementNumber })
+            .from(qrCodes).where(eq(qrCodes.qrCodeId, oldLink.qrCodeId)).for("update").limit(1);
+          if (oldQr) {
+            await tx.delete(qrTableLinks).where(eq(qrTableLinks.qrCodeId, oldQr.qrCodeId));
+            await tx.update(qrCodes).set({ targetType: "UNASSIGNED", status: "RETIRED", updatedByStaffId: auth.staff.staffId, updatedAt: now })
+              .where(eq(qrCodes.qrCodeId, oldQr.qrCodeId));
+            await tx.insert(auditLogs).values({ staffId: auth.staff.staffId, actionType: "QR_RETIRED_BY_REPLACEMENT",
+              entityType: "QR_CODE", entityId: oldQr.qrCodeId, description: `Replaced by prepared QR ${qr.managementNumber}` });
+          }
+        }
+        await closeUnboundCustomers(tableId);
+        await tx.insert(qrTableLinks).values({ qrCodeId, tableId, assignedByStaffId: auth.staff.staffId });
+        await tx.update(qrCodes).set({ targetType: "TABLE_ORDER", status: "IN_USE", updatedByStaffId: auth.staff.staffId, updatedAt: now })
+          .where(eq(qrCodes.qrCodeId, qrCodeId));
+        await tx.delete(qrCodePreparations).where(eq(qrCodePreparations.qrCodeId, qrCodeId));
+        await tx.insert(auditLogs).values({ staffId: auth.staff.staffId, actionType: "QR_TABLE_ACTIVATE", entityType: "QR_CODE",
+          entityId: qrCodeId, description: `Activated replacement QR for table ${tableId}` });
+        return;
+      }
       if (body?.action === "RETIRE") {
         const [link] = await tx.select({ tableId: qrTableLinks.tableId }).from(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId)).for("update").limit(1);
         if (link) await assertNoPendingQrOrders([Number(link.tableId)]);
         if (link) await closeUnboundCustomers(Number(link.tableId));
+        await tx.delete(qrCodePreparations).where(eq(qrCodePreparations.qrCodeId, qrCodeId));
         await tx.delete(qrTableLinks).where(eq(qrTableLinks.qrCodeId, qrCodeId));
         await tx.update(qrCodes).set({ targetType: "UNASSIGNED", status: "RETIRED", updatedByStaffId: auth.staff.staffId, updatedAt: now }).where(eq(qrCodes.qrCodeId, qrCodeId));
         await tx.insert(auditLogs).values({ staffId: auth.staff.staffId, actionType: "QR_RETIRE", entityType: "QR_CODE", entityId: qrCodeId, description: `Retired QR ${qr.managementNumber}` });
@@ -152,6 +241,9 @@ export async function PATCH(request: Request) {
       }
       const targetType = body?.targetType;
       if (targetType === "TABLE_ORDER") {
+        const [preparation] = await tx.select({ qrCodeId: qrCodePreparations.qrCodeId }).from(qrCodePreparations)
+          .where(eq(qrCodePreparations.qrCodeId, qrCodeId)).limit(1);
+        if (preparation) throw new Error("USE_PREPARATION_ACTIVATION");
         if (qr.status === "LOCKED") throw new Error("LEGACY_LOCKED");
         const tableId = Number(body?.tableId);
         if (!Number.isSafeInteger(tableId) || tableId <= 0) throw new Error("INVALID_TABLE");
@@ -207,8 +299,8 @@ export async function PATCH(request: Request) {
     return Response.json({ success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    const status = message === "NOT_FOUND" || message === "NOT_FOUND_TABLE" ? 404 : message === "INVALID_TABLE" || message === "INVALID_ACTION" ? 400 : 409;
-    const userMessage = message === "RETIRED" ? "폐기된 QR은 다시 연결할 수 없습니다." : message === "LEGACY_LOCKED" ? "기존 잠금 상태의 QR은 변경할 수 없습니다. 전체 목록에서 상태를 확인해 주세요." : message === "PENDING_QR_ORDERS" ? "처리 대기 중인 QR 주문이 있어 재발행·재할당할 수 없습니다. 대기 주문을 먼저 확인해 주세요." : status === 404 ? "QR 또는 테이블을 찾을 수 없습니다." : status === 400 ? "요청 값이 유효하지 않습니다." : "QR 연결에 실패했습니다. 새로고침 후 다시 시도해 주세요.";
+    const status = message === "NOT_FOUND" || message === "NOT_FOUND_TABLE" || message === "PREPARATION_NOT_FOUND" ? 404 : message === "INVALID_TABLE" || message === "INVALID_ACTION" ? 400 : 409;
+    const userMessage = message === "RETIRED" ? "폐기된 QR은 다시 연결할 수 없습니다." : message === "USE_PREPARATION_ACTIVATION" ? "준비 QR은 테이블별 활성화 기능으로 적용해 주세요." : message === "PREPARATION_QR_INVALID" || message === "PREPARATION_QR_ALREADY_LINKED" ? "준비 QR 상태가 올바르지 않습니다. QR 목록을 새로고침해 확인해 주세요." : message === "LEGACY_LOCKED" ? "기존 잠금 상태의 QR은 변경할 수 없습니다. 전체 목록에서 상태를 확인해 주세요." : message === "PENDING_QR_ORDERS" ? "처리 대기 중인 QR 주문이 있어 재발행·재할당할 수 없습니다. 대기 주문을 먼저 확인해 주세요." : status === 404 ? "QR 또는 테이블을 찾을 수 없습니다." : status === 400 ? "요청 값이 유효하지 않습니다." : "QR 연결에 실패했습니다. 새로고침 후 다시 시도해 주세요.";
     return Response.json({ success: false, message: userMessage }, { status });
   }
 }

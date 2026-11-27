@@ -1,14 +1,25 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { diningTables, qrOrders, qrSessionInvites, qrSessions, tableSessions } from "@/db/schema";
-import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
+import { auditLogs, diningTables, qrOrders, qrSessionInvites, qrSessions, tableSessions } from "@/db/schema";
+import { getCurrentStaff } from "@/lib/auth";
+import { getCurrentHosStaff } from "@/lib/hos-auth";
+import { isKnownInternalHost } from "@/lib/host-access";
+import { isHttpsSameOriginRequest, isSameOriginRequest } from "@/lib/kds-device";
 import { shouldBlockQrTokenCancellation } from "@/lib/qr-processing-policy";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const auth = await requireQrNoticeManager();
-  if ("error" in auth) return auth.error;
+  // Production also serves POS/HOS on configured internal HTTP hosts.
+  const sameOrigin = isHttpsSameOriginRequest(request) ||
+    (isKnownInternalHost(request.headers.get("host")) && isSameOriginRequest(request));
+  if (!sameOrigin) {
+    return Response.json({ success: false, message: "허용되지 않은 요청 출처입니다." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+  const actor = await getCurrentStaff() ?? await getCurrentHosStaff();
+  if (!actor) {
+    return Response.json({ success: false, message: "POS 또는 HOS 로그인이 필요합니다." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
 
   const body = await request.json().catch(() => null) as { tableId?: unknown } | null;
   const tableId = Number(body?.tableId);
@@ -43,6 +54,15 @@ export async function POST(request: Request) {
         .where(and(inArray(qrSessions.qrSessionId, activeQrSessionIds), eq(qrSessions.status, "ACTIVE")));
       if (sessionIds.length) await tx.update(qrSessionInvites).set({ revokedAt: now })
         .where(and(inArray(qrSessionInvites.sessionId, sessionIds), isNull(qrSessionInvites.revokedAt)));
+
+      await tx.insert(auditLogs).values({
+        staffId: actor.staffId,
+        actionType: "QR_TABLE_TOKEN_CANCELLED",
+        entityType: "DINING_TABLE",
+        entityId: tableId,
+        description: `result=success;closedQrSessions=${activeQrSessionIds.length}`,
+        createdAt: now,
+      });
 
       return { kind: "CANCELLED" as const };
     });

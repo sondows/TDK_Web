@@ -32,8 +32,8 @@ async function main() {
   let tableId;
   let qrCodeId;
   let tableSessionId;
-  let staleSessionId;
-  let posOrderId;
+  let nextTableSessionId;
+  let firstVisitOrderId;
   const marker = `ZZQR${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   try {
     const [[identity]] = await connection.query("SELECT DATABASE() AS name");
@@ -164,73 +164,108 @@ async function main() {
     });
     assert.ok([401, 409].includes(afterClose.status), "closed session cannot read orders");
 
-    // POS-first session: simultaneous first scans must produce one owner and
-    // one join-required visitor. The owner must see this session's POS order.
+    // POS-first session: scanning grants read-only access to the current visit,
+    // but does not bind a QR session or claim TV-7 representative order rights.
     const [sessionInsert] = await connection.query(
       "INSERT INTO table_sessions (table_id, opened_by_staff_id, session_kind, status, person_count) VALUES (?, ?, 'DINE_IN', 'OPEN', 2)",
       [tableId, staff.staff_id],
     );
     tableSessionId = Number(sessionInsert.insertId);
-    const [posOrder] = await connection.query(
+    const [firstVisitOrderInsert] = await connection.query(
       "INSERT INTO orders (session_id, order_type, status, subtotal_amount, discount_amount, total_amount, created_by_staff_id) VALUES (?, 'POS', 'ACCEPTED', 12000, 0, 12000, ?)",
       [tableSessionId, staff.staff_id],
     );
-    posOrderId = Number(posOrder.insertId);
+    firstVisitOrderId = Number(firstVisitOrderInsert.insertId);
     const firstScans = await Promise.all([0, 1].map(() => fetch(`${origin}/tdkqrs/${qr.identifier}`, {
       redirect: "manual", signal: AbortSignal.timeout(15000),
     })));
-    assert.deepEqual(firstScans.map(response => new URL(response.headers.get("location"), origin).pathname).sort(),
-      ["/qrorder", "/qrorder/join-required"], "only one concurrent first scan can claim a POS-first session");
-    const ownerResponse = firstScans.find(response => new URL(response.headers.get("location"), origin).pathname === "/qrorder");
-    const ownerCookie = (ownerResponse.headers.get("set-cookie") ?? "").split(";", 1)[0];
-    assert.match(ownerCookie, /tdkon_qr_session=/);
-    const [sessionMembers] = await connection.query(
-      "SELECT qr_session_id, session_id FROM qr_sessions WHERE table_id = ? AND session_id = ? ORDER BY qr_session_id",
-      [tableId, tableSessionId],
+    assert.deepEqual(firstScans.map(response => new URL(response.headers.get("location"), origin).pathname),
+      ["/qrorder", "/qrorder"], "customers land directly on current POS history when the visit has orders");
+    const customerCookies = firstScans.map(response => (response.headers.get("set-cookie") ?? "").split(";", 1)[0]);
+    customerCookies.forEach(cookie => assert.match(cookie, /tdkon_qr_session=/));
+    assert.notEqual(customerCookies[0], customerCookies[1], "concurrent customers receive independent tokens");
+    for (const cookie of customerCookies) {
+      const orderPage = await fetch(`${origin}/qrorder/order`, {
+        headers: { cookie }, signal: AbortSignal.timeout(15000),
+      });
+      assert.equal(orderPage.status, 200, "each customer can open the menu before order authorization");
+      const historyPage = await fetch(`${origin}/qrorder`, {
+        headers: { cookie }, signal: AbortSignal.timeout(15000),
+      });
+      assert.equal(historyPage.status, 200, "each customer can open the current-visit history screen");
+    }
+    const [unboundSessions] = await connection.query(
+      "SELECT qr_session_id, session_id FROM qr_sessions WHERE table_id = ? AND status = 'ACTIVE' ORDER BY qr_session_id", [tableId],
     );
-    assert.equal(sessionMembers.length, 1, "exactly one QR owner is bound to the open POS session");
-    const posHistory = await fetch(`${origin}/api/qr/table-orders`, {
-      headers: { cookie: ownerCookie, origin }, signal: AbortSignal.timeout(15000),
-    });
-    const posHistoryPayload = await posHistory.json();
-    assert.equal(posHistory.status, 200);
-    assert.equal(posHistoryPayload.canViewOrders, true);
-    assert.equal(posHistoryPayload.totalPersonCount, 2);
-    assert.ok(posHistoryPayload.posOrders.some(order => Number(order.orderId) === posOrderId), "owner sees current-session POS orders");
-    const inviteResponse = await fetch(`${origin}/api/qr/order-invites`, {
-      method: "POST", headers: { cookie: ownerCookie, origin }, signal: AbortSignal.timeout(15000),
-    });
-    const invitePayload = await inviteResponse.json();
-    assert.equal(inviteResponse.status, 200, `POS-first owner can invite guests: ${invitePayload.message ?? "failed"}`);
-    assert.match(invitePayload.url, /\/tdkqrs\/join\//);
-    const guestResponse = firstScans.find(response => new URL(response.headers.get("location"), origin).pathname === "/qrorder/join-required");
-    const guestCookie = (guestResponse.headers.get("set-cookie") ?? "").split(";", 1)[0];
-    const guestHistory = await fetch(`${origin}/api/qr/table-orders`, {
-      headers: { cookie: guestCookie, origin }, signal: AbortSignal.timeout(15000),
-    });
-    const guestHistoryPayload = await guestHistory.json();
-    assert.equal(guestHistory.status, 200);
-    assert.equal(guestHistoryPayload.canViewOrders, false, "non-owner has no session order access");
-    assert.equal(guestHistoryPayload.needsJoin, true);
-    assert.equal(guestHistoryPayload.posOrders.length, 0, "non-owner receives no POS order history");
-
-    // Historical closed ownership is deliberately not reassigned automatically.
+    assert.equal(unboundSessions.length, 2, "both customers receive distinct active QR sessions");
+    assert.ok(unboundSessions.every(row => row.session_id === null), "scanning cannot grant POS visit access");
+    const [[bound]] = await connection.query(
+      "SELECT COUNT(*) AS count FROM qr_sessions WHERE session_id = ? AND status = 'ACTIVE'", [tableSessionId],
+    );
+    assert.equal(Number(bound.count), 0, "POS visit has no QR member before approval or invitation");
+    const [[claim]] = await connection.query("SELECT COUNT(*) AS count FROM qr_table_order_claims WHERE table_id = ?", [tableId]);
+    assert.equal(Number(claim.count), 0, "scanning cannot claim TV-7 representative order rights");
+    for (const cookie of customerCookies) {
+      const history = await fetch(`${origin}/api/qr/table-orders`, {
+        headers: { cookie, origin }, signal: AbortSignal.timeout(15000),
+      });
+      const payload = await history.json();
+      assert.equal(history.status, 200);
+      assert.equal(payload.canViewOrders, false, "scan alone does not grant invite or representative privileges");
+      assert.equal(payload.canViewCurrentVisitOrders, true, "scan can read the current open table visit");
+      assert.equal(payload.needsJoin, false, "menu access does not require an invite");
+      assert.equal(payload.posOrders.length, 1, "current POS-first visit history is immediately visible");
+      assert.equal(payload.posOrders[0].orderId > 0, true);
+      assert.equal(payload.orders.length, 0);
+      assert.equal(payload.ownRequests.length, 0);
+    }
     await connection.query("UPDATE table_sessions SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE session_id = ?", [tableSessionId]);
-    const [staleSession] = await connection.query(
+    await connection.query("UPDATE qr_sessions SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE table_id = ? AND status = 'ACTIVE'", [tableId]);
+    for (const cookie of customerCookies) {
+      const history = await fetch(`${origin}/api/qr/table-orders`, {
+        headers: { cookie, origin }, signal: AbortSignal.timeout(15000),
+      });
+      assert.ok([401, 409].includes(history.status), "completed visit closes its old QR customer tokens");
+    }
+    const [nextSessionInsert] = await connection.query(
       "INSERT INTO table_sessions (table_id, opened_by_staff_id, session_kind, status) VALUES (?, ?, 'DINE_IN', 'OPEN')",
       [tableId, staff.staff_id],
     );
-    staleSessionId = Number(staleSession.insertId);
-    await connection.query(
-      "INSERT INTO qr_sessions (session_id, table_id, token_hash, status) VALUES (?, ?, ?, 'CLOSED')",
-      [staleSessionId, tableId, randomUUID().replaceAll("-", "")],
+    nextTableSessionId = Number(nextSessionInsert.insertId);
+    const [nextOrderInsert] = await connection.query(
+      "INSERT INTO orders (session_id, order_type, status, subtotal_amount, discount_amount, total_amount, created_by_staff_id) VALUES (?, 'POS', 'ACCEPTED', 7000, 0, 7000, ?)",
+      [nextTableSessionId, staff.staff_id],
     );
-    const staleOwnerScan = await fetch(`${origin}/tdkqrs/${qr.identifier}`, { redirect: "manual", signal: AbortSignal.timeout(15000) });
-    assert.equal(new URL(staleOwnerScan.headers.get("location"), origin).pathname, "/qrorder/join-required",
-      "closed QR ownership is not silently reassigned to a new customer");
-    const [staleBound] = await connection.query("SELECT COUNT(*) AS count FROM qr_sessions WHERE session_id = ? AND status = 'ACTIVE'", [staleSessionId]);
-    assert.equal(Number(staleBound[0].count), 0);
-    console.log("PASS: QR entry, POS-first ownership, concurrent scan exclusivity, POS order visibility, invites, guest history denial, and stale-owner protection");
+    const nextVisitOrderId = Number(nextOrderInsert.insertId);
+    const renewedCookies = [];
+    for (const cookie of customerCookies) {
+      const renewed = await fetch(`${origin}/tdkqrs/${qr.identifier}`, {
+        headers: { cookie }, redirect: "manual", signal: AbortSignal.timeout(15000),
+      });
+      assert.equal(new URL(renewed.headers.get("location"), origin).pathname, "/qrorder",
+        "a new visit scan opens history for the new current visit");
+      const renewedCookie = (renewed.headers.get("set-cookie") ?? "").split(";", 1)[0];
+      assert.match(renewedCookie, /tdkon_qr_session=/, "a completed visit token is replaced on rescan");
+      renewedCookies.push(renewedCookie);
+      const history = await fetch(`${origin}/api/qr/table-orders`, {
+        headers: { cookie: renewedCookie, origin }, signal: AbortSignal.timeout(15000),
+      });
+      const payload = await history.json();
+      assert.equal(history.status, 200);
+      assert.equal(payload.posOrders.length, 1, "renewed customer sees the new visit only");
+      assert.equal(Number(payload.posOrders[0].orderId), nextVisitOrderId);
+      assert.notEqual(nextVisitOrderId, firstVisitOrderId);
+    }
+    const rescan = await fetch(`${origin}/tdkqrs/${qr.identifier}`, {
+      headers: { cookie: renewedCookies[0] }, redirect: "manual", signal: AbortSignal.timeout(15000),
+    });
+    assert.equal(new URL(rescan.headers.get("location"), origin).pathname, "/qrorder");
+    assert.equal(rescan.headers.get("set-cookie"), null, "rescan keeps the current-visit customer token");
+    const [[afterRescan]] = await connection.query(
+      "SELECT COUNT(*) AS count FROM qr_sessions WHERE table_id = ? AND status = 'ACTIVE'", [tableId],
+    );
+    assert.equal(Number(afterRescan.count), 2, "rescan does not issue a third customer session");
+    console.log("PASS: QR entry, concurrent scans, current-visit history, prior-visit isolation, no scan-time representative claim, and token reuse");
   } finally {
     if (server) {
       server.kill();
@@ -243,8 +278,9 @@ async function main() {
       try {
         if (qrCodeId !== undefined) await connection.query("DELETE FROM audit_logs WHERE entity_type = 'QR_CODE' AND entity_id = ?", [qrCodeId]);
         if (tableId !== undefined) {
-          if (tableSessionId !== undefined) await connection.query("DELETE FROM order_items WHERE order_id IN (SELECT order_id FROM orders WHERE session_id = ?)", [tableSessionId]);
-          if (tableSessionId !== undefined) await connection.query("DELETE FROM orders WHERE session_id = ?", [tableSessionId]);
+          const sessionIds = [tableSessionId, nextTableSessionId].filter(id => id !== undefined);
+          if (sessionIds.length) await connection.query("DELETE FROM order_items WHERE order_id IN (SELECT order_id FROM orders WHERE session_id IN (?))", [sessionIds]);
+          if (sessionIds.length) await connection.query("DELETE FROM orders WHERE session_id IN (?)", [sessionIds]);
           await connection.query("DELETE FROM qr_order_item_options WHERE qr_order_item_id IN (SELECT item.qr_order_item_id FROM qr_order_items item JOIN qr_orders ord ON ord.qr_order_id = item.qr_order_id JOIN qr_sessions sess ON sess.qr_session_id = ord.qr_session_id WHERE sess.table_id = ?)", [tableId]);
           await connection.query("DELETE FROM qr_order_items WHERE qr_order_id IN (SELECT ord.qr_order_id FROM qr_orders ord JOIN qr_sessions sess ON sess.qr_session_id = ord.qr_session_id WHERE sess.table_id = ?)", [tableId]);
           await connection.query("DELETE FROM qr_orders WHERE qr_session_id IN (SELECT qr_session_id FROM qr_sessions WHERE table_id = ?)", [tableId]);
@@ -252,7 +288,7 @@ async function main() {
         }
         if (tableId !== undefined) await connection.query("DELETE FROM qr_sessions WHERE table_id = ?", [tableId]);
         if (tableSessionId !== undefined) await connection.query("DELETE FROM table_sessions WHERE session_id = ?", [tableSessionId]);
-        if (staleSessionId !== undefined) await connection.query("DELETE FROM table_sessions WHERE session_id = ?", [staleSessionId]);
+        if (nextTableSessionId !== undefined) await connection.query("DELETE FROM table_sessions WHERE session_id = ?", [nextTableSessionId]);
         if (qrCodeId !== undefined) await connection.query("DELETE FROM qr_table_links WHERE qr_code_id = ?", [qrCodeId]);
         if (qrCodeId !== undefined) await connection.query("DELETE FROM qr_codes WHERE qr_code_id = ?", [qrCodeId]);
         if (tableId !== undefined) await connection.query("DELETE FROM dining_tables WHERE table_id = ?", [tableId]);

@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { and, eq, gt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { staff, staffSessions } from "@/db/schema";
@@ -165,6 +165,7 @@ export async function getCurrentStaff(): Promise<CurrentStaff | null> {
         eq(staffSessions.sessionType, "POS"),
         eq(staff.isActive, 1),
         eq(staff.posEnabled, 1),
+        isNull(staff.terminatedAt),
         ne(staff.staffCode, "000"),
         gt(staffSessions.loggedInAt, sessionCutoff)
       )
