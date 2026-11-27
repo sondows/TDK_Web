@@ -4,7 +4,7 @@ import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { parseJsonResponse } from "@/lib/api-response";
 import { useTvQrAuthCode } from "@/lib/use-tv-qr-auth-code";
-import { shouldDisplayTvQrAuthCode } from "@/lib/tdktv-qr-auth-code-policy";
+import { getVisibleTvQrAuthCode, shouldDisplayTvQrAuthCode } from "@/lib/tdktv-qr-auth-code-policy";
 import { getTvEventAnchorStyle, getTvEventTextStyle } from "@/lib/tdktv-event-rendering";
 
 type EventAnimation = "NONE" | "FADE" | "PULSE" | "SLIDE" | "GLOW";
@@ -74,6 +74,7 @@ export default function TvPlayer({ screenCode }: { screenCode: string }) {
   const images = useMemo(() => playlist?.images ?? [], [playlist?.images]);
   const current = images[index];
   const noticeActive = Boolean(playlist?.notice);
+  const visibleQrAuthCode = getVisibleTvQrAuthCode(screenCode, noticeActive, qrAuthCode);
   const playbackConfig = useMemo(() => playlist ? {
     isActive: playlist.isActive, playbackEnabled: playlist.playbackEnabled, loopEnabled: playlist.loopEnabled,
     defaultDurationSeconds: playlist.defaultDurationSeconds, transitionEffect: playlist.transitionEffect,
@@ -129,8 +130,8 @@ export default function TvPlayer({ screenCode }: { screenCode: string }) {
       {transition && <ImageLayer item={images[transition.to] ?? current} fitMode={playlist.fitMode} className={`tdktv-transition tdktv-transition-${transition.effect.toLowerCase()}`} />}
     </>}
     {!noticeActive && status && !current && <div className="absolute inset-0 grid place-items-center bg-neutral-950 text-center text-white"><p>{status}</p></div>}
-    {shouldDisplayTvQrAuthCode(screenCode, noticeActive) && <div aria-label={`인증번호 ${qrAuthCode ?? "--"}`} className="pointer-events-none absolute inset-0 z-50 grid place-items-center" role="status">
-      <span className="rounded-2xl bg-black/65 px-[0.7em] py-[0.25em] text-[clamp(5rem,24vw,24rem)] font-black leading-none tracking-[0.08em] tabular-nums text-white drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)]">{qrAuthCode ?? "--"}</span>
+    {visibleQrAuthCode !== null && <div aria-label={`인증번호 ${visibleQrAuthCode}`} className="pointer-events-none absolute inset-0 z-50 grid place-items-center" role="status">
+      <span className="font-black leading-none tabular-nums text-white" style={{ fontSize: "min(95vh, 54vw)", WebkitTextStroke: "0.55vh #000" }}>{visibleQrAuthCode}</span>
     </div>}
     <style jsx global>{`
       @keyframes tdktv-fade { from { opacity: 0; } to { opacity: 1; } }

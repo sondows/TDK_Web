@@ -11,6 +11,10 @@ export function shouldDisplayTvQrAuthCode(screenCode: string, noticeActive: bool
   return screenCode.toUpperCase() === "DP1" && !noticeActive;
 }
 
+export function getVisibleTvQrAuthCode(screenCode: string, noticeActive: boolean, code: string | null) {
+  return shouldDisplayTvQrAuthCode(screenCode, noticeActive) && code !== null && /^\d{2}$/.test(code) ? code : null;
+}
+
 function compareVersion(left: string, right: string) {
   const a = left.replace(/^0+(?=\d)/, "");
   const b = right.replace(/^0+(?=\d)/, "");

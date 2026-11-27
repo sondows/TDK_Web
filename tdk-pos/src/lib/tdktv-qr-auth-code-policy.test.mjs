@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatTvQrAuthCode, isStaleTvQrAuthCodeResponse, isTvAuthCodeTestIssueAllowed,
+import { formatTvQrAuthCode, getVisibleTvQrAuthCode, isStaleTvQrAuthCodeResponse, isTvAuthCodeTestIssueAllowed,
   shouldDisplayTvQrAuthCode } from "./tdktv-qr-auth-code-policy.ts";
 
 test("TV QR auth codes are two digit strings including leading zeroes", () => {
@@ -23,6 +23,17 @@ test("only DP1 shows the code and TV-4 notice always takes priority", () => {
   assert.equal(shouldDisplayTvQrAuthCode("dp1", false), true);
   assert.equal(shouldDisplayTvQrAuthCode("DP2", false), false);
   assert.equal(shouldDisplayTvQrAuthCode("DP1", true), false);
+});
+
+test("TV QR overlay exists only for a current two-digit DP1 code", () => {
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, null), null);
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, "00"), "00");
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, "99"), "99");
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, "--"), null);
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, "1"), null);
+  assert.equal(getVisibleTvQrAuthCode("DP1", true, "42"), null);
+  assert.equal(getVisibleTvQrAuthCode("DP2", false, "42"), null);
+  assert.equal(getVisibleTvQrAuthCode("DP1", false, null), null);
 });
 
 test("out-of-order polling responses cannot roll the shared code state backward", () => {
