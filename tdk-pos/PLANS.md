@@ -2523,3 +2523,164 @@ TDKQRS QR token/session isolation audit (2026-11-23): Stage 1 PASS; see `checkpo
 TDKQRS invite-only customer-session policy implementation (2026-11-23): Code implementation and targeted verification PASS; see `checkpoints/20261123-qrs-token-session-audit-stage-02.md`. POS first acceptance binds only the accepted order's own QR session. A pending order belonging to an uninvited customer is retained and shown to POS/HOS as approval-blocked until invite join. The shared six-hour/session expiry predicate is applied to the queue and server-side acceptance. Invite join reuses an active unbound same-table credential, preserving its pending-order association. ADM QR retire/reassign/type changes check for affected pending orders transactionally before closing sessions or changing links. TypeScript, scoped ESLint, production build, 13 policy/access tests, 25 API-access tests, and TEST DB HTTP integration for invite preservation, uninvited-order block, expiry block, and QR entry passed. Full successful first-acceptance race and authenticated ADM API integration are not yet covered. Integration used only isolated synthetic `TDK_POS_TEST` rows and cleaned them. No operating DB/NAS changes, commit, or push.
 
 TDKQRS short order-history backdrop (2026-11-23): PASS; see `checkpoints/20261123-qrs-empty-history-backdrop.md`. The existing absolute `bg-slate-50` panel backdrop ended at the panel boundary; short payment-complete/empty states let the lower fixed hero image show beyond that boundary. The existing backdrop now gets a viewport-aware minimum height ending above the measured fixed navigation, without changing the hero, panel gestures, order state, or navigation. Ten panel geometry/wheel tests, TypeScript, scoped ESLint, and production build passed. Physical mobile rendering remains unverified; no production deployment, DB change, commit, or push occurred.
+
+## TDKON QR multi-customer ordering — stage 3 — 2026-11-25
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Recheck TEST DB schema, data, and approval evidence | PASS |
+| 2 | Backfill approved and legacy grant sources in TEST only | PASS |
+| 3 | Remove scan-time table claim and restrict whole-history reads | PASS |
+| 4 | Allow independent pending requests and atomic POS/HOS approval grants | PASS |
+| 5 | Record invite grants and isolate carts by table | PASS |
+| 6 | Run TEST DB/API concurrency and QR preparation regressions | PASS |
+| 7 | Run TypeScript, ESLint, related tests, build, and record limitations | PASS |
+
+See `checkpoints/20261125-qr-multicustomer-stage-03.md`. Schema columns were already present; TEST DB data backfill classified 17 direct approved grants, 10 legacy links, and 30 unbound sessions. Actual POS/HOS approval API, independent customer POST, concurrent approvals, invitation, QR replacement access, close race, TypeScript, lint, 52 related tests, and production build passed. Synthetic test data was removed. Physical mobile cart behavior, real payment/KDS hardware, and first-QR approval on an otherwise empty table still require separate validation before production deployment. No production DB/NAS, commit, or push changes.
+
+## TDKON QR confirmed history — stage 4 — 2026-11-25
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Separate shared confirmed orders from own QR requests in the server response | PASS |
+| 2 | Verify approval, invitation, pending and rejected request boundaries in TEST | PASS |
+| 3 | Number confirmed POS/HOS/QR rounds by actual POS order timestamp and ID | PASS |
+| 4 | Reuse POS summary for round and table amounts with cancellation handling | PASS |
+| 5 | Show KDS states and server-timed boiling under menu-specific policy | PASS |
+| 6 | Separate own request cards and confirmed rounds in QRS history UI | PASS |
+| 7 | Run TEST integration, QR/KDS tests, TypeScript, ESLint, and build | PASS |
+
+See `checkpoints/20261125-qr-order-history-stage-04.md`. Physical mobile, real KDS hardware, multi-device timing, and actual POS payment reconciliation remain unverified. A multi-quantity POS line has one KDS status, so per-unit partial cooking state is unavailable in the existing data model. No production change, commit, or push occurred; stage 5 has not started.
+
+## TDKTV digital signage management — TV-1 — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect ADM access, upload patterns, and TEST DB names | PASS |
+| 2 | Prepare two-table TEST migration and five idempotent screen seeds | PASS |
+| 3 | Apply migration to TDK_POS_TEST | BLOCKED |
+| 4 | Implement ADM navigation, management UI, authenticated API, and image storage | PASS |
+| 5 | Run TypeScript, targeted ESLint/tests, and production build | PASS |
+| 6 | Verify real TEST DB CRUD, image delivery, and browser workflow | IN_PROGRESS |
+| 7 | Implement ADM-session-gated `/tdktv/[screenCode]` preview and 10-second read-only playlist refresh | PASS |
+| 8 | Verify TV playback and live updates with applied DB data in a PC browser | BLOCKED |
+
+The user applied the TEST migration. Read-only inspection now confirms the expected schema and five screens, and a rolled-back DB CRUD check passed. Admin browser management and TV playback remain unverified because no authenticated browser session is available. TV playback routes require an existing ADM session; no public device access was added before TV-3 device enrollment. Operating DB, NAS, Docker/Caddy, and Git history were not changed.
+
+### TV-2 transition effect addendum — 2026-11-26
+
+Added `tv_screens.transition_effect` in `TDK_POS_TEST` after confirming it was absent. It is `ENUM('NONE','FADE','SLIDE','ZOOM') NOT NULL DEFAULT 'FADE'`. TDKADM stores a per-TV effect; the player API includes it in its version hash. The player supports immediate NONE plus 800 ms crossfade, slide, and zoom. TypeScript, targeted ESLint, and production build pass. Browser animation verification was not possible; no test data or operating systems were changed.
+
+## TDKTV TV-3 sync and layout — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect independent timers, group setting and screen layout data | PASS |
+| 2 | Apply group epoch/interval/effect and physical layout schema to TEST | PASS |
+| 3 | Add ADM group and physical layout configuration | PASS |
+| 4 | Return server-time group cycle and next transition in player API | PASS |
+| 5 | Join late clients to group cycle while preserving independent playback | IN_PROGRESS |
+| 6 | Verify concurrent players, config changes, and background recovery | BLOCKED |
+| 7 | TypeScript, ESLint, related tests, and production build | PASS |
+
+TEST migration added tv_sync_groups plus physical_order, layout_x, and layout_y to tv_screens; the initial five physical positions were seeded. Operating DB/NAS and Git history were not changed. Real multi-browser timing remains unverified.
+
+## TDKTV monitor identifier normalization — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect DB mapping and code references | PASS |
+| 2 | Rename existing TEST rows to DP1..DP5 without recreating records | PASS |
+| 3 | Update admin display, player URL, API and legacy URL compatibility | PASS |
+| 4 | Verify screen IDs, purpose, image counts and layout | PASS |
+| 5 | Run TypeScript, ESLint, related tests and build | PASS |
+
+Existing rows were renamed in place. screen_id 5/1/2/3/4 now maps to DP1/DP2/DP3/DP4/DP5; DP1 remains ADVERTISEMENT, DP2..DP5 remain MENU. The two existing images remain on screen_id 1 (DP2). Layout order/coordinates are unchanged. Old player URLs redirect after ADM authentication and old API codes map to the canonical DP codes. No production DB, NAS or Git history changes.
+
+## TDKTV TV-4 business notice — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Add single persisted TEST notice state | PASS |
+| 2 | Add ADM notice management with preview and start/end | PASS |
+| 3 | Add authenticated management API and TV notice response | PASS |
+| 4 | Render target notice and other-screen solid gray | PASS |
+| 5 | Pause image timers during notice and resume normal playlist | PASS |
+| 6 | TypeScript, ESLint, related tests and build | PASS |
+| 7 | Verify in authenticated browser across five player pages | BLOCKED |
+
+The TEST notice row is inactive by default. TV pages continue using their ADM-session auth; the notice management API requires ADM access. Browser display, 10-second propagation, and end/resume behavior remain unverified.
+
+## TDKTV TV-5 image event messages and animation — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Add image-linked event table and TEST migration | PASS |
+| 2 | Add authenticated DP2–DP5 event CRUD with a five-event limit | PASS |
+| 3 | Add ADM event editor, preview, styling and drag positioning | PASS |
+| 4 | Include active events in the matching image playlist layer | PASS |
+| 5 | Preserve image cache, display timer, transition and TV-4 notice priority | PASS |
+| 6 | TypeScript, targeted ESLint, API access suite and production build | PASS |
+| 7 | Verify authenticated ADM browser and real TV animation | BLOCKED |
+
+The `tv_image_events` migration was applied to `TDK_POS_TEST` by the authorized development-only helper (`tableCreated: true`) and is represented in Drizzle schema. The event management API restricts writes to DP2–DP5, validates styling/text, and serializes the five-row cap by locking the parent image. Event data is returned with each active playlist image; event-only edits do not change the image cache key or reset the playback timer. The old and next image layers carry their own event overlays during the existing 800 ms transition. TV-4 notice rendering remains higher priority. API access tests pass (25/25), TypeScript, targeted ESLint, and production build pass. A separate read-only DB recheck in this execution was denied with `EACCES`; no event test rows were written. Authenticated browser/API CRUD and physical TV rendering remain unverified. No operating DB/NAS, Docker/Caddy, Git commit, or push changes.
+
+## TDKTV TV-6 shared QR verification display — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect TV/HOS/admin surfaces and confirm TEST DB target | PASS |
+| 2 | Add singleton rolling-code state table in TEST only | PASS |
+| 3 | Implement secure atomic issuance, expiry, and authenticated read APIs | PASS |
+| 4 | Show shared code on DP1 without resetting playback; preserve TV-4 notice priority | PASS |
+| 5 | Add non-clickable HOS navigation status and server-clock expiry | PASS |
+| 6 | Add ADM development-only test issue control guarded to TDK_POS_TEST | PASS |
+| 7 | Verify leading zeros, rolling TTL, status non-extension, expiry, concurrency, and stale reads | PASS |
+| 8 | TypeScript, ESLint, route access tests, targeted tests, and build | PASS |
+| 9 | Verify authenticated browser display and one-second synchronization | BLOCKED |
+
+Scope: development DB `TDK_POS_TEST` and local development UI only. Production DB, NAS/Docker/Caddy, Git history, customer QR/order flows, and TV-7 are excluded.
+
+See `checkpoints/20261126-tdktv-tv-6-qr-auth-code.md`. `tv_qr_auth_code_state` exists only in `TDK_POS_TEST`. Concurrent DB integration verified one shared active issuance, a rolling 10-second TTL, non-extending status reads, expiry, and a new issuance; the test restored the singleton row to its empty baseline. Leading-zero formatting, server/database production gate, stale response policy, and TV-4 precedence tests pass. Authenticated ADM/HOS browser and physical DP1 behavior were not available to verify. Apply the migration to production only under separate approval before any production rollout; no operating systems, customer data, or Git history changed.
+
+### TV-5 event overlay sizing and text rendering — 2026-11-26
+
+The event's fixed-width positioning wrapper was painting the background, padding, border and clipping the entire configured width. Rendering now keeps the anchor unpainted and applies these styles only to a fit-content text element. The same style helper is used in ADM preview and TV playback; newly created events default to a transparent background. A Korean-capable system font fallback stack is specified. Four rendering-policy tests, targeted ESLint, TypeScript, and production build pass. The build reports two pre-existing dynamic filesystem tracing warnings in `menu-image-storage.ts`. No database, operating deployment, or Git history changes. Physical/browser visual confirmation remains unverified; see `checkpoints/20261126-tdktv-tv5-overlay.md`.
+
+## TDKQRS TV-7 QR order verification and representative customer — 2026-11-26
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Read-only inspect QR order, approval, session-close, TV-6 and TEST DB structures; record compatibility design | PASS |
+| 2 | Add only the required TEST schema for per-request auth attempts, with guarded migration and no data reset | PASS |
+| 3 | Implement server-side auth attempt policy/helpers and unit tests | PASS |
+| 4 | Integrate request, verification UI/API and limits without creating an order before verification | PASS |
+| 5 | Atomically create the first pending representative claim with an order; confirm/release on staff decision | PASS (TV-7C TEST DB integration) |
+| 6 | Permit only confirmed representative follow-up orders without code; release on CLOSED session | PASS (TV-7D both COMPLETE paths) |
+| 7 | Run targeted TEST DB integration, QR/TV tests, TypeScript, ESLint and build | PASS (TV-7D API/DB integration; physical device checks pending) |
+| 8 | Browser and multi-customer/device verification | TODO (no authenticated browser/device run) |
+
+Constraints: `TDK_POS_TEST` only; preserve existing TV-4 notice priority and TV-6 rolling issuance; never return the shared code to QRS; preserve all existing uncommitted files. A completed step is marked PASS only after its tests pass. Operating DB, NAS/Docker/Caddy, and Git history are out of scope.
+
+TV-7A checkpoint: `TDK_POS_TEST` contains both `qr_table_order_claims` and `qr_order_auth_attempts`. Read-only `SHOW CREATE TABLE`, information_schema metadata and Drizzle/migration comparison confirmed the columns, keys, foreign keys, indexes, checks, defaults, and collations match. Both tables were empty before integration tests. Claim and auth-attempt database integration tests use synthetic data inside transactions and roll back; no test rows remain. SELECT/INSERT/UPDATE/DELETE permissions were verified; production DB was not contacted. Policy tests and TypeScript passed. See `checkpoints/20261126-tdkqrs-tv-7a.md`.
+
+TV-7B checkpoint: the development QRS order screen has an opt-in flag requiring `NODE_ENV=development`, `DB_NAME=TDK_POS_TEST`, `TDK_QR_ORDER_AUTH_ENABLED=true`, and runtime `SELECT DATABASE()`=`TDK_POS_TEST`. Request and verify APIs repeat the runtime gate. The request stores only the private TV code snapshot server-side, returns no code, binds the attempt to QR session/table/cart/issuance, reuses idempotent request IDs, and applies the prepared expiry/rate/failure rules. Its original code/DB tests and build passed. TV-7C HTTP verification now passed in the development environment; the flag remains default OFF.
+
+TV-7C code is behind the same default-OFF development flag. The customer order API atomically consumes a VERIFIED attempt, creates the first QR order and claims the representative; confirmed representatives may submit follow-up QR orders without a code. Staff approval confirms and first-order rejection releases the claim. The user applied the session snapshot migration to `TDK_POS_TEST`; read-only schema inspection and actual HTTP/DB integration passed. Concurrent requests exposed a stale transaction snapshot in claim lookup; a locking read fixed it. Initial rejection and retry, approval, follow-up rejection, nonrepresentative denial, old/new visit isolation, idempotency, and flag-OFF regression passed with isolated test fixtures. TypeScript, ESLint, 29 API/policy tests and production build pass. Physical device/TV browser testing remains unverified. See `checkpoints/20261126-tdkqrs-tv-7c.md`.
+
+TV-7D closes representative claims and unused auth attempts in the existing transaction in both table-session PATCH and checkout COMPLETE paths, after pending-order checks. Payment without COMPLETE retains the claim. Locked table/session reads prevent a stale COMPLETE request from closing a later visit. TEST DB HTTP integration covered pending protection, QR/POS/QR round totals, HOS and TV auth-code API agreement, old/new visit isolation, repeat COMPLETE, order-vs-COMPLETE racing and staff-approval-vs-COMPLETE racing. Flag-OFF regression, TV auth-code DB test, API-access tests, TypeScript, focused ESLint, and production build passed. The isolated test data was removed; claim and attempt tables contain zero rows. No new migration was needed. Authenticated browser, real mobile, DP1 display and TCL TV checks remain open. The development flag stays default OFF; no operating deployment was made. See `checkpoints/20261126-tdkqrs-tv-7d.md`.
+
+## QR entry release-preflight regression — 2026-11-27
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Compare concurrent QR entry with current access and representative-claim policy | PASS |
+| 2 | Update stale TEST QR entry and invite checks without weakening history isolation | PASS |
+| 3 | Run TEST DB HTTP checks, QR/API policy tests, TypeScript, ESLint and build | PASS |
+| 4 | Run mutating release automation or NAS deployment | TODO (outside this task) |
+
+The old POS-first scan test expected immediate visit ownership and invite-only approval. Current code grants independent menu sessions at scan, grants visit history after staff approval or invitation, and claims the TV-7 representative only on verified first order submission. Three independent TEST QR entry runs, invite join, cancellation scope, 21 QR policy tests, 30 API-access tests, TypeScript, focused ESLint and the production build passed. The TV-7 flag-ON HTTP suites were not rerun in this turn because the occupied local development server runs the default-OFF mode. See `checkpoints/20261127-qr-entry-preflight-regression.md`.
+
+## TDKQRS QR-1 current-visit order history — 2026-11-27
+
+An active table QR now opens `/qrorder` directly when the current open visit has POS orders. `GET /api/qr/table-orders` resolves the single open DINE_IN visit for unbound QR sessions, or remains pinned to the exact visit for bound sessions. The read-only `canViewCurrentVisitOrders` response flag controls history and summary rendering. `canViewOrders` remains unchanged for invite/representative privileges; scanning does not bind a QR session, create a claim, bypass first-order TV verification, or bypass HOS approval. Conflicting open visits fail closed. The API rechecks the exact visit before returning data so a concurrently closed visit is not returned. QR-1 integration passed against `TDK_POS_TEST`, including POS-first visibility, simultaneous independent scans, no claim/binding at scan, and no old POS history after visit closure. QR invite regression passed; 16 QR policy tests, TypeScript, and focused ESLint passed. Production build was attempted in an isolated copy and is blocked by the existing CSS Module global selector `body *` in `src/app/pos/CustomerBalanceDialog.module.css`; this unrelated file was not changed. Real phone/browser checks remain outstanding. No operating DB, NAS, Docker/Caddy, commit, or push changes.
