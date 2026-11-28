@@ -2,7 +2,7 @@
 // Development-only HTTP integration check with uniquely named fixtures.
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
-const { randomInt, randomUUID } = require("node:crypto");
+const { createHash, randomInt, randomUUID } = require("node:crypto");
 const net = require("node:net");
 const mysql = require("mysql2/promise");
 require("dotenv").config({ path: ".env.local", quiet: true });
@@ -34,7 +34,12 @@ async function main() {
   let tableSessionId;
   let nextTableSessionId;
   let firstVisitOrderId;
+  let secondTableId;
+  let secondQrCodeId;
+  let secondVisitId;
+  let secondOrderId;
   const marker = `ZZQR${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const secondMarker = `${marker}B`;
   try {
     const [[identity]] = await connection.query("SELECT DATABASE() AS name");
     assert.equal(identity.name, "TDK_POS_TEST");
@@ -265,7 +270,118 @@ async function main() {
       "SELECT COUNT(*) AS count FROM qr_sessions WHERE table_id = ? AND status = 'ACTIVE'", [tableId],
     );
     assert.equal(Number(afterRescan.count), 2, "rescan does not issue a third customer session");
-    console.log("PASS: QR entry, concurrent scans, current-visit history, prior-visit isolation, no scan-time representative claim, and token reuse");
+
+    const [secondTable] = await connection.query(
+      "INSERT INTO dining_tables (table_no, capacity, is_active) VALUES (?, 4, 1)", [secondMarker],
+    );
+    secondTableId = Number(secondTable.insertId);
+    const secondIdentifier = identifier();
+    const [secondCode] = await connection.query(
+      "INSERT INTO qr_codes (identifier, management_number, target_type, status, created_by_staff_id) VALUES (?, ?, 'TABLE_ORDER', 'IN_USE', ?)",
+      [secondIdentifier, secondMarker, staff.staff_id],
+    );
+    secondQrCodeId = Number(secondCode.insertId);
+    await connection.query("INSERT INTO qr_table_links (qr_code_id, table_id, assigned_by_staff_id) VALUES (?, ?, ?)",
+      [secondQrCodeId, secondTableId, staff.staff_id]);
+
+    const scanSecond = (priorCookie) => fetch(`${origin}/tdkqrs/${secondIdentifier}`, {
+      headers: priorCookie ? { cookie: priorCookie } : {}, redirect: "manual", signal: AbortSignal.timeout(15000),
+    });
+    const destinationOf = response => new URL(response.headers.get("location"), origin).pathname;
+    const orderHistory = async sessionCookie => {
+      const response = await fetch(`${origin}/api/qr/table-orders`, {
+        headers: { cookie: sessionCookie, origin }, signal: AbortSignal.timeout(15000),
+      });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const freshScan = await scanSecond();
+    assert.equal(destinationOf(freshScan), "/qrorder/order", "a fresh browser can scan the empty second table");
+    const representativeCookie = freshScan.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.match(representativeCookie ?? "", /^tdkon_qr_session=/);
+
+    const switchedEmpty = await scanSecond(renewedCookies[0]);
+    assert.equal(switchedEmpty.status, 302);
+    assert.equal(destinationOf(switchedEmpty), "/qrorder/order", "an active first-table cookie permits entry to the empty second table");
+    const newCookie = switchedEmpty.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.match(newCookie ?? "", /^tdkon_qr_session=/);
+    assert.notEqual(newCookie, renewedCookies[0]);
+    const emptyHistory = await orderHistory(newCookie);
+    assert.equal(emptyHistory.tableNo, secondMarker);
+    assert.equal(emptyHistory.canViewOrders, false);
+    assert.equal(emptyHistory.posOrders.length, 0);
+    assert.equal(emptyHistory.ownRequests.length, 0);
+
+    const [secondVisit] = await connection.query(
+      "INSERT INTO table_sessions (table_id, opened_by_staff_id, session_kind, status) VALUES (?, ?, 'DINE_IN', 'OPEN')",
+      [secondTableId, staff.staff_id],
+    );
+    secondVisitId = Number(secondVisit.insertId);
+    const [secondOrder] = await connection.query(
+      "INSERT INTO orders (session_id, order_type, status, subtotal_amount, discount_amount, total_amount, created_by_staff_id) VALUES (?, 'POS', 'ACCEPTED', 9000, 0, 9000, ?)",
+      [secondVisitId, staff.staff_id],
+    );
+    secondOrderId = Number(secondOrder.insertId);
+    const repHash = createHash("sha256").update(decodeURIComponent(representativeCookie.split("=")[1])).digest("hex");
+    const [[representative]] = await connection.query("SELECT qr_session_id FROM qr_sessions WHERE token_hash = ?", [repHash]);
+    assert.ok(representative, "the fresh browser session can represent the populated visit");
+    const [repOrder] = await connection.query(
+      "INSERT INTO qr_orders (qr_session_id, status, subtotal_amount, total_amount, accepted_order_id) VALUES (?, 'ACCEPTED', 9000, 9000, ?)",
+      [representative.qr_session_id, secondOrderId],
+    );
+    await connection.query(
+      "UPDATE qr_sessions SET session_id = ?, access_grant_source = 'ORDER_APPROVED', access_grant_qr_order_id = ?, access_granted_at = CURRENT_TIMESTAMP WHERE qr_session_id = ?",
+      [secondVisitId, repOrder.insertId, representative.qr_session_id],
+    );
+    await connection.query(
+      "INSERT INTO qr_table_order_claims (table_id, representative_qr_session_id, first_qr_order_id, table_session_id, state, confirmed_at) VALUES (?, ?, ?, ?, 'CONFIRMED', CURRENT_TIMESTAMP)",
+      [secondTableId, representative.qr_session_id, repOrder.insertId, secondVisitId],
+    );
+
+    const switchedPopulated = await scanSecond(renewedCookies[1]);
+    assert.equal(destinationOf(switchedPopulated), "/qrorder", "the other browser can open the populated visit with a confirmed representative");
+    const populatedCookie = switchedPopulated.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.match(populatedCookie ?? "", /^tdkon_qr_session=/);
+    assert.notEqual(populatedCookie, renewedCookies[1]);
+    const secondHistory = await orderHistory(populatedCookie);
+    assert.equal(secondHistory.tableNo, secondMarker);
+    assert.equal(secondHistory.canViewCurrentVisitOrders, true);
+    assert.equal(secondHistory.canViewOrders, false, "switching does not grant representative access");
+    assert.equal(secondHistory.ownRequests.length, 0, "new cookie cannot inherit another customer's requests");
+    const visibleSecondIds = [
+      ...secondHistory.posOrders.map(order => Number(order.orderId)),
+      ...secondHistory.orders.map(order => Number(order.acceptedOrderId)),
+    ];
+    assert.ok(visibleSecondIds.includes(secondOrderId));
+    assert.ok(!visibleSecondIds.includes(nextVisitOrderId), "previous table history never follows the new cookie");
+    const priorHistory = await orderHistory(renewedCookies[1]);
+    assert.equal(priorHistory.tableNo, marker, "the first table session stays independent");
+    assert.equal(Number(priorHistory.posOrders[0].orderId), nextVisitOrderId);
+    const [[claimAfterSwitch]] = await connection.query(
+      "SELECT representative_qr_session_id, state FROM qr_table_order_claims WHERE table_id = ?", [secondTableId],
+    );
+    assert.equal(Number(claimAfterSwitch.representative_qr_session_id), Number(representative.qr_session_id));
+    assert.equal(claimAfterSwitch.state, "CONFIRMED");
+    const sameTableScan = await scanSecond(populatedCookie);
+    assert.equal(destinationOf(sameTableScan), "/qrorder");
+    assert.equal(sameTableScan.headers.get("set-cookie"), null);
+
+    const requireUnavailable = async () => {
+      const response = await scanSecond(renewedCookies[0]);
+      assert.equal(destinationOf(response), "/qrorder/unavailable");
+      assert.equal(response.headers.get("set-cookie"), null, "an invalid target cannot replace a valid cookie");
+    };
+    for (const status of ["LOCKED", "RETIRED"]) {
+      await connection.query("UPDATE qr_codes SET status = ? WHERE qr_code_id = ?", [status, secondQrCodeId]);
+      await requireUnavailable();
+    }
+    await connection.query("UPDATE qr_codes SET status = 'IN_USE' WHERE qr_code_id = ?", [secondQrCodeId]);
+    await connection.query("UPDATE dining_tables SET is_active = 0 WHERE table_id = ?", [secondTableId]);
+    await requireUnavailable();
+    await connection.query("UPDATE dining_tables SET is_active = 1 WHERE table_id = ?", [secondTableId]);
+    await connection.query("DELETE FROM qr_table_links WHERE qr_code_id = ?", [secondQrCodeId]);
+    await requireUnavailable();
+    console.log("PASS: QR entry, concurrent scans, current-visit history, prior-visit isolation, token reuse, switching tables, representative isolation and disabled targets");
   } finally {
     if (server) {
       server.kill();
@@ -292,13 +408,26 @@ async function main() {
         if (qrCodeId !== undefined) await connection.query("DELETE FROM qr_table_links WHERE qr_code_id = ?", [qrCodeId]);
         if (qrCodeId !== undefined) await connection.query("DELETE FROM qr_codes WHERE qr_code_id = ?", [qrCodeId]);
         if (tableId !== undefined) await connection.query("DELETE FROM dining_tables WHERE table_id = ?", [tableId]);
+        if (secondTableId !== undefined) {
+          await connection.query("DELETE FROM qr_table_order_claims WHERE table_id = ?", [secondTableId]);
+          await connection.query("DELETE FROM qr_orders WHERE qr_session_id IN (SELECT qr_session_id FROM qr_sessions WHERE table_id = ?)", [secondTableId]);
+          await connection.query("DELETE FROM qr_sessions WHERE table_id = ?", [secondTableId]);
+        }
+        if (secondOrderId !== undefined) await connection.query("DELETE FROM orders WHERE order_id = ?", [secondOrderId]);
+        if (secondVisitId !== undefined) await connection.query("DELETE FROM table_sessions WHERE session_id = ?", [secondVisitId]);
+        if (secondQrCodeId !== undefined) {
+          await connection.query("DELETE FROM audit_logs WHERE entity_type = 'QR_CODE' AND entity_id = ?", [secondQrCodeId]);
+          await connection.query("DELETE FROM qr_table_links WHERE qr_code_id = ?", [secondQrCodeId]);
+          await connection.query("DELETE FROM qr_codes WHERE qr_code_id = ?", [secondQrCodeId]);
+        }
+        if (secondTableId !== undefined) await connection.query("DELETE FROM dining_tables WHERE table_id = ?", [secondTableId]);
         await connection.commit();
       } catch (error) {
         await connection.rollback();
         throw error;
       }
     }
-    const [[remaining]] = await connection.query("SELECT COUNT(*) AS count FROM dining_tables WHERE table_no = ?", [marker]);
+    const [[remaining]] = await connection.query("SELECT COUNT(*) AS count FROM dining_tables WHERE table_no IN (?, ?)", [marker, secondMarker]);
     assert.equal(Number(remaining.count), 0, "development fixture was removed");
     await connection.end();
   }

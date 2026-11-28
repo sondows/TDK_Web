@@ -78,6 +78,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
     let reusableQrSessionId: number | null = null;
     if (currentToken) {
       const current = await resolveQrOrderSession(currentToken);
+      // Only reuse a session for the scanned table. A different table gets a fresh, unbound session below.
       if (current?.tableId === qrTableId) {
         if (current.canViewOrders) {
           await recordQrAccess(qrCodeId, "QR_ACCESS_REUSED");
@@ -85,11 +86,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ iden
           return Response.redirect(qrCustomerRedirectUrl(request, "/qrorder"));
         }
         reusableQrSessionId = current.qrSessionId;
-      }
-      if (current && current.tableId !== qrTableId) {
-        await recordQrAccess(qrCodeId, "QR_ACCESS_FAILED", "SESSION_TABLE_MISMATCH");
-        authEventRecorded = true;
-        return unavailable(request);
       }
     }
 
