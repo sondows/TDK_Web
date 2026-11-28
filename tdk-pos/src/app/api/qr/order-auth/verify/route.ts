@@ -1,6 +1,6 @@
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { pool } from "@/db";
-import { isQrOrderAuthRuntimeEnabled, resolveQrOrderRequest } from "@/lib/qr-order-auth";
+import { getQrOrderAuthApiError, resolveQrOrderRequest } from "@/lib/qr-order-auth";
 import { isSameOriginQrRequest } from "@/lib/qr-visit-session";
 import { nextQrOrderAuthFailure, validQrOrderAuthCode } from "@/lib/qr-order-auth-attempt-policy";
 
@@ -8,10 +8,6 @@ export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "no-store" };
 const uuidPattern = /^[0-9a-f-]{36}$/i;
 const rowTimestamp = (value: unknown) => value === null || value === undefined ? null : Number(value);
-
-async function flowEnabled() {
-  return isQrOrderAuthRuntimeEnabled();
-}
 
 async function lockAndValidateCustomer(connection: PoolConnection, member: NonNullable<Awaited<ReturnType<typeof resolveQrOrderRequest>>>) {
   const [tables] = await connection.query<RowDataPacket[]>("SELECT table_id FROM dining_tables WHERE table_id=? AND is_active=1 FOR UPDATE", [member.tableId]);
@@ -34,7 +30,8 @@ async function lockAndValidateCustomer(connection: PoolConnection, member: NonNu
 
 export async function POST(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403, headers });
-  if (!await flowEnabled()) return Response.json({ success: false }, { status: 404, headers });
+  const unavailable = await getQrOrderAuthApiError();
+  if (unavailable) return unavailable;
   const member = await resolveQrOrderRequest(request);
   if (!member) return Response.json({ success: false, message: "테이블 QR 인증이 만료되었습니다. QR을 다시 스캔해 주세요." }, { status: 401, headers });
   const body = await request.json().catch(() => null) as { attemptId?: unknown; code?: unknown } | null;
@@ -42,8 +39,9 @@ export async function POST(request: Request) {
     return Response.json({ success: false, message: "인증번호 두 자리를 입력해 주세요." }, { status: 400, headers });
   }
 
-  const connection = await pool.getConnection();
+  let connection: PoolConnection | null = null;
   try {
+    connection = await pool.getConnection();
     await connection.beginTransaction();
     if (!await lockAndValidateCustomer(connection, member)) {
       await connection.rollback();
@@ -114,8 +112,8 @@ export async function POST(request: Request) {
     return Response.json({ success: true, verified: true, duplicate: false, attemptId: attempt.attemptId,
       requestExpiresAtMs: expiresAtMs, codeExpiresAtMs: rowTimestamp(currentCode.codeExpiresAtMs), serverNowMs: rowTimestamp(currentCode.serverNowMs) }, { headers });
   } catch (error) {
-    await connection.rollback().catch(() => undefined);
+    await connection?.rollback().catch(() => undefined);
     console.error("QR order auth verification failed", error);
     return Response.json({ success: false, message: "인증을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요." }, { status: 503, headers });
-  } finally { connection.release(); }
+  } finally { connection?.release(); }
 }

@@ -2747,3 +2747,24 @@ See `checkpoints/20261128-qr-entry-table-switch.md` for the operating evidence, 
 Production SELECT at 21:40 showed QR 20261128-0001 active on table 2 and logged two `SESSION_TABLE_MISMATCH` failures at 21:37. QR 20261127-0002 logged the same failure before retirement and once issued a session. It was retired and unlinked before the newly issued QR was assigned. The old ID must stay retired. Local HEAD and GitHub main both remain at `bb3d88f000d2b4c64b2b72377f858a805b365f3b`, which still contains the rejection. The prior local route fix is present in the working tree. NAS SSH authentication was denied, and its exact image is unverified. Preserve the existing route correction and verify the actual ADM issue-to-scan path.
 
 The authenticated ADM and customer HTTP check, QR-1 entry and invite regression, TV authentication ON/OFF, 51 tests, TypeScript, ESLint, and production build passed. See `checkpoints/20261128-qr-new-and-existing-entry.md`.
+
+## Production first QR order authentication investigation — 2026-11-28
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Trace the order page and API, check live responses and inspect the production schema with SELECT | PASS |
+| 2 | Reproduce the ON/OFF difference and readiness failure against TEST | PASS |
+| 3 | Verify the running NAS image, runtime flag and release revision | BLOCKED |
+
+The public order page returned `qrAuthFlowEnabled=false` and `qrAuthUnavailable=false`, and the authentication endpoint returned 404. The source associates that pair with the legacy flag branch. A separate read-only production database check found all 16 columns expected by the readiness check. The exact value and deployed image need NAS evidence. See `checkpoints/20261128-qr-first-order-production-auth-investigation.md` for the order path, verification and approval boundaries.
+
+## Mandatory first QR order TV authentication — 2026-11-28
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Implement one readiness decision for the customer page and order APIs | PASS |
+| 2 | Verify auth, failures, representative lifecycle and history on TEST | PASS |
+| 3 | Verify the build and prepare the exact deployment scope | PASS |
+| 4 | Confirm NAS runtime and deploy after user approval | BLOCKED |
+
+Production uses mandatory TV proof for the first customer QR order. The order page and customer write APIs share one readiness check for the configured database, connected database, authorization schema and TV state row. The legacy test path requires an explicit setting on `TDK_POS_TEST`. The default authentication and explicit TEST-only OFF flows passed against the development database, as did scan, invite, cancellation, HOS approval, POS and payment/COMPLETE regressions. A simulated missing TV state returned the unavailable page state and HTTP 503 for customer authentication and submission. TypeScript, targeted ESLint, the QR and API tests, and the production build passed. The release handoff and remaining checks are in `checkpoints/20261128-qr-first-order-auth-mandatory.md`.

@@ -3,7 +3,7 @@ import type { RowDataPacket } from "mysql2/promise";
 import { db, pool } from "@/db";
 import { diningTables, menuCategories, menus, modifierGroups, modifierOptions, orderItemCancellations, orderItemOptions, orderItems, orders as posOrderTable, paymentSessionAllocations, payments, qrCodes, qrOrderAuthAttempts, qrOrderItemOptions, qrOrderItems, qrOrders, qrSessions, qrTableLinks, tableSessionDiscounts, tableSessions } from "@/db/schema";
 import { isSameOriginQrRequest } from "@/lib/qr-visit-session";
-import { classifyQrOrderRequestFailure, isQrOrderAuthRuntimeEnabled, resolveQrOrderRequest } from "@/lib/qr-order-auth";
+import { classifyQrOrderRequestFailure, getQrOrderAuthAvailability, QR_ORDER_AUTH_UNAVAILABLE_MESSAGE, resolveQrOrderRequest } from "@/lib/qr-order-auth";
 import { qrOrderAuthCartFingerprint } from "@/lib/qr-order-auth-attempt-policy";
 import { createQrTableOrderClaim, getQrTableOrderClaim } from "@/lib/qr-table-order-claims";
 import { enrichQrCatalog, qrWaitCartTotal, validateQrWaitCart } from "@/lib/qr-wait-order-data";
@@ -25,15 +25,17 @@ const timestampMs = (value: number | string | null | undefined) => {
 
 export async function POST(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403 });
-  const member = await resolveQrOrderRequest(request);
-  if (!member) return Response.json({ success: false, message: "테이블 QR 인증이 만료되었습니다. QR을 다시 스캔해 주세요." }, { status: 401 });
-  const body = await request.json().catch(() => null) as { requestId?: unknown; cart?: unknown; authAttemptId?: unknown } | null;
-  const requestId = body?.requestId;
-  if (!body || typeof requestId !== "string" || !/^[0-9a-f-]{36}$/i.test(requestId) || !Array.isArray(body.cart)) return Response.json({ success: false, message: "주문 요청 정보가 유효하지 않습니다." }, { status: 400 });
   try {
-    const representativeMode = await isQrOrderAuthRuntimeEnabled();
-    if (process.env.TDK_QR_ORDER_AUTH_ENABLED === "true" && !representativeMode)
-      return Response.json({ success: false, message: "QR 주문 인증 설정 또는 DB 구조를 확인해 주세요." }, { status: 503 });
+    const availability = await getQrOrderAuthAvailability();
+    if (availability === "UNAVAILABLE") return Response.json({
+      success: false, code: "QR_AUTH_UNAVAILABLE", message: QR_ORDER_AUTH_UNAVAILABLE_MESSAGE,
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    const member = await resolveQrOrderRequest(request);
+    if (!member) return Response.json({ success: false, message: "테이블 QR 인증이 만료되었습니다. QR을 다시 스캔해 주세요." }, { status: 401 });
+    const body = await request.json().catch(() => null) as { requestId?: unknown; cart?: unknown; authAttemptId?: unknown } | null;
+    const requestId = body?.requestId;
+    if (!body || typeof requestId !== "string" || !/^[0-9a-f-]{36}$/i.test(requestId) || !Array.isArray(body.cart)) return Response.json({ success: false, message: "주문 요청 정보가 유효하지 않습니다." }, { status: 400 });
+    const representativeMode = availability === "READY";
     const catalog = enrichQrCatalog(await loadQrMenuCatalog());
     const lines = validateQrWaitCart(body.cart, catalog);
     if (!lines?.length) return Response.json({ success: false, message: "메뉴 또는 옵션이 변경되었습니다. 장바구니를 확인해 주세요." }, { status: 409 });

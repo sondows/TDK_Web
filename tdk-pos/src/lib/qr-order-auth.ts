@@ -1,15 +1,15 @@
 import "server-only";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, getTableName, isNull, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { RowDataPacket } from "mysql2/promise";
 import { db, pool } from "@/db";
-import { checkouts, diningTables, orders, paymentSessionAllocations, payments, qrCodes, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { checkouts, diningTables, orders, paymentSessionAllocations, payments, qrCodes, qrOrderAuthAttempts, qrSessions, qrTableLinks, qrTableOrderClaims, tableSessions, tvQrAuthCodeState } from "@/db/schema";
 import { QR_ORDER_ACCESS_MAX_AGE_SECONDS, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 import { classifyQrOrderAccessState } from "@/lib/qr-order-access-state";
 import { qrCustomerRedirectUrl } from "@/lib/qr-customer-redirect";
-import { isQrOrderAuthFlowEnabled } from "@/lib/qr-order-auth-attempt-policy";
+import { expectedQrOrderAuthDatabase, resolveQrOrderAuthAvailability } from "@/lib/qr-order-auth-attempt-policy";
 
 export { QR_ORDER_ACCESS_MAX_AGE_SECONDS } from "@/lib/qr-session-expiry-policy";
 
@@ -41,26 +41,37 @@ export async function isDevelopmentQrTestDatabase() {
   }
 }
 
-/** Verify the live database before using the optional representative-order tables. */
-export async function hasQrOrderAuthSchema() {
-  if (!((process.env.NODE_ENV === "development" && process.env.DB_NAME === "TDK_POS_TEST") ||
-    (process.env.NODE_ENV === "production" && process.env.DB_NAME === "TDK_POS"))) return false;
+export const QR_ORDER_AUTH_UNAVAILABLE_MESSAGE = "QR 주문 인증을 사용할 수 없습니다. 직원에게 문의해 주세요.";
+
+const authSchemaColumns = [qrTableOrderClaims, qrOrderAuthAttempts, tvQrAuthCodeState].map(table =>
+  [getTableName(table), Object.values(getTableColumns(table)).map(column => column.name)] as const);
+const authSchemaConditions = authSchemaColumns.map(() => "(TABLE_NAME=? AND COLUMN_NAME IN (?))").join(" OR ");
+const expectedAuthColumnCount = authSchemaColumns.reduce((count, [, columns]) => count + columns.length, 0);
+
+export async function getQrOrderAuthAvailability(): Promise<ReturnType<typeof resolveQrOrderAuthAvailability>> {
+  const { NODE_ENV, DB_NAME, TDK_QR_ORDER_AUTH_TEST_OFF } = process.env;
+  const expected = expectedQrOrderAuthDatabase(NODE_ENV);
+  if (!expected || DB_NAME !== expected) return "UNAVAILABLE";
   try {
-    const [rows] = await pool.query<(RowDataPacket & { databaseName: string | null; schemaColumns: number })[]>(`
+    const [rows] = await pool.query<(RowDataPacket & { databaseName: string | null; schemaColumns: number; tvStateReady: number })[]>(`
       SELECT DATABASE() AS databaseName,
-        (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND
-          (TABLE_NAME='qr_table_order_claims' AND COLUMN_NAME IN ('table_id','representative_qr_session_id','state','table_session_id') OR
-           TABLE_NAME='qr_order_auth_attempts' AND COLUMN_NAME IN ('attempt_id','qr_session_id','table_id','table_session_id_at_auth','session_snapshot_recorded','state','qr_order_id') OR
-           TABLE_NAME='tv_qr_auth_code_state' AND COLUMN_NAME IN ('state_id','code','expires_at') OR
-           TABLE_NAME='qr_sessions' AND COLUMN_NAME IN ('qr_session_id','table_id'))) AS schemaColumns`);
-    return rows[0]?.databaseName === process.env.DB_NAME && Number(rows[0]?.schemaColumns) === 16;
-  } catch { return false; }
+        (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA=DATABASE() AND (${authSchemaConditions})) AS schemaColumns,
+        EXISTS (SELECT 1 FROM tv_qr_auth_code_state WHERE state_id=1) AS tvStateReady`, authSchemaColumns.flatMap(([table, columns]) => [table, columns]));
+    return resolveQrOrderAuthAvailability(NODE_ENV, DB_NAME, rows[0]?.databaseName,
+      Number(rows[0]?.schemaColumns) === expectedAuthColumnCount, Number(rows[0]?.tvStateReady) === 1,
+      TDK_QR_ORDER_AUTH_TEST_OFF);
+  } catch { return "UNAVAILABLE"; }
 }
 
-/** Fail closed when the configured database, live connection, or TV-7 schema differs. */
-export async function isQrOrderAuthRuntimeEnabled() {
-  return isQrOrderAuthFlowEnabled(process.env.NODE_ENV, process.env.DB_NAME, process.env.TDK_QR_ORDER_AUTH_ENABLED) &&
-    await hasQrOrderAuthSchema();
+export async function getQrOrderAuthApiError() {
+  const availability = await getQrOrderAuthAvailability();
+  const headers = { "Cache-Control": "no-store" };
+  if (availability === "TEST_OFF") return Response.json({ success: false }, { status: 404, headers });
+  if (availability === "UNAVAILABLE") return Response.json({
+    success: false, code: "QR_AUTH_UNAVAILABLE", message: QR_ORDER_AUTH_UNAVAILABLE_MESSAGE,
+  }, { status: 503, headers });
+  return null;
 }
 
 export function hashQrToken(token: string) {

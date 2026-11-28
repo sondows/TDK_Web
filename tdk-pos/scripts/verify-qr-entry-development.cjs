@@ -147,21 +147,29 @@ async function main() {
       }
       return chosen.map(modifierOptionId => ({ modifierOptionId, qty: 1 }));
     });
+    const authStatus = await fetch(`${origin}/api/qr/order-auth`, { headers: { cookie }, signal: AbortSignal.timeout(15000) });
+    assert.ok([200, 404].includes(authStatus.status), `QR authentication status check failed: HTTP ${authStatus.status}`);
+    await authStatus.arrayBuffer();
     const submitted = await fetch(`${origin}/api/qr/table-orders`, {
       method: "POST", headers: { cookie, origin, "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: randomUUID(), cart: [{ menuId: menu.menuId, qty: 1, options }] }),
       signal: AbortSignal.timeout(15000),
     });
     const submission = await submitted.json();
-    assert.ok([200, 201].includes(submitted.status), `QR order submission failed: HTTP ${submitted.status} ${submission.message ?? submission.code ?? "unknown"}`);
-    assert.equal(submission.success, true);
     const [savedOrders] = await connection.query(
       "SELECT qr_order_id, status FROM qr_orders WHERE qr_session_id = ?", [issued[0].qr_session_id],
     );
-    assert.equal(savedOrders.length, 1);
-    assert.equal(savedOrders[0].status, "PENDING");
-
-    await connection.query("UPDATE qr_orders SET status = 'REJECTED' WHERE qr_order_id = ?", [savedOrders[0].qr_order_id]);
+    if (authStatus.status === 200) {
+      assert.equal(submitted.status, 403);
+      assert.equal(submission.code, "AUTH_REQUIRED");
+      assert.equal(savedOrders.length, 0, "QR entry alone cannot submit an order");
+    } else {
+      assert.equal(submitted.status, 201, submission.message);
+      assert.equal(submission.success, true);
+      assert.equal(savedOrders.length, 1);
+      assert.equal(savedOrders[0].status, "PENDING");
+      await connection.query("UPDATE qr_orders SET status = 'REJECTED' WHERE qr_order_id = ?", [savedOrders[0].qr_order_id]);
+    }
 
     await connection.query("UPDATE qr_sessions SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP WHERE qr_session_id = ?", [issued[0].qr_session_id]);
     const afterClose = await fetch(`${origin}/api/qr/table-orders`, {

@@ -167,15 +167,24 @@ async function main() {
       }
       return chosen.map(modifierOptionId => ({ modifierOptionId, qty: 1 }));
     });
+    const authStatus = await request("/api/qr/order-auth", { headers: { cookie } });
+    assert.ok([200, 404].includes(authStatus.status), `QR authentication status check failed: HTTP ${authStatus.status}`);
+    await authStatus.arrayBuffer();
     const order = await request("/api/qr/table-orders", {
       method: "POST", headers: { cookie, origin, "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: randomUUID(), cart: [{ menuId: menu.menuId, qty: 1, options }] }),
     });
     const orderBody = await order.json();
-    assert.ok([200, 201].includes(order.status), `guest order: ${order.status} ${orderBody.message ?? ""}`);
-    assert.equal(orderBody.success, true);
     const [[guestOrder]] = await connection.query("SELECT status FROM qr_orders WHERE qr_session_id = ?", [guestRows[0].qr_session_id]);
-    assert.equal(guestOrder.status, "PENDING");
+    if (authStatus.status === 200) {
+      assert.equal(order.status, 403);
+      assert.equal(orderBody.code, "AUTH_REQUIRED");
+      assert.equal(guestOrder, undefined, "An invitation alone cannot submit an order");
+    } else {
+      assert.equal(order.status, 201, orderBody.message);
+      assert.equal(orderBody.success, true);
+      assert.equal(guestOrder?.status, "PENDING");
+    }
 
     const repeatWithCookie = await request(`/tdkqrs/join/${invite.raw}`, { headers: { cookie } });
     assert.equal(redirectPath(repeatWithCookie), "/qrorder");

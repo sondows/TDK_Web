@@ -1,7 +1,6 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { qrOrderAuthAttempts, qrOrders, qrSessions, qrTableOrderClaims, tableSessions } from "@/db/schema";
 import { classifyQrRepresentativePermission, sameQrClaimIdentity, type QrRepresentativePermission } from "@/lib/qr-table-order-claim-policy";
-import { hasQrOrderAuthSchema } from "@/lib/qr-order-auth";
 
 type Tx = Parameters<Parameters<typeof import("@/db").db.transaction>[0]>[0];
 export type QrOrderClaim = typeof qrTableOrderClaims.$inferSelect;
@@ -22,6 +21,12 @@ const sameIdentity = sameQrClaimIdentity;
 function isDuplicateKey(error: unknown): boolean {
   const candidate = error as { code?: string; cause?: { code?: string } } | null;
   return candidate?.code === "ER_DUP_ENTRY" || candidate?.cause?.code === "ER_DUP_ENTRY";
+}
+
+function ignoreMissingClaimStorage(error: unknown) {
+  const candidate = error as { code?: string; cause?: { code?: string } } | null;
+  const code = candidate?.cause?.code ?? candidate?.code;
+  if (code !== "ER_NO_SUCH_TABLE" && code !== "ER_BAD_FIELD_ERROR") throw error;
 }
 
 export async function createQrTableOrderClaim(tx: Tx, identity: QrOrderClaimIdentity, tableSessionId: number | null = null) {
@@ -90,20 +95,15 @@ export async function finishQrOrderAuthorizationForClosedVisits(
   tx: Tx, sessionIds: number[], tableIds: number[], qrSessionIds: number[],
 ) {
   if (!sessionIds.length || !tableIds.length) return;
-  // A claim created before the flag was disabled still belongs to this visit.
-  // On older installations without the TV-7 schema, preserve the legacy close path.
-  if (!await hasQrOrderAuthSchema()) {
-    if (process.env.TDK_QR_ORDER_AUTH_ENABLED === "true") throw new Error("QR order authorization schema is unavailable");
-    return;
-  }
-
   const attemptScope = or(inArray(qrOrderAuthAttempts.tableSessionIdAtAuth, sessionIds),
     ...(qrSessionIds.length ? [inArray(qrOrderAuthAttempts.qrSessionId, qrSessionIds)] : []));
+  // Older schemas can still close visits. A TV outage does not skip existing claim cleanup.
   await tx.update(qrOrderAuthAttempts).set({ state: "BLOCKED" }).where(and(
     inArray(qrOrderAuthAttempts.tableId, tableIds), inArray(qrOrderAuthAttempts.state, ["PENDING", "VERIFIED"]), attemptScope,
-  ));
+  )).catch(ignoreMissingClaimStorage);
   await tx.delete(qrTableOrderClaims).where(and(inArray(qrTableOrderClaims.tableId, tableIds),
-    or(inArray(qrTableOrderClaims.tableSessionId, sessionIds), isNull(qrTableOrderClaims.tableSessionId))));
+    or(inArray(qrTableOrderClaims.tableSessionId, sessionIds), isNull(qrTableOrderClaims.tableSessionId))))
+    .catch(ignoreMissingClaimStorage);
 }
 
 export async function getQrRepresentativePermission(tx: Tx, tableId: number, qrSessionId: number): Promise<QrRepresentativePermission> {

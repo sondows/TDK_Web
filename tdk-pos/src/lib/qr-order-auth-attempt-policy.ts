@@ -6,9 +6,21 @@ export const QR_ORDER_AUTH_MAX_FAILURES = 3;
 export const QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_SESSION = 5;
 export const QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_TABLE = 20;
 
-export function isQrOrderAuthFlowEnabled(nodeEnv: string | undefined, databaseName: string | undefined, flag: string | undefined) {
-  return flag === "true" && ((nodeEnv === "development" && databaseName === "TDK_POS_TEST") ||
-    (nodeEnv === "production" && databaseName === "TDK_POS"));
+export function expectedQrOrderAuthDatabase(nodeEnv: string | undefined) {
+  if (nodeEnv === "production") return "TDK_POS";
+  if (nodeEnv === "development") return "TDK_POS_TEST";
+  return null;
+}
+
+export function resolveQrOrderAuthAvailability(
+  nodeEnv: string | undefined, configuredDatabase: string | undefined,
+  connectedDatabase: string | null | undefined, schemaReady: boolean, tvStateReady: boolean,
+  testOff: string | undefined,
+) {
+  const expected = expectedQrOrderAuthDatabase(nodeEnv);
+  if (!expected || configuredDatabase !== expected || connectedDatabase !== expected || !schemaReady || !tvStateReady)
+    return "UNAVAILABLE";
+  return nodeEnv === "development" && testOff === "true" ? "TEST_OFF" : "READY";
 }
 
 export type QrOrderAuthCartLine = {

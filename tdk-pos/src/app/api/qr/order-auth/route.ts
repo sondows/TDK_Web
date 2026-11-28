@@ -4,7 +4,7 @@ import { pool } from "@/db";
 import { enrichQrCatalog, qrWaitCartTotal, validateQrWaitCart } from "@/lib/qr-wait-order-data";
 import { loadQrMenuCatalog } from "@/lib/qr-menu-catalog";
 import { isSameOriginQrRequest } from "@/lib/qr-visit-session";
-import { isQrOrderAuthRuntimeEnabled, resolveQrOrderRequest } from "@/lib/qr-order-auth";
+import { getQrOrderAuthApiError, resolveQrOrderRequest } from "@/lib/qr-order-auth";
 import { QR_ORDER_AUTH_ATTEMPT_TTL_MS, QR_ORDER_AUTH_MAX_FAILURES, QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_SESSION,
   QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_TABLE, QR_ORDER_AUTH_RATE_WINDOW_MS,
   qrOrderAuthCartFingerprint } from "@/lib/qr-order-auth-attempt-policy";
@@ -14,10 +14,6 @@ export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "no-store" };
 const uuidPattern = /^[0-9a-f-]{36}$/i;
 
-async function flowEnabled() {
-  return isQrOrderAuthRuntimeEnabled();
-}
-
 function attemptResponse(row: RowDataPacket, duplicate: boolean) {
   return { success: true, attemptId: row.attemptId, state: row.state,
     requestExpiresAtMs: Number(row.requestExpiresAtMs), codeExpiresAtMs: row.codeExpiresAtMs === null ? null : Number(row.codeExpiresAtMs),
@@ -26,7 +22,8 @@ function attemptResponse(row: RowDataPacket, duplicate: boolean) {
 }
 
 export async function GET(request: Request) {
-  if (!await flowEnabled()) return Response.json({ success: false }, { status: 404, headers });
+  const unavailable = await getQrOrderAuthApiError();
+  if (unavailable) return unavailable;
   const member = await resolveQrOrderRequest(request);
   if (!member) return Response.json({ success: false }, { status: 401, headers });
   try {
@@ -50,7 +47,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403, headers });
-  if (!await flowEnabled()) return Response.json({ success: false }, { status: 404, headers });
+  const unavailable = await getQrOrderAuthApiError();
+  if (unavailable) return unavailable;
   const member = await resolveQrOrderRequest(request);
   if (!member) return Response.json({ success: false, message: "테이블 QR 인증이 만료되었습니다. QR을 다시 스캔해 주세요." }, { status: 401, headers });
   const body = await request.json().catch(() => null) as { requestId?: unknown; cart?: unknown } | null;
@@ -172,7 +170,8 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   if (!isSameOriginQrRequest(request)) return Response.json({ success: false }, { status: 403, headers });
-  if (!await flowEnabled()) return Response.json({ success: false }, { status: 404, headers });
+  const unavailable = await getQrOrderAuthApiError();
+  if (unavailable) return unavailable;
   const member = await resolveQrOrderRequest(request);
   if (!member) return Response.json({ success: false }, { status: 401, headers });
   const body = await request.json().catch(() => null) as { attemptId?: unknown } | null;

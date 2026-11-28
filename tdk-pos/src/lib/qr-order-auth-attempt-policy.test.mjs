@@ -7,9 +7,9 @@ import {
   QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_TABLE,
   canStartQrOrderAuthAttempt,
   classifyQrOrderAuthAttempt,
-  isQrOrderAuthFlowEnabled,
   nextQrOrderAuthFailure,
   qrOrderAuthCartFingerprint,
+  resolveQrOrderAuthAvailability,
   validQrOrderAuthCode,
 } from "./qr-order-auth-attempt-policy.ts";
 
@@ -54,12 +54,31 @@ test("pending attempts expire independently of the shared display TTL", () => {
   assert.equal(classifyQrOrderAuthAttempt("UNEXPECTED", 1000, 0), "INVALID");
 });
 
-test("QR code auth flow is opt-in with matching development or production DB", () => {
-  assert.equal(isQrOrderAuthFlowEnabled("development", "TDK_POS_TEST", "true"), true);
-  assert.equal(isQrOrderAuthFlowEnabled("development", "TDK_POS_TEST", undefined), false);
-  assert.equal(isQrOrderAuthFlowEnabled("production", "TDK_POS_TEST", "true"), false);
-  assert.equal(isQrOrderAuthFlowEnabled("development", "TDK_POS", "true"), false);
-  assert.equal(isQrOrderAuthFlowEnabled("production", "TDK_POS", "true"), true);
-  assert.equal(isQrOrderAuthFlowEnabled("production", "TDK_POS", "false"), false);
-  assert.equal(isQrOrderAuthFlowEnabled("production", "TDK_POS_TEST", "true"), false);
+test("production always requires TV authentication on the verified production DB", () => {
+  for (const testOff of [undefined, "false", "true", "ON"]) {
+    assert.equal(resolveQrOrderAuthAvailability("production", "TDK_POS", "TDK_POS", true, true, testOff), "READY");
+  }
+});
+
+test("only an explicit development switch on the verified TEST DB permits legacy orders", () => {
+  for (const testOff of [undefined, "false", "ON"]) {
+    assert.equal(resolveQrOrderAuthAvailability("development", "TDK_POS_TEST", "TDK_POS_TEST", true, true, testOff), "READY");
+  }
+  assert.equal(resolveQrOrderAuthAvailability("development", "TDK_POS_TEST", "TDK_POS_TEST", true, true, "true"), "TEST_OFF");
+});
+
+test("incorrect database, runtime, schema, or TV state blocks orders even with test OFF requested", () => {
+  const cases = [
+    ["production", "TDK_POS_TEST", "TDK_POS_TEST", true, true],
+    ["development", "TDK_POS", "TDK_POS", true, true],
+    ["development", "TDK_POS_TEST", "TDK_POS", true, true],
+    ["production", "TDK_POS", "TDK_POS_TEST", true, true],
+    ["production", "TDK_POS", null, true, true],
+    ["production", "TDK_POS", "TDK_POS", false, true],
+    ["development", "TDK_POS_TEST", "TDK_POS_TEST", false, true],
+    ["production", "TDK_POS", "TDK_POS", true, false],
+    ["development", "TDK_POS_TEST", "TDK_POS_TEST", true, false],
+    ["test", "TDK_POS_TEST", "TDK_POS_TEST", true, true],
+  ];
+  for (const args of cases) assert.equal(resolveQrOrderAuthAvailability(...args, "true"), "UNAVAILABLE");
 });
