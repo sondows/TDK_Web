@@ -220,6 +220,10 @@
                     ]
     },
     {
+        "path":  "/api/admin/qr-auth-guide",
+        "methods":  ["GET", "PUT"]
+    },
+    {
         "path":  "/api/admin/qr-notices",
         "methods":  [
                         "GET",
@@ -916,6 +920,10 @@
           "GET",
           "POST"
         ]
+    },
+    {
+        "path": "/api/qr/order-auth/guide-image/:assetId",
+        "methods": ["GET"]
     },
     {
         "path": "/api/qr/order-auth/verify",

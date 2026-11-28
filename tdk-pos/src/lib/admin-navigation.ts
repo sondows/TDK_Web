@@ -39,6 +39,7 @@ export const adminNavigation: NavigationItem[] = [
       { label: "안내문", href: "/tdkadm/qr/notices" },
       { label: "QR 발행·관리", href: "/tdkadm/qr-codes" },
       fanManagementLink,
+        { label: "인증버튼", href: "/tdkadm/qr/auth-guide" },
     ],
   },
   {

@@ -17,10 +17,11 @@ import QrStoreTitle from "./QrStoreTitle";
 import QrTitleCarousel from "./QrTitleCarousel";
 import { useQrCustomerLanguage } from "./QrCustomerLanguageProvider";
 import QrDoubleDivider from "./QrDoubleDivider";
-import QrBottomNavigation, { QR_BOTTOM_NAV_HEIGHT } from "@/app/qrorder/QrBottomNavigation";
+import QrAuthGuidePanel from "./QrAuthGuidePanel";
 import QrMenuAddIcon from "@/components/QrMenuAddIcon";
 import { qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, type QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
+import { DEFAULT_QR_AUTH_GUIDE, type QrAuthGuide } from "@/lib/qr-auth-guide-model";
 
 const copy: Record<QrLocale, Record<string, string>> = {
   ko: { title: "메뉴", cart: "장바구니", count: "개", empty: "장바구니가 비어 있습니다.", add: "장바구니에 담기", close: "닫기", qty: "수량", total: "주문금액", remove: "삭제", required: "필수", optional: "선택", none: "선택 안 함", loading: "메뉴를 불러오는 중입니다.", error: "메뉴를 불러오지 못했습니다.", networkError: "네트워크 연결을 확인해 주세요.", invalidError: "메뉴 서버 응답을 확인할 수 없습니다.", retry: "다시 시도", noMenus: "이 분류에 표시할 메뉴가 없습니다.", noImage: "메뉴 사진", optionPrice: "추가", language: "언어" },
@@ -63,7 +64,11 @@ function hosDefaultSelections(groups: QrMenu["groups"]) {
   return selections;
 }
 
-export default function QrMenuClient({ waitingMode = false, tableOrderMode = false, qrAuthFlowEnabled = false, cartTableId = null, initialTitleData, notices = [] }: { waitingMode?: boolean; tableOrderMode?: boolean; qrAuthFlowEnabled?: boolean; cartTableId?: number | null; initialTitleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
+export default function QrMenuClient({ waitingMode = false, tableOrderMode = false, qrAuthFlowEnabled = false,
+  qrAuthUnavailable = false, qrAuthGuide = DEFAULT_QR_AUTH_GUIDE, cartTableId = null, initialTitleData, notices = [] }: {
+  waitingMode?: boolean; tableOrderMode?: boolean; qrAuthFlowEnabled?: boolean; qrAuthUnavailable?: boolean;
+  qrAuthGuide?: QrAuthGuide; cartTableId?: number | null; initialTitleData: QrPublicTitleSettings; notices?: QrPublicNotice[];
+}) {
   const router = useRouter();
   const { locale } = useQrCustomerLanguage();
   const cartStorageKey = tableOrderMode ? cartTableId === null ? null : `${QR_CART_STORAGE_KEY}:table:${cartTableId}` : QR_CART_STORAGE_KEY;
@@ -138,6 +143,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const [qrAuthDialogOpen, setQrAuthDialogOpen] = useState(false);
   const [qrAuthAttempt, setQrAuthAttempt] = useState<QrAuthAttemptUi | null>(null);
   const [qrAuthCode, setQrAuthCode] = useState("");
+  const qrAuthCodeRef = useRef("");
+  const qrAuthActionRef = useRef(false);
   const [qrAuthBusy, setQrAuthBusy] = useState(false);
   const [qrAuthMessage, setQrAuthMessage] = useState("");
   const [qrAuthRequiresRestart, setQrAuthRequiresRestart] = useState(false);
@@ -1052,11 +1059,12 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   }, [qrAuthFlowEnabled]);
 
   const submitTableOrder = async () => {
-    if (!tableOrderMode || tableOrderBusy || !cart.length) return;
+    if (!tableOrderMode || tableOrderBusy || qrAuthUnavailable || !cart.length) return;
     if (qrAuthFlowEnabled) {
       if (!qrAuthStorageKey) { setWaitError("QR 테이블 세션을 확인할 수 없습니다."); return; }
       setTableOrderBusy(true);
       setWaitError("");
+      let openingAuth = false;
       try {
         const currentRepresentativeState = await refreshRepresentativeState();
         if (!currentRepresentativeState) throw new Error("대표 주문 상태를 확인하지 못했습니다.");
@@ -1078,6 +1086,12 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
             : currentRepresentativeState === "OTHER_PENDING" ? "다른 고객의 주문이 승인 대기 중입니다."
               : "현재 이 테이블의 주문은 대표 고객이 진행하고 있습니다.");
         }
+        openingAuth = true;
+        setQrAuthAttempt(null);
+        resetQrAuthCode();
+        setQrAuthMessage("");
+        setQrAuthRequiresRestart(false);
+        setQrAuthDialogOpen(true);
         const cartSnapshot = JSON.stringify(cart);
         let stored: StoredQrAuthAttempt | null = null;
         try { stored = JSON.parse(localStorage.getItem(qrAuthStorageKey) ?? "null") as StoredQrAuthAttempt | null; } catch { stored = null; }
@@ -1087,7 +1101,7 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         }
         const response = await fetch("/api/qr/order-auth", { method: "POST", headers: { "Content-Type": "application/json" },
           credentials: "same-origin", cache: "no-store", body: JSON.stringify({ requestId: stored.requestId, cart }) });
-        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string; message?: string; attemptId?: string; state?: string; requestExpiresAtMs?: number; codeExpiresAtMs?: number | null; serverNowMs?: number };
+        const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; code?: string; message?: string; attemptId?: string; state?: string; requestExpiresAtMs?: number; codeExpiresAtMs?: number | null; serverNowMs?: number; attemptsRemaining?: number };
         if (!response.ok || !result.success || !result.attemptId || !result.requestExpiresAtMs || !result.serverNowMs) {
           if (["ATTEMPT_NOT_REUSABLE", "CODE_EXPIRED"].includes(result.code ?? "")) localStorage.removeItem(qrAuthStorageKey);
           throw new Error(result.message ?? "인증 요청을 시작하지 못했습니다.");
@@ -1095,18 +1109,20 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         const nextStored: StoredQrAuthAttempt = { ...stored, attemptId: result.attemptId, requestExpiresAtMs: result.requestExpiresAtMs,
           codeExpiresAtMs: result.codeExpiresAtMs ?? null, serverNowMs: result.serverNowMs, verified: result.state === "VERIFIED" };
         localStorage.setItem(qrAuthStorageKey, JSON.stringify(nextStored));
-        setQrAuthAttempt({ attemptId: result.attemptId, requestId: stored.requestId, state: result.state ?? "PENDING",
+        const attempt = { attemptId: result.attemptId, requestId: stored.requestId, state: result.state ?? "PENDING",
           requestExpiresAtMs: result.requestExpiresAtMs, codeExpiresAtMs: result.codeExpiresAtMs ?? null,
           serverNowMs: result.serverNowMs, expiresAtLocalMs: qrAuthClockNow() + Math.max(0, Math.min(result.requestExpiresAtMs, result.codeExpiresAtMs ?? result.requestExpiresAtMs) - result.serverNowMs),
-          verified: result.state === "VERIFIED" });
-        setQrAuthCode("");
-        setQrAuthAttemptsRemaining(3);
-        setQrAuthMessage("");
-        setQrAuthRequiresRestart(false);
+          verified: result.state === "VERIFIED" };
+        setQrAuthAttempt(attempt);
+        setQrAuthAttemptsRemaining(result.attemptsRemaining ?? 3);
         setQrAuthNow(qrAuthClockNow());
-        setQrAuthDialogOpen(true);
+        if (attempt.verified) await submitVerifiedQrOrder(attempt);
       } catch (error) {
-        setWaitError(error instanceof Error ? error.message : "인증 요청을 시작하지 못했습니다.");
+        const message = error instanceof Error ? error.message : "인증 요청을 시작하지 못했습니다.";
+        if (openingAuth) {
+          setQrAuthMessage(message);
+          setQrAuthRequiresRestart(true);
+        } else setWaitError(message);
         if (representativeState !== "UNKNOWN") await refreshRepresentativeState();
       }
       finally { setTableOrderBusy(false); }
@@ -1130,8 +1146,9 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
   const sendRepresentativeOrder = async (requestId: string, authAttemptId?: string) => {
     const response = await fetch("/api/qr/table-orders", { method: "POST", headers: { "Content-Type": "application/json" },
       credentials: "same-origin", body: JSON.stringify({ requestId, cart, ...(authAttemptId ? { authAttemptId } : {}) }) });
-    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string };
+    const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; message?: string; code?: string };
     if (!response.ok || !result.success) {
+      if (authAttemptId && result.code === "AUTH_REQUIRED") setQrAuthRequiresRestart(true);
       await refreshRepresentativeState();
       throw new Error(result.message ?? "주문을 접수하지 못했습니다.");
     }
@@ -1143,53 +1160,73 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     router.push("/qrorder");
   };
 
-  const submitVerifiedQrOrder = async () => {
-    if (!qrAuthAttempt?.verified || qrAuthBusy) return;
-    setQrAuthBusy(true);
-    setQrAuthMessage("");
-    try { await sendRepresentativeOrder(qrAuthAttempt.requestId, qrAuthAttempt.attemptId); }
-    catch (error) { await refreshRepresentativeState(); setQrAuthMessage(error instanceof Error ? error.message : "주문을 접수하지 못했습니다."); }
-    finally { setQrAuthBusy(false); }
+  const resetQrAuthCode = () => {
+    qrAuthCodeRef.current = "";
+    setQrAuthCode("");
   };
 
-  const verifyQrOrderAuth = async () => {
-    if (!qrAuthAttempt || qrAuthBusy || qrAuthAttempt.verified || !/^\d{2}$/.test(qrAuthCode)) return;
+  const submitVerifiedQrOrder = async (attempt: QrAuthAttemptUi) => {
+    if (qrAuthActionRef.current) return;
+    qrAuthActionRef.current = true;
+    setQrAuthBusy(true);
+    setQrAuthMessage("");
+    try { await sendRepresentativeOrder(attempt.requestId, attempt.attemptId); }
+    catch (error) { await refreshRepresentativeState(); setQrAuthMessage(error instanceof Error ? error.message : "주문을 접수하지 못했습니다."); }
+    finally { qrAuthActionRef.current = false; setQrAuthBusy(false); }
+  };
+
+  const verifyQrOrderAuth = async (attempt: QrAuthAttemptUi, code: string) => {
+    qrAuthActionRef.current = true;
     setQrAuthBusy(true);
     setQrAuthMessage("");
     try {
       const response = await fetch("/api/qr/order-auth/verify", { method: "POST", headers: { "Content-Type": "application/json" },
-        credentials: "same-origin", cache: "no-store", body: JSON.stringify({ attemptId: qrAuthAttempt.attemptId, code: qrAuthCode }) });
+        credentials: "same-origin", cache: "no-store", body: JSON.stringify({ attemptId: attempt.attemptId, code }) });
       const result = await readJsonResponse(response, response.url, "API request") as { success?: boolean; verified?: boolean; code?: string; message?: string; attemptsRemaining?: number; requestExpiresAtMs?: number; codeExpiresAtMs?: number | null; serverNowMs?: number };
       if (result.attemptsRemaining !== undefined) setQrAuthAttemptsRemaining(result.attemptsRemaining);
       if (["CODE_EXPIRED", "ATTEMPT_EXPIRED", "ATTEMPTS_BLOCKED", "BLOCKED", "EXPIRED", "ATTEMPT_NOT_REUSABLE"].includes(result.code ?? "")) setQrAuthRequiresRestart(true);
       if (!response.ok || !result.success || !result.verified) throw new Error(result.message ?? "인증번호를 확인하지 못했습니다.");
-      const verifiedAttempt = { ...qrAuthAttempt, state: "VERIFIED", verified: true,
-        requestExpiresAtMs: result.requestExpiresAtMs ?? qrAuthAttempt.requestExpiresAtMs,
-        codeExpiresAtMs: result.codeExpiresAtMs ?? qrAuthAttempt.codeExpiresAtMs,
-        serverNowMs: result.serverNowMs ?? qrAuthAttempt.serverNowMs, expiresAtLocalMs: qrAuthAttempt.expiresAtLocalMs };
+      const verifiedAttempt = { ...attempt, state: "VERIFIED", verified: true };
       setQrAuthAttempt(verifiedAttempt);
       setQrAuthMessage("");
       if (qrAuthStorageKey) {
         try {
           const stored = JSON.parse(localStorage.getItem(qrAuthStorageKey) ?? "null") as StoredQrAuthAttempt | null;
-          if (stored?.requestId === qrAuthAttempt.requestId) localStorage.setItem(qrAuthStorageKey, JSON.stringify({ ...stored, verified: true }));
+          if (stored?.requestId === attempt.requestId) localStorage.setItem(qrAuthStorageKey, JSON.stringify({ ...stored, verified: true }));
         } catch { /* Keep this-page verification state if storage is unavailable. */ }
       }
-    } catch (error) { setQrAuthMessage(error instanceof Error ? error.message : "인증번호를 확인하지 못했습니다."); }
-    finally { setQrAuthBusy(false); }
+      await sendRepresentativeOrder(attempt.requestId, attempt.attemptId);
+    } catch (error) {
+      resetQrAuthCode();
+      setQrAuthMessage(error instanceof Error ? error.message : "인증번호를 확인하지 못했습니다.");
+    } finally { qrAuthActionRef.current = false; setQrAuthBusy(false); }
+  };
+
+  const pressQrAuthKey = (key: string) => {
+    if (!qrAuthAttempt || qrAuthAttempt.verified || qrAuthActionRef.current || tableOrderBusy ||
+        qrAuthRequiresRestart || qrAuthAttemptsRemaining === 0 || qrAuthAttempt.expiresAtLocalMs <= qrAuthClockNow()) return;
+    const current = qrAuthCodeRef.current;
+    const next = key === "C" ? "" : key === "←" ? current.slice(0, -1) : (current + key).slice(0, 2);
+    qrAuthCodeRef.current = next;
+    setQrAuthCode(next);
+    if (next.length === 2) void verifyQrOrderAuth(qrAuthAttempt, next);
   };
 
   const closeQrAuthDialog = async (invalidate: boolean) => {
-    if (qrAuthBusy) return;
-    if (invalidate && qrAuthAttempt && !qrAuthAttempt.verified) {
+    if (qrAuthActionRef.current || tableOrderBusy) return;
+    qrAuthActionRef.current = true;
+    setQrAuthBusy(true);
+    if (invalidate && qrAuthAttempt) {
       try { await fetch("/api/qr/order-auth", { method: "DELETE", headers: { "Content-Type": "application/json" },
         credentials: "same-origin", cache: "no-store", body: JSON.stringify({ attemptId: qrAuthAttempt.attemptId }) }); } catch { /* The attempt expires server-side if offline. */ }
-      if (qrAuthStorageKey) { try { localStorage.removeItem(qrAuthStorageKey); } catch { /* No storage available. */ } }
     }
+    if (invalidate && qrAuthStorageKey) { try { localStorage.removeItem(qrAuthStorageKey); } catch { /* No storage available. */ } }
     setQrAuthDialogOpen(false);
-    setQrAuthCode("");
+    resetQrAuthCode();
     setQrAuthMessage("");
     setQrAuthRequiresRestart(false);
+    qrAuthActionRef.current = false;
+    setQrAuthBusy(false);
   };
 
   useEffect(() => {
@@ -1221,13 +1258,9 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     };
   }, [qrAuthFlowEnabled, refreshRepresentativeState]);
 
-  const qrAuthDialogCopy = ({
-    ko: { title: "매장 화면에 표시된 인증번호를 입력해주세요.", prompt: "인증번호 2자리", confirm: "확인", cancel: "취소", retry: "새 인증 요청", remaining: "남은 시간", expired: "인증 시간이 만료되었습니다. 새 인증을 요청해 주세요.", verified: "인증이 완료되었습니다.", submit: "주문 접수" },
-    en: { title: "Enter the code shown on the store screen.", prompt: "2-digit code", confirm: "Verify", cancel: "Cancel", retry: "Request a new code", remaining: "Time left", expired: "The code expired. Request a new verification.", verified: "Verification complete.", submit: "Submit order" },
-    "zh-CN": { title: "请输入店内屏幕上显示的验证码。", prompt: "2位验证码", confirm: "确认", cancel: "取消", retry: "重新请求验证码", remaining: "剩余时间", expired: "验证码已过期，请重新验证。", verified: "验证完成。", submit: "提交订单" },
-    ja: { title: "店内画面に表示された認証番号を入力してください。", prompt: "2桁の番号", confirm: "確認", cancel: "キャンセル", retry: "認証番号を再リクエスト", remaining: "残り時間", expired: "認証の有効期限が切れました。再度お試しください。", verified: "認証が完了しました。", submit: "注文を送信" },
-  } as Record<QrLocale, { title: string; prompt: string; confirm: string; cancel: string; retry: string; remaining: string; expired: string; verified: string; submit: string }>)[locale];
   const qrAuthRemainingSeconds = qrAuthAttempt ? Math.max(0, Math.ceil((qrAuthAttempt.expiresAtLocalMs - qrAuthNow) / 1000)) : 0;
+  const qrAuthExpired = Boolean(qrAuthAttempt && !qrAuthAttempt.verified && qrAuthRemainingSeconds === 0);
+  const qrAuthRestart = qrAuthRequiresRestart || qrAuthExpired || qrAuthAttemptsRemaining === 0;
 
   const editWaitOrder = () => {
     if (!waitOrder || waitOrder.status !== "PENDING") return;
@@ -1379,8 +1412,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     <p className="text-lg font-bold">메뉴 둘러보기를 종료했습니다.</p>
   </main>;
 
-  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: tableOrderMode ? `calc(${cartPeekHeight + 40}px + ${QR_BOTTOM_NAV_HEIGHT})` : `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
-    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status" style={{ bottom: `calc(${cartPeekHeight}px + ${QR_BOTTOM_NAV_HEIGHT} + 0.5rem)` }}>{quickAddFeedback}</div>}
+  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: tableOrderMode ? `calc(${cartPeekHeight + 40}px + env(safe-area-inset-bottom))` : `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
+    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status" style={{ bottom: `calc(${cartPeekHeight}px + env(safe-area-inset-bottom) + 0.5rem)` }}>{quickAddFeedback}</div>}
     {titleData.photos.length > 0 && <QrTitleCarousel exitDisabled={tableOrderMode && !cartReady} fixedHero onExitRequest={!waitingMode ? requestQrExit : undefined} photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>
     {titleData.photos.length > 0 && <span aria-hidden="true" className="absolute left-0 top-0 h-px w-px" data-qr-content-start />}
@@ -1447,10 +1480,9 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         </div>}
     </div>
 
-    {tableOrderMode && <QrBottomNavigation covered={cartSheetOpen || view !== null} fanDisabled={cartTableId === null} menuCurrent />}
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
-    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none`}
-      style={{ translate: cartSheetOpen ? "0 0" : `0 calc(100% - ${cartPeekHeight}px${tableOrderMode ? ` - ${QR_BOTTOM_NAV_HEIGHT}` : ""})` }}
+    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 ${tableOrderMode ? "bottom-[env(safe-area-inset-bottom)] bg-white pb-4" : "bottom-0 bg-blue-700 pb-[max(1rem,env(safe-area-inset-bottom))]"} z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none`}
+      style={{ translate: cartSheetOpen ? "0 0" : `0 calc(100% - ${cartPeekHeight}px)` }}
       data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
       <div className="relative shrink-0">
         <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex w-full flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
@@ -1492,12 +1524,14 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-2 pt-3"><div className="mx-auto max-w-xl">
           {waitingMode && <>{waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}<button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50" disabled={!cart.length || waitBusy || Boolean(waitOrder && ["PENDING", "ASSIGNED"].includes(waitOrder.status) && !editingWaitOrder)} onClick={() => void submitWaitOrder()} type="button">{waitBusy ? "\uCC98\uB9AC \uC911..." : editingWaitOrder ? "\uB300\uAE30 \uC8FC\uBB38 \uC218\uC815 \uC800\uC7A5" : "\uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</button></>}
           {tableOrderMode && <>
+            {qrAuthUnavailable && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">QR 주문 인증을 사용할 수 없습니다. 직원에게 문의해 주세요.</p>}
             {qrAuthFlowEnabled && representativeState === "OWN_PENDING" && <p className="mt-3 text-sm font-semibold text-slate-700" role="status">주문 승인 대기 중</p>}
             {waitError && <p className="mt-3 text-sm font-semibold text-red-600" role="alert">{waitError}</p>}
             {qrAuthFlowEnabled && cart.length > 0 && ["OTHER_PENDING", "OTHER_CONFIRMED"].includes(representativeState) &&
               <p className="mt-3 text-sm font-medium leading-5 text-slate-600" role="status">현재 주문 중인 기기에서만 주문을 전송할 수 있습니다.</p>}
             <button className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 font-extrabold text-white disabled:opacity-50"
-              disabled={!cart.length || tableOrderBusy || (qrAuthFlowEnabled && representativeState !== "NO_REPRESENTATIVE" && representativeState !== "OWN_CONFIRMED")}
+              disabled={!cart.length || tableOrderBusy || qrAuthUnavailable ||
+                (qrAuthFlowEnabled && ["OWN_PENDING", "OTHER_PENDING", "OTHER_CONFIRMED", "STALE"].includes(representativeState))}
               onClick={() => void submitTableOrder()} type="button">{tableOrderBusy ? "처리 중..." : "주문 전송"}</button>
           </>}
           {!waitingMode && !tableOrderMode && <a className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-amber-50 text-sm font-bold text-amber-900" href="/qr/wait">{"\uB300\uAE30 QR\uC5D0\uC11C \uB300\uAE30 \uC8FC\uBB38 \uB4F1\uB85D"}</a>}
@@ -1505,28 +1539,27 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
       </div>
     </section>
 
-    {qrAuthDialogOpen && <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-4" onClick={() => void closeQrAuthDialog(!qrAuthAttempt?.verified)}>
-      <section aria-labelledby="qr-order-auth-title" aria-modal="true" className="w-full max-w-md rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="dialog">
-        <h2 className="text-lg font-extrabold text-slate-900" id="qr-order-auth-title">{qrAuthDialogCopy.title}</h2>
-        {qrAuthAttempt?.verified ? <>
-          <p className="mt-4 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800" role="status">{qrAuthDialogCopy.verified}</p>
-          {qrAuthMessage && <p className="mt-2 text-sm font-semibold text-red-600" role="alert">{qrAuthMessage}</p>}
-          <div className="mt-4 grid grid-cols-2 gap-2"><button className="min-h-12 rounded-xl border border-slate-200 font-bold text-slate-700" disabled={qrAuthBusy} onClick={() => void closeQrAuthDialog(false)} type="button">{qrAuthDialogCopy.cancel}</button>
-            <button className="min-h-12 rounded-xl bg-blue-700 font-bold text-white disabled:opacity-50" disabled={qrAuthBusy} onClick={() => void submitVerifiedQrOrder()} type="button">{qrAuthBusy ? "…" : qrAuthDialogCopy.submit}</button></div>
-        </> : <>
-          <label className="mt-5 block text-sm font-semibold text-slate-700" htmlFor="qr-order-auth-code">{qrAuthDialogCopy.prompt}</label>
-          <input autoComplete="one-time-code" autoFocus className="mt-2 h-16 w-full rounded-xl border border-slate-300 bg-slate-50 text-center text-3xl font-extrabold tracking-[0.5em] text-slate-900 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" disabled={qrAuthBusy || qrAuthRemainingSeconds === 0} id="qr-order-auth-code" inputMode="numeric" maxLength={2} onChange={event => setQrAuthCode(event.target.value.replace(/\D/g, "").slice(0, 2))} pattern="[0-9]*" placeholder="00" type="text" value={qrAuthCode} />
-          <p className={`mt-3 text-center text-sm font-semibold ${qrAuthRemainingSeconds === 0 ? "text-red-600" : "text-slate-600"}`} aria-live="polite">
-            {qrAuthRemainingSeconds === 0 ? qrAuthDialogCopy.expired : `${qrAuthDialogCopy.remaining}: ${Math.floor(qrAuthRemainingSeconds / 60)}:${String(qrAuthRemainingSeconds % 60).padStart(2, "0")} · ${qrAuthAttemptsRemaining}/3`}
-          </p>
-          {qrAuthMessage && <p className="mt-2 text-center text-sm font-semibold text-red-600" role="alert">{qrAuthMessage}</p>}
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <button className="min-h-12 rounded-xl border border-slate-200 bg-white px-3 font-bold text-slate-700 disabled:opacity-50" disabled={qrAuthBusy} onClick={() => void closeQrAuthDialog(true)} type="button">{qrAuthDialogCopy.cancel}</button>
-            {qrAuthRemainingSeconds === 0 || qrAuthAttemptsRemaining === 0 || qrAuthRequiresRestart ?
-              <button className="min-h-12 rounded-xl bg-blue-700 px-3 font-bold text-white disabled:opacity-50" disabled={qrAuthBusy} onClick={async () => { await closeQrAuthDialog(true); void submitTableOrder(); }} type="button">{qrAuthDialogCopy.retry}</button> :
-              <button className="min-h-12 rounded-xl bg-blue-700 px-3 font-bold text-white disabled:opacity-50" disabled={qrAuthBusy || qrAuthCode.length !== 2} onClick={() => void verifyQrOrderAuth()} type="button">{qrAuthBusy ? "…" : qrAuthDialogCopy.confirm}</button>}
-          </div>
-        </>}
+    {qrAuthDialogOpen && <div className="fixed inset-0 z-[130] flex items-end justify-center bg-slate-950/55 sm:items-center sm:p-4" onClick={() => void closeQrAuthDialog(!qrAuthAttempt?.verified)}>
+      <section aria-labelledby="qr-order-auth-title" aria-modal="true" className="max-h-[100dvh] w-full max-w-md touch-pan-y overflow-y-auto overscroll-contain rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl"
+        onClick={event => event.stopPropagation()} onKeyDown={event => {
+          if (event.key === "Escape") { event.stopPropagation(); void closeQrAuthDialog(!qrAuthAttempt?.verified); }
+        }} role="dialog">
+        <QrAuthGuidePanel guide={qrAuthGuide} code={qrAuthExpired ? "" : qrAuthCode} titleId="qr-order-auth-title"
+          onClose={() => void closeQrAuthDialog(!qrAuthAttempt?.verified)} closeDisabled={qrAuthBusy || tableOrderBusy}
+          onKey={pressQrAuthKey} disabled={!qrAuthAttempt || qrAuthAttempt.verified || qrAuthBusy || tableOrderBusy || qrAuthRestart}>
+          {(qrAuthBusy || tableOrderBusy) && <p className="mt-2 text-center text-sm font-semibold text-slate-600" role="status">
+            {qrAuthAttempt?.verified ? "인증 완료. 주문을 접수하는 중입니다." : qrAuthAttempt ? "인증번호를 확인하는 중입니다." : "매장 인증번호를 요청하는 중입니다."}
+          </p>}
+          {!qrAuthBusy && !tableOrderBusy && qrAuthAttempt && !qrAuthAttempt.verified && !qrAuthRestart &&
+            <p className="mt-2 text-center text-sm font-semibold text-slate-600">남은 시간 {qrAuthRemainingSeconds}초 · 입력 {qrAuthAttemptsRemaining}회</p>}
+          {(qrAuthMessage || qrAuthExpired) && <p className="mt-2 text-center text-sm font-semibold text-red-600" role="alert">
+            {qrAuthExpired ? "인증번호가 만료되었습니다. 새 번호를 요청해 매장 TV를 확인해 주세요." : qrAuthMessage}
+          </p>}
+          {qrAuthRestart && <button className="mt-3 min-h-11 w-full rounded-lg bg-blue-700 font-bold text-white disabled:opacity-50"
+            disabled={qrAuthBusy || tableOrderBusy} onClick={async () => { await closeQrAuthDialog(true); void submitTableOrder(); }} type="button">새 인증번호 요청</button>}
+          {!qrAuthRestart && qrAuthAttempt?.verified && qrAuthMessage && <button className="mt-3 min-h-11 w-full rounded-lg bg-blue-700 font-bold text-white disabled:opacity-50"
+            disabled={qrAuthBusy} onClick={() => void submitVerifiedQrOrder(qrAuthAttempt)} type="button">주문 전송 재시도</button>}
+        </QrAuthGuidePanel>
       </section>
     </div>}
 

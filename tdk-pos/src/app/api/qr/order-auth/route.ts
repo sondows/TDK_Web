@@ -5,7 +5,7 @@ import { enrichQrCatalog, qrWaitCartTotal, validateQrWaitCart } from "@/lib/qr-w
 import { loadQrMenuCatalog } from "@/lib/qr-menu-catalog";
 import { isSameOriginQrRequest } from "@/lib/qr-visit-session";
 import { isQrOrderAuthRuntimeEnabled, resolveQrOrderRequest } from "@/lib/qr-order-auth";
-import { QR_ORDER_AUTH_ATTEMPT_TTL_MS, QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_SESSION,
+import { QR_ORDER_AUTH_ATTEMPT_TTL_MS, QR_ORDER_AUTH_MAX_FAILURES, QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_SESSION,
   QR_ORDER_AUTH_MAX_NEW_ATTEMPTS_PER_TABLE, QR_ORDER_AUTH_RATE_WINDOW_MS,
   qrOrderAuthCartFingerprint } from "@/lib/qr-order-auth-attempt-policy";
 import { issueTvQrAuthCodeInTransaction } from "@/lib/tdktv-qr-auth-code";
@@ -21,7 +21,8 @@ async function flowEnabled() {
 function attemptResponse(row: RowDataPacket, duplicate: boolean) {
   return { success: true, attemptId: row.attemptId, state: row.state,
     requestExpiresAtMs: Number(row.requestExpiresAtMs), codeExpiresAtMs: row.codeExpiresAtMs === null ? null : Number(row.codeExpiresAtMs),
-    serverNowMs: Number(row.serverNowMs), duplicate };
+    serverNowMs: Number(row.serverNowMs), duplicate,
+    attemptsRemaining: Math.max(0, QR_ORDER_AUTH_MAX_FAILURES - Number(row.failedAttempts ?? 0)) };
 }
 
 export async function GET(request: Request) {

@@ -2704,3 +2704,20 @@ Chrome verified the shared menu at 320 px and desktop widths with mocked APIs. T
 | 3 | Verify development storage, QR requests and production build | PASS |
 
 The existing `system_settings` record supports multiple table IDs with the same fan value. The ADM UI and API accept shared assignments, and removing one table's assignment leaves the others intact. Local tests verified persisted shared assignments in `TDK_POS_TEST` using a temporary settings key, device-level command serialization with a mocked Home Assistant, and the assignment and QR controls in Chrome with mocked responses. TypeScript, focused ESLint, 55 related tests and the production build passed. The temporary setting was removed. Physical device operation was not tested.
+
+## TDKQRS order-screen footer separation — 2026-11-28
+
+The three-button `QrBottomNavigation` remains on `/qrorder` through `QrOrderHistory`; `/qrorder/order` no longer renders it from `QrMenuClient`. This removes the extra footer row completely. The blue cart sheet now sits directly above the device safe area, and the order page reserves only its cart peek and safe-area inset. Cart expansion, collapse, contents and submission controls are unchanged. Two footer regression checks, 22 related QR unit tests, TypeScript, focused ESLint, `git diff --check`, and production build passed. Samsung Internet and physical phone layout remain unverified. See `checkpoints/20261128-qrorder-cart-only-footer.md`.
+
+## QR first-order authentication and ADM presentation — 2026-11-28
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Trace live disabled state and the existing order, TV and HOS flow | PASS |
+| 2 | Reuse TV-7 flow with a two-digit keypad and add ADM presentation settings | PASS |
+| 3 | Verify the TEST DB HTTP flow, Chrome components and build | PASS |
+| 4 | Check the running NAS revision, flag and physical devices | BLOCKED |
+
+Local HEAD before changes: `eb0584ad516a3088763fc696a79d5718b2e666ee`. On production, `/qrorder/order` returned 200/no-store and serialized `qrAuthFlowEnabled=false`; `/api/qr/order-auth` returned 404 JSON, while DP1 and its code-status API returned 200. This directly explains the missing modal and missing issuance on a first order. The existing button calls `submitTableOrder`: disabled mode posts directly to `/api/qr/table-orders`; enabled mode reads the current representative, POSTs `/api/qr/order-auth` to issue/reuse the TV state, verifies through `/api/qr/order-auth/verify`, then posts the verified attempt to the existing transactional order endpoint. The live source treats only runtime `TDK_QR_ORDER_AUTH_ENABLED=true` with the matching DB/schema as ready. Compose loads `.env.production`; the existing rollout record used OFF and the local file omits the flag. NAS SSH connects but rejects noninteractive authentication, so the actual running image, Compose env and flag/schema distinction still need NAS evidence. The page response proves the behavior is server-side even on a fresh request. The current claim lookup ignores POS-only order history. The current UI also requires two separate manual confirmations even when enabled. Reuse the existing issuance, verify, representative claim and HOS approval implementation. Change `QrMenuClient`, the order page, and add the ADM presentation settings and image handler.
+
+Implementation and evidence are recorded in `checkpoints/20261128-qr-first-order-auth.md`. Verification included real TEST DB HTTP runs with the flag ON and OFF, ADM photo save, replacement and deletion, and Chrome rendering of the actual QR, ADM and DP1 components with the same HTTP handlers. NAS release and mobile/TV device verification remain pending.

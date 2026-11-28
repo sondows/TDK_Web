@@ -183,7 +183,7 @@ test("public QRS APIs allow only required read and session-authenticated routes"
     assert.equal(isQrDevelopmentPathAllowed(path, "GET"), true, path);
     assert.equal(isQrDevelopmentPathAllowed(path, "POST"), false, path);
   }
-  for (const path of [`/api/qr/notices/images/${assetId}`, `/api/qr/title-images/${assetId}`]) {
+  for (const path of [`/api/qr/notices/images/${assetId}`, `/api/qr/title-images/${assetId}`, `/api/qr/order-auth/guide-image/${assetId}`]) {
     assert.equal(isExternalAdminPathAllowed(path, "GET"), true, path);
     assert.equal(isExternalAdminPathAllowed(path, "POST"), false, path);
     assert.equal(isQrDevelopmentPathAllowed(path, "GET"), true, path);

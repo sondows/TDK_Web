@@ -16,16 +16,20 @@ function imagePath(assetId: string) {
 
 export async function saveQrNoticeImage(assetId: string, source: Buffer) {
   if (!isQrNoticeAssetId(assetId)) throw new Error("이미지 식별값이 올바르지 않습니다.");
+  const output = await encodeQrGuideImage(source);
+  await mkdir(storagePath(), { recursive: true });
+  await writeFile(imagePath(assetId), output, { flag: "wx" });
+  return { assetId, imageUrl: `/api/qr/notices/images/${assetId}` };
+}
+
+export async function encodeQrGuideImage(source: Buffer) {
   if (!source.length || source.length > QR_NOTICE_IMAGE_MAX_BYTES) throw new Error("이미지는 10MB 이하로 등록해 주세요.");
   const pipeline = sharp(source, { limitInputPixels: MAX_PIXELS });
   const metadata = await pipeline.metadata();
   if (!metadata.format || !["jpeg", "png", "webp"].includes(metadata.format) || !metadata.width || !metadata.height || metadata.width * metadata.height > MAX_PIXELS) {
     throw new Error("JPG, PNG, WebP 이미지 파일만 등록할 수 있습니다.");
   }
-  const output = await sharp(source, { limitInputPixels: MAX_PIXELS }).rotate().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true }).webp({ quality: 88 }).toBuffer();
-  await mkdir(storagePath(), { recursive: true });
-  await writeFile(imagePath(assetId), output, { flag: "wx" });
-  return { assetId, imageUrl: `/api/qr/notices/images/${assetId}` };
+  return pipeline.rotate().resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true }).webp({ quality: 88 }).toBuffer();
 }
 
 export async function readQrNoticeImage(assetId: string) {

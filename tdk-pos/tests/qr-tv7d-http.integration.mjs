@@ -115,12 +115,13 @@ try {
   const openingSetting = await one("SELECT setting_value FROM system_settings WHERE setting_key='business_opening_cash_enabled'");
   if (openingSetting?.setting_value === "1") {
     fixture.openingBusinessDate = (await one("SELECT DATE_FORMAT(CURRENT_DATE(), '%Y-%m-%d') AS businessDate")).businessDate;
-    assert.equal(Number((await one("SELECT COUNT(*) AS n FROM cash_opening_funds WHERE business_date=?",
-      [fixture.openingBusinessDate])).n), 0, "Refusing to replace an existing opening fund");
-    const [created] = await db.execute(`INSERT INTO cash_opening_funds
-      (business_date,created_by_staff_id,updated_by_staff_id) VALUES (?,?,?)`,
-    [fixture.openingBusinessDate, staff.staff_id, staff.staff_id]);
-    fixture.openingFundId = Number(created.insertId);
+    const opening = await one("SELECT cash_opening_fund_id FROM cash_opening_funds WHERE business_date=?", [fixture.openingBusinessDate]);
+    if (!opening) {
+      const [created] = await db.execute(`INSERT INTO cash_opening_funds
+        (business_date,created_by_staff_id,updated_by_staff_id) VALUES (?,?,?)`,
+      [fixture.openingBusinessDate, staff.staff_id, staff.staff_id]);
+      fixture.openingFundId = Number(created.insertId);
+    }
   }
   fixture.table = Number((await db.execute("INSERT INTO dining_tables (table_no,capacity,is_active) VALUES (?,8,1)", [`ZZ7D${tag}`]))[0].insertId);
   fixture.code = Number((await db.execute("INSERT INTO qr_codes (identifier,management_number,target_type,status,created_by_staff_id) VALUES (?,?,'TABLE_ORDER','IN_USE',?)", [identifier, `ZZ7M${tag}`, staff.staff_id]))[0].insertId);
