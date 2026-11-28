@@ -5,6 +5,7 @@ import { resolveTableLayout } from "@/lib/table-layout";
 import LayoutEditor from "@/app/pos/layout/LayoutEditor";
 import { getCurrentAdminStaff } from "@/lib/admin-auth";
 import styles from "../../admin.module.css";
+import FanManagementClient from "@/app/admin/(protected)/fans/FanManagementClient";
 
 export default async function AdminTablesPage() {
   const member = await getCurrentAdminStaff();
@@ -16,5 +17,6 @@ export default async function AdminTablesPage() {
       <p className={styles.pageDescription}>POS 메인 화면과 테이블 관리 화면에 사용할 테이블 배치를 설정합니다.</p>
     </div>
     <LayoutEditor embedded returnPath="/tdkadm" tables={tables.map((table, index) => ({ ...table, ...resolveTableLayout({ positionX: table.positionX === null ? undefined : Number(table.positionX), positionY: table.positionY === null ? undefined : Number(table.positionY), layoutWidth: table.layoutWidth === null ? undefined : Number(table.layoutWidth), layoutHeight: table.layoutHeight === null ? undefined : Number(table.layoutHeight), rotation: table.rotation }, index) }))} />
+    {member.role === "OWNER" && <FanManagementClient />}
   </div>;
 }

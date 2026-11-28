@@ -165,6 +165,12 @@ test("public TV playback allows only DP1-DP5 read paths and keeps TV management 
 });
 
 test("public QRS APIs allow only required read and session-authenticated routes", () => {
+  assert.equal(isExternalAdminPathAllowed("/api/qr/fan", "GET"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/fan", "POST"), true);
+  assert.equal(isExternalAdminPathAllowed("/api/qr/fan", "PUT"), false);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/fan", "GET"), true);
+  assert.equal(isQrDevelopmentPathAllowed("/api/qr/fan", "POST"), true);
+  assert.equal(isExternalPosPath("/api/qr/fan"), false);
   assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "POST"), true);
   assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "GET"), true);
   assert.equal(isExternalAdminPathAllowed("/api/qr/order-auth", "DELETE"), true);

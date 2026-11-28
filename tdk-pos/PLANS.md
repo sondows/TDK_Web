@@ -2684,3 +2684,23 @@ The old POS-first scan test expected immediate visit ownership and invite-only a
 ## TDKQRS QR-1 current-visit order history — 2026-11-27
 
 An active table QR now opens `/qrorder` directly when the current open visit has POS orders. `GET /api/qr/table-orders` resolves the single open DINE_IN visit for unbound QR sessions, or remains pinned to the exact visit for bound sessions. The read-only `canViewCurrentVisitOrders` response flag controls history and summary rendering. `canViewOrders` remains unchanged for invite/representative privileges; scanning does not bind a QR session, create a claim, bypass first-order TV verification, or bypass HOS approval. Conflicting open visits fail closed. The API rechecks the exact visit before returning data so a concurrently closed visit is not returned. QR-1 integration passed against `TDK_POS_TEST`, including POS-first visibility, simultaneous independent scans, no claim/binding at scan, and no old POS history after visit closure. QR invite regression passed; 16 QR policy tests, TypeScript, and focused ESLint passed. Production build was attempted in an isolated copy and is blocked by the existing CSS Module global selector `body *` in `src/app/pos/CustomerBalanceDialog.module.css`; this unrelated file was not changed. Real phone/browser checks remain outstanding. No operating DB, NAS, Docker/Caddy, commit, or push changes.
+
+## TDKQRS common bottom menu — 2026-11-28
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect order history, table menu, cart and the existing fan API | PASS |
+| 2 | Share the bottom menu and reserve space for the collapsed cart | PASS |
+| 3 | Verify navigation, fan UI, cart and production build locally | PASS |
+
+Chrome verified the shared menu at 320 px and desktop widths with mocked APIs. The checks covered language persistence, menu access for non-representative customers, cart restoration and back navigation, assigned and unassigned fans, fan state and command errors, two-digit TV verification with a leading zero, and order status rendering. All 73 related tests, TypeScript, targeted ESLint and the production build passed. Physical fan operation, Samsung Internet and live HOS integration were outside this browser run.
+
+## TDKADM and TDKQRS shared table fans — 2026-11-28
+
+| Step | Goal | Status |
+|---|---|---|
+| 1 | Inspect the ADM restriction, settings storage and QR control path | PASS |
+| 2 | Permit repeated fan IDs while keeping one fan per table | PASS |
+| 3 | Verify development storage, QR requests and production build | PASS |
+
+The existing `system_settings` record supports multiple table IDs with the same fan value. The ADM UI and API accept shared assignments, and removing one table's assignment leaves the others intact. Local tests verified persisted shared assignments in `TDK_POS_TEST` using a temporary settings key, device-level command serialization with a mocked Home Assistant, and the assignment and QR controls in Chrome with mocked responses. TypeScript, focused ESLint, 55 related tests and the production build passed. The temporary setting was removed. Physical device operation was not tested.

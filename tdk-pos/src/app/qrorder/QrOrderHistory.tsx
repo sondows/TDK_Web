@@ -12,7 +12,7 @@ import { getQrOrderPanelGeometry, nextQrOrderPanelSnap, qrPanelBackdropMinHeight
 import { getQrCookingProgress, type QrCookingProgress } from "@/lib/qr-cooking-progress";
 import type { QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
-import { useQrCustomerLanguage } from "@/app/qr/QrCustomerLanguageProvider";
+import QrBottomNavigation, { QR_BOTTOM_NAV_HEIGHT } from "./QrBottomNavigation";
 
 type OrderItem = {
   qrOrderId: number;
@@ -83,7 +83,7 @@ const orderTime = (value: string) => new Intl.DateTimeFormat("ko-KR", {
 }).format(new Date(value));
 function readOrderPanelGeometry(hasHero: boolean, titleHeight: number) {
   const hero = document.querySelector<HTMLElement>("[data-qr-fixed-hero]");
-  const navigation = document.querySelector<HTMLElement>('[aria-label="주문내역 하단 메뉴"]');
+  const navigation = document.querySelector<HTMLElement>("[data-qr-bottom-nav]");
   const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
   const bottomReserved = navigation?.getBoundingClientRect().height ?? 72;
   return { ...getQrOrderPanelGeometry({
@@ -139,7 +139,6 @@ function QrSummaryDivider() {
 
 export default function QrOrderHistory({ titleData, notices = [] }: { titleData: QrPublicTitleSettings; notices?: QrPublicNotice[] }) {
   const router = useRouter();
-  const { openLanguageSettings } = useQrCustomerLanguage();
   const [payload, setPayload] = useState<Payload | null>(null);
   const [error, setError] = useState("");
   const [accessState, setAccessState] = useState<"AUTH_EXPIRED" | "AUTH_REQUIRED" | "PAYMENT_COMPLETED" | null>(null);
@@ -321,8 +320,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     setAccessState(null);
     setServerOffset((data.serverNow ?? Date.now()) - Date.now());
     setError("");
-    if (data.needsJoin && !data.ownRequests?.some(order => order.status === "PENDING")) router.replace("/qrorder/join-required");
-    else if ((data.ownRequests?.length ?? 0) === 0 && (data.posOrders?.length ?? 0) === 0) router.replace("/qrorder/order");
+    if ((data.ownRequests?.length ?? 0) === 0 && (data.posOrders?.length ?? 0) === 0 && (data.orders?.length ?? 0) === 0) router.replace("/qrorder/order");
   }, [router]);
 
   useEffect(() => {
@@ -465,28 +463,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
     }
   };
 
-  const bottomActions = [
-    {
-      id: "language",
-      label: "언어설정",
-      icon: "language",
-      disabled: false,
-    },
-    {
-      id: "invite",
-      label: "주문초대",
-      icon: "qr",
-      disabled: !payload?.canViewOrders || accessState !== null,
-    },
-    {
-      id: "order",
-      label: "주문하기",
-      icon: "cart",
-      disabled: !canUseOrderAction || accessState !== null,
-    },
-  ];
-
-  return <main className="isolate min-h-svh w-full overflow-x-clip bg-white text-slate-900" ref={mainRef} style={{ paddingBottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}>
+  return <main className="isolate min-h-svh w-full overflow-x-clip bg-white text-slate-900" ref={mainRef} style={{ paddingBottom: QR_BOTTOM_NAV_HEIGHT }}>
     {titleData.photos.length > 0 && <QrTitleCarousel fixedHero onTap={() => setPanelSnap(nextQrOrderPanelSnap(panelSnapIndexRef.current, "show-image"))} photos={titleData.photos} />}
     <div aria-hidden="true" ref={panelSpacerRef} style={{ height: panelBaseTop === null ? titleData.photos.length ? "75vw" : "62dvh" : `${panelBaseTop}px` }} />
     <section aria-label="주문내역 패널" className="relative z-20 mx-auto w-full max-w-2xl" ref={panelSectionRef} data-qr-content-start
@@ -606,16 +583,7 @@ export default function QrOrderHistory({ titleData, notices = [] }: { titleData:
         </div>
     </section>
 
-    <nav aria-label="주문내역 하단 메뉴" className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-2xl border-t border-[#D1D5DB] bg-[#F3F4F6] pb-[env(safe-area-inset-bottom)]">
-      <div className="flex min-h-[4.5rem] w-full">
-        {bottomActions.map(action => <button aria-label={action.label} className={`flex min-h-[4.5rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 bg-[#F3F4F6] transition-colors active:bg-[#E5E7EB] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-gray-500 ${action.id === "language" ? "text-slate-600" : action.disabled ? "text-slate-400" : "text-blue-700"} ${action.id === "order" ? "font-bold" : "font-normal"}`} disabled={action.disabled} key={action.id} onClick={() => action.id === "language" ? openLanguageSettings() : action.id === "invite" ? openShare() : router.push("/qrorder/order")} type="button">
-          {action.icon === "language" ? <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg> : action.icon === "qr"
-            ? <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM19 14v2m2 2v3h-3m-4 0h2" /></svg>
-            : <svg aria-hidden="true" className="size-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H6" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>}
-          <span className="text-[11px] font-normal leading-tight">{action.label}</span>
-        </button>)}
-      </div>
-    </nav>
+    <QrBottomNavigation fanDisabled={!canUseOrderAction} orderDisabled={!canUseOrderAction} />
 
     {shareOpen && <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4" onClick={() => setShareOpen(false)}>
       <section aria-labelledby="qr-share-title" aria-modal="true" className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl" onClick={event => event.stopPropagation()} role="dialog">

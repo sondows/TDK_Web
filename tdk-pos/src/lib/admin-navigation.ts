@@ -2,6 +2,8 @@ export type NavigationLink = { label: string; href: string };
 export type NavigationGroup = { id: string; label: string; href: string; children: NavigationLink[] };
 export type NavigationItem = NavigationLink | NavigationGroup;
 
+const fanManagementLink: NavigationLink = { label: "선풍기관리", href: "/tdkadm/fans" };
+
 export const adminNavigation: NavigationItem[] = [
   { label: "대시보드", href: "/tdkadm" },
   { label: "영업시간설정", href: "/tdkadm/business-hours" },
@@ -36,6 +38,7 @@ export const adminNavigation: NavigationItem[] = [
       { label: "타이틀설정", href: "/tdkadm/qr/title" },
       { label: "안내문", href: "/tdkadm/qr/notices" },
       { label: "QR 발행·관리", href: "/tdkadm/qr-codes" },
+      fanManagementLink,
     ],
   },
   {
@@ -131,5 +134,10 @@ export function getAdminNavigationItems({
     (canManageHosLayout || !isNavigationGroup(item) || item.id !== "hos-settings") &&
     (canManageMenu || !isNavigationGroup(item) || item.id !== "menus") &&
     (canManageMenu || !isNavigationGroup(item) || item.id !== "qr-settings") &&
-    (canManageMenu || isNavigationGroup(item) || item.href !== "/tdkadm/business-hours"));
+    (canManageMenu || isNavigationGroup(item) || item.href !== "/tdkadm/business-hours"))
+    .map(item => {
+      // Fan management and HOS layout both use the OWNER role.
+      if (canManageHosLayout || !isNavigationGroup(item) || item.id !== "qr-settings") return item;
+      return { ...item, children: item.children.filter(child => child !== fanManagementLink) };
+    });
 }

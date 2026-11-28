@@ -43,6 +43,13 @@
                     ]
     },
     {
+        "path":  "/api/admin/fans",
+        "methods":  [
+                        "GET",
+                        "PUT"
+                    ]
+    },
+    {
         "path":  "/api/admin/grant",
         "methods":  [
                         "DELETE"
@@ -872,6 +879,13 @@
     },
     {
         "path":  "/api/qr/dev-test-session",
+        "methods":  [
+                        "GET",
+                        "POST"
+                    ]
+    },
+    {
+        "path":  "/api/qr/fan",
         "methods":  [
                         "GET",
                         "POST"

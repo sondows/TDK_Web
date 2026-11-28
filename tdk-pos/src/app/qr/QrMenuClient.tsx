@@ -17,6 +17,7 @@ import QrStoreTitle from "./QrStoreTitle";
 import QrTitleCarousel from "./QrTitleCarousel";
 import { useQrCustomerLanguage } from "./QrCustomerLanguageProvider";
 import QrDoubleDivider from "./QrDoubleDivider";
+import QrBottomNavigation, { QR_BOTTOM_NAV_HEIGHT } from "@/app/qrorder/QrBottomNavigation";
 import QrMenuAddIcon from "@/components/QrMenuAddIcon";
 import { qrTitleHeroOverlap, qrTitleInitialCardTop, qrTitleInitialScroll, type QrPublicTitleSettings } from "@/lib/qr-title-model";
 import type { QrPublicNotice } from "@/lib/qr-notice-model";
@@ -1378,8 +1379,8 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
     <p className="text-lg font-bold">메뉴 둘러보기를 종료했습니다.</p>
   </main>;
 
-  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: tableOrderMode ? `calc(${cartPeekHeight}px + 40px + env(safe-area-inset-bottom))` : `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
-    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status" style={{ bottom: `calc(${cartPeekHeight}px + env(safe-area-inset-bottom) + 0.5rem)` }}>{quickAddFeedback}</div>}
+  return <main className="isolate min-h-svh bg-white text-slate-900" style={{ paddingBottom: tableOrderMode ? `calc(${cartPeekHeight + 40}px + ${QR_BOTTOM_NAV_HEIGHT})` : `${cartPeekHeight + 40}px`, ...(titleData.photos.length > 0 ? { paddingTop: "calc(75vw - clamp(32px, 8vw, 40px))" } : {}) }}>
+    {tableOrderMode && quickAddFeedback && <div aria-live="polite" className="fixed inset-x-0 z-20 mx-auto w-fit max-w-[calc(100vw-2rem)] rounded-full bg-slate-900/90 px-4 py-2 text-center text-sm font-semibold text-white shadow-lg" role="status" style={{ bottom: `calc(${cartPeekHeight}px + ${QR_BOTTOM_NAV_HEIGHT} + 0.5rem)` }}>{quickAddFeedback}</div>}
     {titleData.photos.length > 0 && <QrTitleCarousel exitDisabled={tableOrderMode && !cartReady} fixedHero onExitRequest={!waitingMode ? requestQrExit : undefined} photos={titleData.photos} />}
     <div className="relative z-10" data-qr-content>
     {titleData.photos.length > 0 && <span aria-hidden="true" className="absolute left-0 top-0 h-px w-px" data-qr-content-start />}
@@ -1446,8 +1447,11 @@ export default function QrMenuClient({ waitingMode = false, tableOrderMode = fal
         </div>}
     </div>
 
+    {tableOrderMode && <QrBottomNavigation covered={cartSheetOpen || view !== null} fanDisabled={cartTableId === null} menuCurrent />}
     {cartSheetOpen && <button aria-label={t.close} className="fixed inset-0 z-30 bg-slate-950/45 transition-opacity duration-300 ease-out motion-reduce:transition-none" onClick={() => closeCartSheet()} type="button" />}
-    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${cartSheetOpen ? "translate-y-0" : cartHasItems ? "translate-y-[calc(100%-57.6px)]" : "translate-y-[calc(100%-17.28px)]"}`} data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
+    <section aria-label={t.cart} aria-modal={cartSheetOpen ? "true" : undefined} className={`fixed inset-x-0 bottom-0 z-40 mx-auto flex h-[82dvh] max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl ${tableOrderMode ? "bg-white" : "bg-blue-700"} pb-[max(1rem,env(safe-area-inset-bottom))] text-white shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none`}
+      style={{ translate: cartSheetOpen ? "0 0" : `0 calc(100% - ${cartPeekHeight}px${tableOrderMode ? ` - ${QR_BOTTOM_NAV_HEIGHT}` : ""})` }}
+      data-qr-cart-sheet role={cartSheetOpen ? "dialog" : "region"}>
       <div className="relative shrink-0">
         <button aria-expanded={cartSheetOpen} aria-label={cartSheetOpen ? t.cart + " " + t.close : t.cart} className={`z-10 flex w-full flex-col items-center justify-center overflow-hidden text-left transition-[height,padding] duration-300 ease-out motion-reduce:transition-none ${tableOrderMode ? "bg-blue-700" : ""} ${cartHeaderVisible ? "h-[57.6px] px-4 pb-[9.6px] pt-[6.4px]" : "h-[17.28px] px-0 py-0"}`} onClick={toggleCartSheet} onTouchStart={handleCartHeaderTouchStart} onTouchEnd={handleCartHeaderTouchEnd} type="button">
           <span aria-hidden="true" className={`h-1 w-10 shrink-0 rounded-full bg-white/90 ${cartHeaderVisible ? "mb-[6.4px]" : ""}`} />

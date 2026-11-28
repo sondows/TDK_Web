@@ -73,11 +73,11 @@ function isAdminPageOrApi(pathname: string): boolean {
 function isCustomerQrApiPathAllowed(pathname: string, method: string): boolean {
   if (method === "GET" || method === "HEAD") return pathname === "/api/qr/menu-catalog" || pathname === "/api/qr/title"
     || pathname === "/api/qr/notices" || pathname === "/api/qr/table-order-link"
-    || pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/visit"
+    || pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/visit" || pathname === "/api/qr/fan"
     || /^\/api\/qr\/title-images\/[0-9a-f-]{36}$/i.test(pathname)
     || /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname)
     || /^\/api\/qr\/table-orders\/[1-9]\d*$/.test(pathname);
-  if (method === "POST") return pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/order-auth/verify" || pathname === "/api/qr/order-invites" || pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" || pathname === "/api/qr/cart-events";
+  if (method === "POST") return pathname === "/api/qr/table-orders" || pathname === "/api/qr/order-auth" || pathname === "/api/qr/order-auth/verify" || pathname === "/api/qr/order-invites" || pathname === "/api/qr/wait-orders" || pathname === "/api/qr/visit" || pathname === "/api/qr/cart-events" || pathname === "/api/qr/fan";
   if (method === "DELETE" && pathname === "/api/qr/order-auth") return true;
   return method === "PATCH" || method === "DELETE" ? /^\/api\/qr\/wait-orders\/[1-9]\d*$/.test(pathname) : false;
 }

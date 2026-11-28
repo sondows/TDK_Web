@@ -1,6 +1,6 @@
 import { and, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { diningTables, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
+import { diningTables, orders, qrCodes, qrOrders, qrSessions, qrTableLinks, tableSessions } from "@/db/schema";
 import { qrSessionCookieMaxAgeSeconds, qrTableSessionExpiresAtSql } from "@/lib/qr-session-expiry-policy";
 import { requireQrNoticeManager } from "@/lib/qr-notice-admin-auth";
 import {
@@ -49,11 +49,14 @@ export async function POST(request: Request) {
       await tx.select({ tableId: diningTables.tableId }).from(diningTables).where(eq(diningTables.tableId, qr.tableId)).for("update").limit(1);
       const openSessions = await tx.select({ sessionId: tableSessions.sessionId }).from(tableSessions)
         .where(and(eq(tableSessions.tableId, qr.tableId), eq(tableSessions.status, "OPEN"), eq(tableSessions.sessionKind, "DINE_IN"))).for("update").limit(1);
+      const [currentOrder] = openSessions.length ? await tx.select({ orderId: orders.orderId }).from(orders)
+        .where(and(eq(orders.sessionId, openSessions[0].sessionId), eq(orders.orderType, "POS"))).limit(1) : [];
+      const entryDestination = currentOrder ? "/qrorder" : "/qrorder/order";
       if (currentTestSession?.tableId === Number(qr.tableId)) {
         if (currentTestSession.sessionId !== null) return { tableNo: qr.tableNo, redirectTo: "/qrorder", reused: true };
         const [ownOrder] = await tx.select({ qrOrderId: qrOrders.qrOrderId }).from(qrOrders)
           .where(eq(qrOrders.qrSessionId, currentTestSession.qrSessionId)).limit(1);
-        return { tableNo: qr.tableNo, redirectTo: ownOrder ? "/qrorder" : openSessions.length ? "/qrorder/join-required" : "/qrorder/order", reused: true };
+        return { tableNo: qr.tableNo, redirectTo: ownOrder ? "/qrorder" : entryDestination, reused: true };
       }
 
       const [validQrTableSession] = openSessions.length ? await tx.select({
@@ -65,7 +68,7 @@ export async function POST(request: Request) {
       const token = createQrDevTestToken();
       await tx.insert(qrSessions).values({ sessionId: validQrTableSession ? Number(validQrTableSession.sessionId) : null,
         tableId: qr.tableId, tokenHash: hashQrToken(token), languageCode: "ko", status: "ACTIVE", lastActiveAt: new Date() });
-      const redirectTo = validQrTableSession ? "/qrorder" : openSessions.length ? "/qrorder/join-required" : "/qrorder/order";
+      const redirectTo = entryDestination;
       const expiresInSeconds = validQrTableSession
         ? qrSessionCookieMaxAgeSeconds(Number(validQrTableSession.remainingSeconds), QR_DEV_TEST_MAX_AGE_SECONDS)
         : QR_DEV_TEST_MAX_AGE_SECONDS;
